@@ -55,7 +55,7 @@
 ## Commit record
 - `82b64f1`, `b70000a`, `066dbd0`, `380d317`: Phase 0. `main` = `066dbd0`.
 - `377841c`, `ec259ed`: S5. `591b01e`, `3d0081e`: S6. `e680b47`, `9939af9`: Phase 1A.
-- Phase 1B commit: recorded by the follow-up commit after the push is observed. CI: **not observed**.
+- `e15ec55`: Phase 1B (secure MCP core, review 6 fixes). Pushed to `origin/dev` and observed with `git ls-remote` (`refs/heads/dev` = `e15ec55…`, `refs/heads/main` = `066dbd0…`, so `main` is unchanged). This record was added by the follow-up commit. CI: **not observed**.
 
 ## Phase 1C prerequisites (next)
 1. **Owner decisions:**
