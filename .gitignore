@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+
+# TouchDesigner autosaves / backups / crash files
+Backup/
+*.toe.bak
+CrashAutoSave.*
+*.dmp
+
+# Build outputs (release .tox files are built, not committed — see docs/architecture/source-of-truth.md)
+build/
+dist/
+
+# Runtime state — never commit
+*.sqlite
+*.sqlite3
+*.db
+*.jsonl
+audit/
+logs/
+.tdflowmcp/
+secrets*.json
+*.token
+.env
+.env.*
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+._*
+
+# Local scratch
+.tmp/
