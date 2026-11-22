@@ -1,0 +1,6 @@
+DAT:execute
+tile 0 250 130 90
+flags =  current on parlanguage 0
+color 0.67 0.67 0.67 
+view -1 8 0 1 1 1 0 0 0 0 1 1 0
+end

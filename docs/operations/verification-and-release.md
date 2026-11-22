@@ -7,6 +7,7 @@
 1. `python tools/check_docs.py` passes. It checks required ICM files, relative links and anchors, ADR status lines and the ADR index.
 2. `python -m unittest discover -s tests -t .` passes (currently only tests for the doc checker).
 3. Affected ICM files are updated. `validation-index.md` lists what was actually executed, with results.
+   - **CI evidence rule:** record a CI result only when it was observed: a run URL/ID with its conclusion, or output pasted by the owner. Otherwise write **not observed** and say why. A workflow file existing, or a push succeeding, is not CI evidence.
 4. Commit message states what changed and which checks ran.
 
 ## 2. Code changes (from Phase 1)
@@ -26,7 +27,7 @@ Changes to policy, identity, gate, audit, exec or network require: new or update
 
 ## 4. Release (proposed)
 
-1. All gates green on `dev`. In-TD tests are run on the **declared minimum TD build** and the latest TD build, with build numbers recorded.
+1. All gates green on `dev`, with **observed** CI evidence. In-TD tests are run on the **declared minimum TD build** and the latest TD build, with build numbers recorded.
 2. Changelog and `current-state.md` updated. Version bumped (SemVer).
 3. Owner approves the PR `dev → main`.
 4. Tag `vX.Y.Z` on `main`. Build `.tox` from the tag on a clean checkout. Generate `TDflowMCP.json` (version, TD build, sha256).

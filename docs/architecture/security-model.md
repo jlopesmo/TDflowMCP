@@ -1,6 +1,6 @@
 # Security and permission model
 
-**Status: Proposed** ([ADR-0005](../decisions/0005-dashboard.md), [ADR-0009](../decisions/0009-permission-model.md)). Not implemented. Accepted security invariants are listed in [invariants.md](../icm/invariants.md). Revised after the [Phase 0 independent review](../research/2026-11-22-phase-0-independent-review.md).
+**Status:** Design, not implemented. [ADR-0009](../decisions/0009-permission-model.md) and [ADR-0005](../decisions/0005-dashboard.md) are Conditionally Accepted (owner, 2026-11-22). The §10–§11 additions come from Proposed ADRs [0010](../decisions/0010-setup-assistant-and-component-parameters.md)–[0013](../decisions/0013-project-memory-model.md). Accepted security invariants are listed in [invariants.md](../icm/invariants.md). Revised after the [Phase 0 independent review](../research/2026-11-22-phase-0-independent-review.md).
 
 ## 1. Threat model
 
@@ -13,9 +13,13 @@
 | Arbitrary code escapes policy | `exec` reaches `op('/')` | Raw `execute_python` is the highest-risk grant, approval-gated and **documented as policy-bypassing** |
 | Approval replay / TOCTOU | Agent gets approval, then the policy changes or a renamed op now resolves elsewhere | Single-use approvals redeemed only by the repeated call. Targets re-resolved and policy **re-evaluated at execution** (§4) |
 | Tampered history | Edit audit rows to hide actions | Append-only store + hash chain, with **keyed** checkpoints exported outside the store (§6). Tamper-*evident*, not tamper-proof |
-| Token leakage | Token in a committed `.mcp.json`, or pasted into a DAT | Tokens shown once, stored hashed outside the project, env-var client configuration recommended, secret scanning (planned, Phase 1 CI) |
+| Token leakage | Token in a committed `.mcp.json`, or pasted into a DAT | Tokens shown once, stored hashed outside the project, single-quoted env-var placeholders in user/local scope (§10), secret scanning (planned, Phase 1A CI) |
 | Self-modification | Agent disables checks by editing the TDflowMCP COMP, another TDflowMCP instance, or an ancestor's bypass/cooking flags | Hard denies on every TDflowMCP instance (by tag) and on ancestors' flags/rename/move (§3.4) |
-| Resource exhaustion | Huge bodies, unauthenticated floods, `while True` scripts freezing TD | Size caps, auth-fail rate limiting with aggregated audit (Phase 1), cooperative budgets (§7). **Runaway in-process code cannot be killed**; this is a documented residual risk |
+| Resource exhaustion | Huge bodies, unauthenticated floods, `while True` scripts freezing TD | Size caps, auth-fail rate limiting with aggregated audit (Phase 1A gate), cooperative budgets (§7). **Runaway in-process code cannot be killed**; this is a documented residual risk |
+| Setup surface abused before MCP is enabled | A web page drives Setup actions (create tokens, enable MCP) | Setup listener starts only on a user action; read-only in 1A; paired admin session + exact Origin + CSRF for every action (§2.5, §10) |
+| Unauthorized environment changes | Troubleshooting "fixes" by pip-installing, editing TD prefs or rewriting client config | Diagnose-and-instruct only. Writes are limited to Skills/config files the user previews and confirms. Never installs software or edits permission settings (§10) |
+| Secrets leaking through generated text | Token embedded in "Tell Your Coding Agent" or a parameter saved into the `.toe` | Generated text and parameters never contain tokens; placeholders only (§10) |
+| Prompt injection through memory | A previous agent's handoff text instructs the next agent to request raw exec | Agent-authored memory is labelled with its author and presented as untrusted data; only server-verified facts are marked verified (§11) |
 | Lost work | Agent action corrupts the project, then TD crashes or restarts and the undo history is gone | Agents may not save the `.toe` by default. Pre-mutation snapshots are planned (Phase 3), and the kill switch (§2.4) applies |
 
 **Out of scope (documented):** a malicious *human* operator of the machine; code already run with raw `execute_python` (full process access).
@@ -32,10 +36,19 @@ Named grant bundles. Proposed built-ins: `observer` (read), `builder` (read + cr
 MCP 2026-07-28 is stateless, so a **session** in TDflowMCP is a dashboard/audit grouping: consecutive requests from one `token_id` with the same client info, ending after a configurable idle gap (proposed 15 min). Legacy `initialize` clients also report their declared client info. Sessions are an observability construct and never an authorization input.
 
 ### 2.4 Kill switch
-A single "Suspend all agents" control is available as a TD component parameter (Phase 1) and as a dashboard button (Phase 2b). It rejects every MCP request with `SUSPENDED` until it is cleared, and the change itself is audited. Each agent can also be disabled individually.
+A single "Suspend all agents" control is available as a TD component parameter (`Suspendagents`, Phase 1B) and as a dashboard button (Phase 2B). It rejects every MCP request with `SUSPENDED` until it is cleared, and the change itself is audited. Each agent can also be disabled individually.
 
-### 2.5 Dashboard admin
-A separate credential. A one-time pairing code shown inside TD is exchanged for an HttpOnly session cookie. Because **cookies are not isolated by port** and SameSite treats other `127.0.0.1` ports as same-site, the cookie is **not** relied on alone. Every `/api` request and the WebSocket upgrade require (a) an `Origin` exactly equal to the canonical dashboard origin `http://127.0.0.1:<port>` (a missing Origin is rejected), and (b) an `X-TDflow-CSRF` header matching the session's token. `localhost` is not a canonical origin; requests to `localhost` are redirected to it.
+### 2.5 Dashboard and Setup admin sessions
+The Setup Assistant (1B+) and the Governance Dashboard (2B) share one admin credential, separate from agent tokens.
+
+**Pairing (reverse flow; no secret ever stored in a parameter):**
+1. The browser requests pairing. The server creates **one** pending request (any earlier pending request is cancelled). It holds a random 128-bit request secret bound to the browser by an HttpOnly cookie, plus a short, non-secret **match code** (e.g. `K7Q-42M`) shown on the page.
+2. TouchDesigner shows `Pairingrequest` = `Pending: K7Q-42M (12:01:05)`. The user compares the code and pulses `Approvepairing` or `Rejectpairing` inside TD. Only someone physically at TD can approve.
+3. On approval, the cookie becomes an admin session. Pending requests expire after 2 minutes. At most 3 requests are allowed per minute, and denials are audited.
+
+The match code only prevents approving the wrong request. Holding it grants nothing, so it is safe in a saved parameter, in autosaves and on a shared screen.
+
+**Request rules:** because **cookies are not isolated by port** (SameSite treats other `127.0.0.1` ports as same-site), the cookie is never relied on alone. See the [per-route gate table](#81-per-route-gate-table). The canonical origin is `http://127.0.0.1:<port>`; requests to `localhost` are redirected to it.
 
 ### 2.6 OAuth 2.1
 Deferred (TDMCP uses it). It may be added behind the same identity interface if clients require it, which is an owner decision.
@@ -78,12 +91,14 @@ The tool registry refuses a tool whose resolver doesn't declare its classificati
 ### 3.4 Hard denies (non-overridable)
 - Every TDflowMCP component instance (identified by tag `TDflowMCP`, not by path) and its descendants, for all actions including `read` (it holds configuration).
 - On every **ancestor** of a TDflowMCP instance: delete, rename/move, and changes to `bypass`, `allowCooking`, `cooking`-related flags and extension parameters.
-- `/sys`, `/local`, `/ui`, and any path outside the configured host project root (default `/project1`; configurable).
-- `tdflow_project_info` returns a fixed summary only and does not need read on `/`.
+- `/sys`, `/local`, `/ui`, and any path outside the configured host project root (`Projectroot`, default `/project1`).
+- The optional `tdflowProject` COMP, and every **ancestor**'s delete, rename/move and bypass/cooking flags, for **raw operator tools**. It changes only through memory tools, which enforce the record schema and revision rules (§11).
+- **Protected-set identity is registration, not tags.** The controller records the operator ids (`op.id`) of its own instance, other genuine TDflowMCP instances it discovers, and the `tdflowProject` COMP the user created or linked, in `Datadir`. Tags are used for discovery only. Agents may not add, remove or change the reserved tags `TDflowMCP` and `tdflowProject` (this is treated as a hard-denied update), so a decoy COMP cannot claim protection or block work.
+- `tdflow_project_info` returns a fixed summary. The top-level COMP names it lists are **filtered to those the agent can read**.
 
 ## 4. Approvals
 
-- Triggered by a grant constraint or a global rule. In **Phase 1** there is no approval surface, so `require_approval` resolves to **deny** with code `APPROVAL_UNAVAILABLE`. The approval flow ships in Phase 2b.
+- Triggered by a grant constraint or a global rule. Phases 1A–2A have no approval surface, so `require_approval` resolves to **deny** with code `APPROVAL_UNAVAILABLE`. The approval flow ships in Phase 2B.
 - A pending record stores: the agent, the RFC 8785 (JCS) canonical JSON of the arguments and its SHA-256, the resolved targets, the policy version, and the expiry (proposed 10 min).
 - **Redemption is only by repeating the identical call** with `_meta.tdflow.approval_id`. `tdflow_approval_status` is read-only. At redemption the server checks the digest and agent, **re-resolves the targets and requires them to be identical**, and **re-evaluates policy** at the current policy version (a revoked grant cancels the approval). Approvals are single-use.
 - The dashboard shows the **complete raw arguments** (full code, full expression text) and the resolved targets. An agent-written summary is never the only content.
@@ -112,11 +127,42 @@ TD's main thread cannot pre-empt running Python. Limits are therefore:
 
 ## 8. Network posture
 
-- Bind `127.0.0.1` only. At startup the component verifies the effective bind (by trying a connection on a non-loopback local interface where one exists, and by checking the DAT's reported address) and **refuses to start** if loopback-only cannot be confirmed. Remote/LAN access is out of scope for Phases 1–3 and needs an ADR (TLS via the Web Server DAT `secure` parameter, plus mTLS).
-- `/mcp`: a missing Origin is accepted (non-browser clients); a present Origin must equal the canonical dashboard origin, otherwise 403 (MCP spec MUST). `/api` and `/ui` mutations: exact Origin required (§2.5).
+- Bind `127.0.0.1` only. At startup the component verifies the effective bind and **refuses to start** unless loopback-only is positively confirmed. Firewalls and Windows routing can make a self-connection test pass or fail wrongly, so an **ambiguous result counts as failure** (fail closed). Spike S1 defines the evidence that counts: the DAT's reported address, a socket-level check of the listening address, and the non-loopback connection attempt. Remote/LAN access is out of scope for Phases 1–3 and needs an ADR (TLS via the Web Server DAT `secure` parameter, plus mTLS).
+
+### 8.1 Per-route gate table
+
+| Route | Method | Requirements (all must hold) |
+|---|---|---|
+| `/mcp` | POST | Valid Host. Origin absent (non-browser) **or** equal to the canonical origin, else 403 (spec MUST). Valid agent bearer token. State Enabled |
+| `/setup/`, `/ui/` static files | GET | Valid Host. If `Sec-Fetch-Site` is present it must be `same-origin` or `none` |
+| `/setup/api/*`, `/api/*` reads | GET | Valid Host + custom header `X-TDflow-Request: 1`. A cross-origin page cannot send a custom header without a CORS preflight, and the server never grants preflights. `Sec-Fetch-Site`, if present, must be `same-origin`. Reads after pairing also need the admin session |
+| `/setup/api/*`, `/api/*` mutations | POST/PUT/DELETE | Valid Host + **Origin exactly canonical (a missing Origin is rejected)** + admin session cookie + `X-TDflow-CSRF` matching the session |
+| `/api/events` | WebSocket upgrade | As for mutations: exact Origin + session + CSRF token in the first message |
+| `/.well-known/tdflowmcp` | GET | Valid Host. Returns only `{product, version}`: no project name, path or instance details |
+
+Responses never include `Access-Control-Allow-*` headers.
+
 - `Host` must be `127.0.0.1:<port>` or `localhost:<port>` (defence in depth against DNS rebinding; not itself a spec requirement).
-- TDflowMCP core makes no outbound network calls.
+- TDflowMCP core makes no **non-loopback** outbound network calls. The only outbound request is the loopback port-ownership probe (`GET http://127.0.0.1:<port>/.well-known/tdflowmcp`) during conflict detection. It has a timeout of at most 200 ms, runs off the main thread or in non-blocking steps, and its answer is **untrusted**: it is shown only as "responds like TDflowMCP vX" and never drives any automatic action.
 
 ## 9. Concurrency between agents (Phase 1 rule)
 
 Calls are serialized on TD's main thread. Concurrent agents can still interleave edits, so `tdflow_undo` only undoes an agent's action while it is on top of TD's undo stack, and otherwise returns `UNDO_CONFLICT`. Scope leases for multi-agent work are planned for Phase 4.
+
+## 10. Setup Assistant and integration safety
+
+- The Setup listener starts only on a user action (`Opensetup` or `Enablemcp`) and only after the loopback-bind self-test passes. If the bind cannot be verified, nothing listens; guidance is shown in parameters and an internal DAT.
+- Phase 1A Setup is read-only: status, checks, troubleshooting text and "Tell Your Coding Agent". From 1B, actions (create or disable tokens, choose scope presets, enable MCP, Skills writes) require a paired admin session (§2.5).
+- **No unauthorized changes:** TDflowMCP never installs packages or software, never changes TouchDesigner preferences or Python search paths, never edits firewall or OS settings, never writes coding-agent configuration of any kind (MCP server entries, permission or approval settings), and never kills processes. MCP client connection is **instruction-only**: the user runs the generated command or pastes the snippet. The only file writes are **Skills files**, in assisted-write mode. They require a preview, explicit confirmation, a hash manifest and an audit event, and may target only the registry-listed skills directories ([agent integration §3](agent-integration.md#3-client-aware-installation-consent-first)).
+- **Secrets:** custom parameters are saved into the `.toe`, so they never hold tokens. Pairing uses non-secret match codes (§2.5). Tokens are displayed once, in the Setup page only.
+- **Token placeholders and shells:** generated commands keep `${TDFLOW_TOKEN}` literal by using **single quotes**, which are literal in both POSIX shells and PowerShell. A double-quoted form would let bash or zsh expand the real token into the client config, and in PowerShell it would expand an empty variable. Generated commands use user/local scope, never project scope (which writes a committable `.mcp.json`). Whether each client expands `${VAR}` in stored headers at runtime is **[verify in 1C]**. A 1C test asserts that no client config file written by following the instructions contains the token.
+- **Generated text hygiene ("Tell Your Coding Agent", parameters):** only allowlisted fields are included (versions, state, check ids/results, fixed remediation text, endpoint URL). Environment-derived strings (operator names, probe answers, error messages) are excluded or truncated and fenced as data. Paths are shown in `%LOCALAPPDATA%\TDflowMCP\<key>` form, never expanded with a username. The resume section is **reference-only by default** (handoff id, verified-fact counts). Agent-authored summaries are returned only through `tdflow_handoff_resume`, fenced and labelled.
+- Client detection reports only `present`/`absent` from `shutil.which`, never paths, plus user selection. TDflowMCP does not read client config files unless the user points it at one (read-only).
+
+## 11. Project memory and continuity safety
+
+- Exactly one authoritative memory home ([ADR-0013](../decisions/0013-project-memory-model.md)). Writes carry `based_on_rev`, and stale writes return `MEMORY_CONFLICT`. A `Projectid` mismatch blocks linking.
+- Memory tools act on dedicated pseudo-scopes `memory:<record-type>` (e.g. `memory:handoff`) with actions `read`, `create`, `update` and `delete`. Memory access is therefore granted separately from operator scopes. `delete` is denied by default; records are archived instead.
+- **Fork and rollback detection:** Save As, incremental saves or copying the COMP can clone an embedded authority, and a repo checkout can move `rev` backwards. `Datadir` keeps, per `Projectid`, the registered authority instance (COMP `op.id` + `.toe` identity) and each record's highest seen `rev`. A mismatch puts memory into `FORKED` or `REWOUND` read-only state until the user performs an explicit **Claim authority** (audited) ([continuity §2](continuity-and-memory.md#2-authority-model-avoids-conflicting-authoritative-records)).
+- Memory and handoffs never contain tokens, raw audit arguments or user-profile paths. They reference audit by sequence number and hash.
+- Agent-authored content is returned labelled `author: agent:<id>` and is never presented as an instruction from the user or the server. Only server-derived facts are labelled `verified`.

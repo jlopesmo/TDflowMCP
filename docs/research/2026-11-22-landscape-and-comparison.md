@@ -7,7 +7,7 @@ Evidence labels: **[D]** documented by the project/vendor (source linked) · **[
 
 ## 1. Original `mcp_bridge.tox` and its audit
 
-**Not found.** I searched `F:\` (depth 6, excluding worktrees and node_modules) and the current Windows user profile (depth 6) for `*mcp_bridge*`/`*mcpbridge*` and found no TouchDesigner bridge component or audit. The only hit was an unrelated LM Studio file. **[L]** No lessons from it are included here. **Owner action:** provide the `.tox` and its audit, or confirm it is retired (see [roadmap § owner decisions](../icm/roadmap.md#owner-decisions-pending)).
+**Update, 2026-11-22:** the owner supplied the `.tox`, its audit and the extracted source later the same day. They are reviewed in [mcp_bridge review](2026-11-22-mcp-bridge-review.md) and preserved in [reference/historical/mcp_bridge](../../reference/historical/mcp_bridge/README.md). The earlier local search had found nothing on `F:\` or in the user profile, because the files were not yet in the workspace.
 
 ## 2. Projects reviewed
 

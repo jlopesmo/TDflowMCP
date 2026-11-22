@@ -111,6 +111,21 @@ class CheckTests(unittest.TestCase):
             _write(root, "docs/decisions/README.md", "# ADRs\n| [0001](0001-x.md) | X | Accepted |\n")
             self.assertIn("index status ['Accepted'] != ADR status ['Proposed']", self._errors(root))
 
+    def test_conditional_acceptance_is_distinct(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            self._minimal_repo(root)
+            _write(root, "docs/decisions/0001-x.md", "# ADR\n\n**Status:** Conditionally Accepted (owner)\n")
+            _write(root, "docs/decisions/README.md", "# ADRs\n| [0001](0001-x.md) | X | Accepted |\n")
+            self.assertIn("index status ['Accepted'] != ADR status ['Conditionally Accepted']", self._errors(root))
+            _write(root, "docs/decisions/README.md", "# ADRs\n| [0001](0001-x.md) | X | Conditionally Accepted |\n")
+            self.assertEqual(check_docs.check(root), [])
+
+    def test_required_files_include_new_architecture_docs(self):
+        for rel in ("docs/architecture/setup-assistant.md", "docs/architecture/agent-integration.md",
+                    "docs/architecture/continuity-and-memory.md", "docs/architecture/security-model.md"):
+            self.assertIn(rel, check_docs.REQUIRED_FILES)
+
     def test_privacy_patterns_in_md_and_py(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)

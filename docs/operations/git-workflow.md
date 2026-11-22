@@ -3,7 +3,7 @@
 TDflowMCP follows the owner's cross-project [Workspace and Git working agreement](https://github.com/jlopesmo/nexOS/blob/main/docs/operations/workspace-and-git-working-agreement.md) (owner decision 2026-10-25). It is summarized here; the linked agreement wins on conflict.
 
 - **Canonical checkout:** `F:\dev\TDflowMCP` on branch `dev`. No permanent sibling `*-dev`/`*-review` directories.
-- **Branches:** `dev` (active development) and `main` (owner-approved release state). Promotion `dev → main` only with owner approval after required checks. No force pushes, history rewrites or automatic deployments.
+- **Branches:** `dev` (active development) and `main` (owner-approved release state). Per owner decision D6 (2026-11-22), `main` is created from the verified Phase 0 foundation; the observed result is recorded in [current-state](../icm/current-state.md). All future development happens on `dev`. Promotion `dev → main` only with owner approval after required checks. No force pushes, history rewrites or automatic deployments.
 - **Temporary worktrees/branches** are explicit exceptions with a recorded purpose, location, owner and removal condition. Prefer `.tmp/` (git-ignored).
 - Before Git topology changes, inspect `git status --short --branch`, `git worktree list`, `git branch -vv`.
 - **This repository is on a filesystem that does not record ownership.** Git reports "dubious ownership". Use `git -c safe.directory=F:/dev/TDflowMCP …` per command, or have the owner add the exception globally. Agents must not change global Git config without approval.

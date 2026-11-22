@@ -1,0 +1,47 @@
+# Agent integration: MCP client setup, Skills, version management
+
+**Status: Proposed design** for owner-approved requirement P13 ([ADR-0011](../decisions/0011-agent-integration-and-skills.md)). Not implemented. Client-specific facts must be re-verified against each client's current documentation in Phase 1C; none are verified here.
+
+## 1. Client registry
+
+`src/integrations/clients.json` (planned) — one entry per coding agent:
+
+```json
+{ "id": "claude-code", "display": "Claude Code", "support": "primary",
+  "mcp": { "transport": "http", "add_command": "claude mcp add --transport http --scope user tdflow {url} --header 'Authorization: Bearer ${TDFLOW_TOKEN}'" },
+  "skills": { "format": "skill-md", "project_dir": ".claude/skills", "user_dir": "~/.claude/skills" },
+  "verified": { "client_version": null, "date": null, "evidence": null } }
+```
+
+Support levels: `primary` (tested each release), `verified` (tested once, date recorded), `documented` (from vendor docs only), `unsupported`. A client is never shown as `verified` without a recorded test in `validation-index.md`. Example values above are **placeholders to verify**.
+
+## 2. Skills bundle
+
+- Source: `src/skills/<skill-name>/SKILL.md` (+ references), versioned with the tool surface (`skill_version == tool_surface_version` major.minor).
+- Content: how to use TDflowMCP tools safely, the scope/permission model as seen by agents, checkpoint/handoff etiquette (2A), and "never install or reconfigure without asking the user".
+- Skills are guidance, **not enforcement** — every rule they describe is also enforced (or explicitly unenforced) by the server.
+- Upstream Skills (e.g. TDMCPSkills) are not copied, because they carry the TDMCP Shared Use License ([ADR-0008](../decisions/0008-upstream-reuse-policy.md)). TDflowMCP Skills are authored independently.
+- **Namespace and coexistence:** TDflowMCP Skills use the `tdflow-` prefix. TDMCPSkills reserves `td-` and manages its own `.tdmcp-skills.json` manifest ([TDMCPSkills README](https://github.com/TouchDesigner/TDMCPSkills/blob/2025.30000/README.md)). TDflowMCP never reads, modifies or removes `td-*` skills or that manifest, and its own manifest is a separate file.
+- **No network:** the Skills bundle is embedded in the `.tox`, so installing or updating works offline. TDMCP, by contrast, fetches Skills from its latest release by default.
+
+## 3. Client-aware installation (consent-first)
+
+**MCP client connection is instruction-only.** TDflowMCP shows the shell-specific command or config snippet and never writes client configuration ([security model §10](security-model.md#10-setup-assistant-and-integration-safety)). For **Skills files**, there are two modes, chosen per action by the user in the Setup Assistant:
+
+1. **Instruction mode (default):** show exact commands/files to copy; TDflowMCP writes nothing.
+2. **Assisted write:** requires a paired admin session. TDflowMCP shows the target path (project or user scope, user-chosen), a full preview/diff, and the file list with hashes; writes only after explicit confirmation; records `tdflow-skills.manifest.json` in the target (`{skill, version, files: {path: sha256}, installed_at, installed_by: "TDflowMCP <version>"}`).
+
+Hard rules:
+- Targets are restricted to the skills directories listed for the chosen client in the registry (project or user scope). Arbitrary paths are not allowed.
+- Paths containing `..`, symlinks or junctions anywhere in the target are rejected.
+- Writes are atomic: write to a temp file, then rename.
+- Bundled Skills are verified against the `TDflowMCP.json` build manifest hashes before writing, because Skills steer agents.
+- Never overwrite a file whose hash doesn't match the manifest (user-modified → show diff, stop); never write tokens into any file; never write client permission/approval settings (contrast: Envoy writes `.claude/settings.local.json`); never write inside a Git repository without telling the user it will appear in `git status`; uninstall removes only manifest-listed, unmodified files. Every write is audited.
+
+## 4. Version management
+
+- `tdflow_whoami` returns `server_version`, `tool_surface_version`, `expected_skill_version`.
+- Skills declare their version and instruct the agent to compare it and tell the user on mismatch. **[verify in 1C]** Clients may not accept extra frontmatter fields: TDMCPSkills uses only `name` and `description` and keeps the version repo-wide. If clients reject a `version` field, the version moves into the manifest and a line in the skill body.
+- The Setup Assistant compares installed manifests with the bundled version and offers update (same consent flow).
+- **Coexistence with TDMCP:** TDMCP defaults to port 13316, and a Claude account plugin may already connect there. TDflowMCP uses 9480 and the server name `tdflow`, so both can be registered in the same client without colliding. Running both against the same project is allowed but not recommended, and the Setup Assistant warns about it if it detects another MCP component.
+- MCP client config drift (wrong port/URL) is detected only from what the user pastes or from failed connections — TDflowMCP does not read client config files unless the user explicitly points it at one (read-only, previewed).

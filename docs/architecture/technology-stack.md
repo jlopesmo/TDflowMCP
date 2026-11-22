@@ -1,6 +1,6 @@
 # Technology stack (proposed)
 
-**Status: Proposed.** Selection is not final until the referenced ADRs are Accepted. Nothing listed as "selected" has been installed, built or tested.
+**Status:** The rows backed by ADRs 0002–0007 and 0009 are Conditionally Accepted (owner, 2026-11-22), subject to validation gates. The rows backed by ADRs 0010–0013 are Proposed. Nothing listed here has been installed, built or tested.
 
 ## Proposed stack
 
@@ -9,10 +9,14 @@
 | Host runtime | TouchDesigner's bundled Python 3.11 (verified present in local 2025.32440) | Zero install; same interpreter users already have | [0002](../decisions/0002-in-process-mcp-host.md) |
 | HTTP/WebSocket server | Web Server DAT (built-in) | Native, documented `localaddress` bind, TLS available; no server thread of our own (callback thread still to be confirmed in S1) | [0002](../decisions/0002-in-process-mcp-host.md) |
 | MCP protocol | Hand-rolled JSON-RPC 2.0 + MCP 2026-07-28 + legacy `initialize` | SDK's deps (pydantic, uvicorn, anyio…) not bundled; PyPI may be blocked; main-thread model conflicts | [0003](../decisions/0003-protocol-implementation.md) |
-| Schema validation | `jsonschema` 4.23 (bundled with TD 2025.32440; pinned as a test-only dependency for CI) | Already present at runtime; no new runtime dependency | [0003](../decisions/0003-protocol-implementation.md) |
+| Schema validation | `jsonschema` (4.23 observed in the local 2025.32440 bundle; **provisional** test-only CI pin, to be re-pinned to the 2025.33230+ bundle) | Already present at runtime; no new runtime dependency | [0003](../decisions/0003-protocol-implementation.md) |
 | Audit + approvals + policy store | `sqlite3` (stdlib, bundled `_sqlite3.pyd`) | Transactions, queryable reports, single file | [0006](../decisions/0006-audit-store.md) |
 | Crypto primitives | `secrets`, `hashlib`, `hmac` (stdlib) | Token generation, hashing, constant-time compare | [0009](../decisions/0009-permission-model.md) |
-| Dashboard | Static HTML + vanilla ES modules + CSS, served by the component; WebSocket for live events | No build step, no npm, works offline on locked-down PCs | [0005](../decisions/0005-dashboard.md) |
+| Setup Assistant | One static HTML page + vanilla JS served at `/setup/` from embedded DATs; JSON endpoints | Available before MCP; no build, no CDN; same gate as MCP | [0010](../decisions/0010-setup-assistant-and-component-parameters.md) |
+| Component UI | TouchDesigner custom parameters (pulse/toggle/str/int/menu) | Native, self-contained; no external files at runtime | [0010](../decisions/0010-setup-assistant-and-component-parameters.md) |
+| Governance dashboard | Static HTML + vanilla ES modules + CSS, served by the component; WebSocket for live events | No build step, no npm, works offline on locked-down PCs | [0005](../decisions/0005-dashboard.md) |
+| Skills + client registry | Markdown `SKILL.md` bundles + `clients.json`, embedded in the `.tox`, written only on confirmed assisted install with sha256 manifest | No installer, no network; version tied to tool surface | [0011](../decisions/0011-agent-integration-and-skills.md) |
+| Project memory | Markdown/JSON records with rev + sha256; files (repo mode) or DATs (embedded mode) | Single authority, diffable, Git-optional | [0013](../decisions/0013-project-memory-model.md) |
 | Code Mode | Pattern only: `search_api`/`describe_api`/`execute_script` over a policy-checked Python facade | Cloudflare package is JS + Workers-bound; in-process cannot be sandboxed | [0004](../decisions/0004-code-mode-strategy.md) |
 | Unit tests | stdlib `unittest` on CPython 3.11 (local Python 3.11.8 verified) | Matches TD's major/minor; no pytest dependency required | [0007](../decisions/0007-source-first-build.md) |
 | In-TD tests | Custom runner COMP executing `tests/td/` inside TouchDesigner, emitting JSON results | Only way to test `td` behavior faithfully | [0007](../decisions/0007-source-first-build.md) |

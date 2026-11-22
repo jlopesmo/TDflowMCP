@@ -1,0 +1,22 @@
+# ADR-0011 — Agent integration, Skills and "Tell Your Coding Agent"
+
+**Status:** Proposed (2026-11-22). The requirements (P13, P14) are owner-approved; this design awaits acceptance.
+
+## Context
+The owner requires MCP and agent Skills integration with client-aware installation and version management, and a dynamic "Tell Your Coding Agent" parameter covering setup, connection, repair and work resumption. Reference projects auto-write client configs and permission postures; Envoy writes `.claude/settings.local.json` with auto-approve defaults ([research](../research/2026-11-22-landscape-and-comparison.md)). That conflicts with TDflowMCP's server-side enforcement and its no-unauthorized-changes requirement.
+
+## Decision
+Adopt [agent-integration.md](../architecture/agent-integration.md) and [setup-assistant §6](../architecture/setup-assistant.md#6-tell-your-coding-agent):
+1. A client registry with explicit support levels. A client counts as `verified` only with recorded test evidence.
+2. Skills are authored in `src/skills/` and versioned with the tool surface. They are guidance, not enforcement.
+3. **MCP client connection is instruction-only:** shell-specific commands keep `${TDFLOW_TOKEN}` literal and use user/local scope. TDflowMCP never writes client configuration. **Skills** default to instruction mode. **Assisted write** of Skills files needs a paired session, a registry-listed target, a preview and explicit confirmation, and it records a hash manifest. It rejects symlinks and `..`, writes atomically, never overwrites modified files, and never writes tokens.
+4. Version management uses `tdflow_whoami`, Skills frontmatter and manifest comparison.
+5. "Tell Your Coding Agent" is generated from allowlisted state fields and never contains secrets or environment-derived free text. Its resume section is reference-only by default, and agent-authored content is available only through `tdflow_handoff_resume`, fenced and labelled as untrusted.
+
+## Alternatives
+- Automatic config writing (Envoy-like): rejected.
+- Shipping no Skills: weaker agent behaviour and higher token use.
+- Copying TDMCP Skills: barred by ADR-0008.
+
+## Validation gates
+Phase 1C acceptance: Claude Code connects using only the generated text, and a Skills install/update/uninstall round-trip passes on a disposable target directory.

@@ -26,12 +26,13 @@ ICM (the owner's project-context convention, shared with nexOS, Morphora and Flo
 | What's next and when is it done? | [roadmap.md](roadmap.md) + [milestones](../milestones/README.md) |
 | What did we learn from other projects? | [docs/research/](../research/2026-11-22-landscape-and-comparison.md) + [repoinspire.md](../../repoinspire.md) |
 | Where does source live vs built artifacts? | [source-of-truth.md](../architecture/source-of-truth.md) |
+| Where does a *host project's* memory live? | [continuity-and-memory.md](../architecture/continuity-and-memory.md) (not this folder: this folder is TDflowMCP's own development memory) |
 
 ADRs remain authoritative for the decisions they record. ICM files summarize and link; they don't duplicate rationale.
 
 ## Statement status vocabulary
 
-**Accepted** (owner-approved) · **Proposed** (awaiting approval) · **Hypothesis** (untested) · **Verified** (evidenced by an executed check). See [AGENTS.md §2](../../AGENTS.md#2-status-discipline).
+**Accepted** (owner-approved; *Conditionally Accepted* = subject to the listed validation gates) · **Proposed** (awaiting approval) · **Hypothesis** (untested) · **Verified** (evidenced by an executed and observed check). See [AGENTS.md §2](../../AGENTS.md#2-status-discipline).
 
 ## Maintenance rules
 

@@ -36,3 +36,7 @@ Thumbs.db
 
 # Local scratch
 .tmp/
+
+# Third-party reference implementations (e.g. official TDMCP releases) — never committed,
+# kept separate from TDflowMCP source. Provenance is recorded in docs/research/ instead.
+reference/third_party/

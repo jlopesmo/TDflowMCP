@@ -37,9 +37,14 @@ REQUIRED_FILES = [
     "docs/architecture/README.md",
     "docs/milestones/README.md",
     "docs/product/vision.md",
+    "docs/architecture/setup-assistant.md",
+    "docs/architecture/agent-integration.md",
+    "docs/architecture/continuity-and-memory.md",
+    "docs/architecture/security-model.md",
 ]
 
-STATUS_WORDS = ("Proposed", "Accepted", "Superseded", "Rejected")
+# "Conditionally Accepted" is matched first so it is distinguished from plain "Accepted".
+STATUS_WORDS = ("Conditionally Accepted", "Proposed", "Accepted", "Superseded", "Rejected")
 STATUS_RE = re.compile(r"\b(" + "|".join(STATUS_WORDS) + r")\b")
 ADR_NAME = re.compile(r"^(\d{4})-[a-z0-9-]+\.md$")
 LINK = re.compile(r"!?\[[^\]]*\]\(<?([^)\s>]+)>?(?:\s+\"[^\"]*\")?\)")

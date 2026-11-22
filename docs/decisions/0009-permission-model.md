@@ -1,6 +1,6 @@
 # ADR-0009 — Permission model
 
-**Status:** Proposed (2026-11-22).
+**Status:** Conditionally Accepted (owner, 2026-11-22), subject to the Phase 1B enforcement gates. Revision: hard denies also cover the optional `tdflowProject` COMP for raw operator tools ([ADR-0013](0013-project-memory-model.md)).
 
 ## Context
 None of the reviewed projects enforce scoped permissions server-side. TDMCP relies on OAuth consent and read-only annotations, and Envoy relies on client-side permission settings ([research](../research/2026-11-22-landscape-and-comparison.md)). The owner requires server-side CRUD enforcement, operator scopes and agent identity.
@@ -21,3 +21,8 @@ Tool-level allowlists only (too coarse; cannot express "edit only /project1/fx")
 
 ## Consequences
 Target resolution is security-critical. Each resolver needs dedicated tests covering path traversal, shortcuts, global OP shortcuts, clones/replicants and operators created during the call.
+
+## Validation gates
+- Phase 1B acceptance item 1 (scoped allow/deny, expression-as-execute, protection of instances, ancestors and `tdflowProject`) and Phase 1A acceptance item 4 (Origin gate).
+- The policy engine reaches its branch-coverage target.
+- Any bypass found in review blocks Phase 1C.

@@ -15,7 +15,7 @@ Every statement in this repository has a status. Never promote one silently:
 
 | Status | Meaning | Where it lives |
 |---|---|---|
-| **Accepted** | Owner-approved decision | ADR with `Status: Accepted` + owner/date |
+| **Accepted** | Owner-approved decision (**Conditionally Accepted** = binding once its validation gates pass; a failed gate reopens it) | ADR with `Status: Accepted`/`Conditionally Accepted` + owner/date |
 | **Proposed** | Assistant/engineer recommendation awaiting owner approval | ADR with `Status: Proposed`, architecture docs |
 | **Hypothesis** | Untested claim or expectation | research, milestones |
 | **Verified** | Observed through an executed check, with evidence | `docs/icm/current-state.md`, `docs/icm/validation-index.md` |
@@ -36,13 +36,18 @@ Any change that affects behavior, structure, contracts, security, dependencies o
 | Permission, identity, audit, exec or network behavior | `docs/architecture/security-model.md` (+ ADR if it changes a decision) |
 | An invariant | `docs/icm/invariants.md` **only** with an owner-accepted ADR |
 | MCP tool surface | `docs/architecture/tool-surface.md` |
+| Component parameters, states, Setup Assistant, compatibility checks, troubleshooting | `docs/architecture/setup-assistant.md` (+ ADR-0010) |
+| Client registry, Skills, "Tell Your Coding Agent" | `docs/architecture/agent-integration.md` (+ ADR-0011) |
+| Session logs, checkpoints, handoffs, project memory, `tdflowProject` | `docs/architecture/continuity-and-memory.md` (+ ADR-0012/0013) |
+| CI or any check result | `docs/icm/validation-index.md`, with **observed** evidence only (run URL/ID or pasted output) |
 
 `python tools/check_docs.py` must pass before committing. Reviewers should reject code changes that leave ICM stale.
 
 ## 4. Hard rules
 
 - **No upstream code copying** from TDMCP, Embody/Envoy or other references unless `repoinspire.md` records a completed license review and an owner-approved `code_reuse` decision. See [ADR-0008](docs/decisions/0008-upstream-reuse-policy.md).
-- **Do not alter real TouchDesigner projects** (`.toe`/`.tox` outside this repo) and do not launch TouchDesigner, MCP servers or network services unless the current milestone explicitly authorizes it and the owner has asked for it.
+- **Do not alter real TouchDesigner projects** (`.toe`/`.tox` outside this repo). TouchDesigner experiments are authorized (owner, 2026-11-22) **only in isolated, disposable projects** created for the purpose under `.tmp/` or a scratch folder. Do not launch MCP servers or network services except inside such an experiment, when the current milestone calls for it.
+- **No unauthorized installations or configuration changes**, neither by the product nor by agents working on it. Ask before installing anything.
 - **Security is server-side.** Never rely on client honesty, prompt instructions or the dashboard UI for permission enforcement.
 - **No new runtime dependency** without an ADR. TouchDesigner's bundled Python is the default runtime; do not assume network access to PyPI/npm on the work PC.
 - Never commit secrets, tokens, user-profile paths or personal details, user media, audit databases, or large binaries. Built `.tox` files are release artifacts, not source (see [source-of-truth rules](docs/architecture/source-of-truth.md)).

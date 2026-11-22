@@ -12,3 +12,7 @@
 *.toe binary
 *.png binary
 *.jpg binary
+*.zip binary
+
+# Historical references are preserved byte-for-byte
+reference/historical/** -text
