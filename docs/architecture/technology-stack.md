@@ -11,6 +11,7 @@
 | MCP protocol | Hand-rolled JSON-RPC 2.0 + MCP 2026-07-28 + legacy `initialize` | SDK's deps (pydantic, uvicorn, anyio…) not bundled; PyPI may be blocked; main-thread model conflicts | [0003](../decisions/0003-protocol-implementation.md) |
 | Schema validation | `jsonschema` (4.23 observed in the local 2025.32440 bundle; **provisional** test-only CI pin, to be re-pinned to the 2025.33230+ bundle) | Already present at runtime; no new runtime dependency | [0003](../decisions/0003-protocol-implementation.md) |
 | Audit + approvals + policy store | `sqlite3` (stdlib, bundled `_sqlite3.pyd`) | Transactions, queryable reports, single file | [0006](../decisions/0006-audit-store.md) |
+| Bind evidence | OS listening-socket table via `GetExtendedTcpTable` (`ctypes`, stdlib) plus non-loopback connection probes | Validated against `netstat` in S5; no subprocess or third-party package | [0002](../decisions/0002-in-process-mcp-host.md) |
 | Crypto primitives | `secrets`, `hashlib`, `hmac` (stdlib) | Token generation, hashing, constant-time compare | [0009](../decisions/0009-permission-model.md) |
 | Setup Assistant | One static HTML page + vanilla JS served at `/setup/` from embedded DATs; JSON endpoints | Available before MCP; no build, no CDN; same gate as MCP | [0010](../decisions/0010-setup-assistant-and-component-parameters.md) |
 | Component UI | TouchDesigner custom parameters (pulse/toggle/str/int/menu) | Native, self-contained; no external files at runtime | [0010](../decisions/0010-setup-assistant-and-component-parameters.md) |

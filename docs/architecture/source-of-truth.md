@@ -22,11 +22,12 @@ The current tree is in [project-map.md](../icm/project-map.md). Planned addition
 src/
   tdflowmcp/            # pure-Python core: protocol, policy, registry, audit (no `td` imports)
     protocol/  policy/  registry/  audit/  identity/  approvals/
-    gate/  compat/  continuity/  memory/  integrations/   # pure logic; TD/file access injected
+    gate.py  compat.py  net/   # EXIST (Phase 1A prep): request gate, compatibility checks, bind verification
+    continuity/  memory/  integrations/   # planned; pure logic, TD/file access injected
   td_adapter/           # thin layer that touches `td` (op access, undo, Web Server DAT callbacks)
   tools/                # core tool definitions (Phase 1)
   extensions/           # optional tool modules (Phase 4+)
-  setup/                # Setup Assistant static page + troubleshooting.json (Phase 1A)
+  setup/                # troubleshooting.json EXISTS; Setup Assistant static page planned (Phase 1A)
   dashboard/            # governance dashboard static UI (Phase 2B) — no build step
   integrations/         # clients.json registry (Phase 1C)
   skills/               # agent Skills bundle sources (Phase 1C)
@@ -34,8 +35,9 @@ src/
   component/            # manifest.json describing the COMP layout and custom parameters
 reference/historical/   # read-only historical artifacts (exists: mcp_bridge/)
 reference/third_party/  # git-ignored; official third-party releases for hands-on tests only
+spikes/                 # EXISTS: disposable, reproducible spike code (never built or imported)
 tests/
-  unit/                 # stdlib unittest, runs in plain CPython 3.11 (CI)
+  unit/                 # EXISTS: stdlib unittest, runs in plain CPython 3.11 (CI) and TD's bundled Python
   td/                   # in-TouchDesigner integration tests + runner
 tools/
   check_docs.py         # Phase 0 (exists)

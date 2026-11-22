@@ -1,13 +1,13 @@
 # ADR-0010 — Setup Assistant, essential parameters, compatibility checks and troubleshooting
 
-**Status:** Proposed (2026-11-22). The requirements (P9–P12, P14 setup/repair) are owner-approved; this design awaits acceptance.
+**Status:** Conditionally Accepted (owner, 2026-11-22; recorded as roadmap decision D9) for Phase 1A, subject to the validation gates below. The requirements (P9–P12, P14 setup/repair) are owner-approved.
 
 ## Context
 The owner requires a self-contained drag-and-drop `.tox` with essential custom parameters, a browser Setup Assistant usable before MCP access is enabled, compatibility checks (TD build, bundled Python, dependencies, ports, coding agents), and guided troubleshooting **without unauthorized installations or configuration changes**. The owner also asked that this minimal setup experience arrive earlier than, and separately from, the governance dashboard.
 
 ## Decision
 Adopt [setup-assistant.md](../architecture/setup-assistant.md):
-1. Explicit component states (Off → Setup → Enabled / Suspended / Error). The component never listens until the user acts, and only after the loopback-bind self-test passes.
+1. Explicit component states (Off → Setup → Enabled / Suspended / Error). The component never listens until the user acts. The listener starts `VERIFYING` and serves no application request until the effective loopback-only binding is verified. Failure closes it immediately ([bind-verification gate](../architecture/security-model.md#82-bind-verification-gate)).
 2. The essential parameter set, phased 1A/1B. Parameters never hold long-lived secrets.
 3. `/setup/` is served by the same Web Server DAT and gate as `/mcp`. It is read-only in 1A; paired, CSRF-protected actions arrive in 1B. It is separate from the `/ui/` governance dashboard (Phase 2B, [ADR-0005](0005-dashboard.md)).
 4. Compatibility checks report pass/warn/fail/unknown with evidence. Provisional target build: **2025.33230+**. Older builds may run Setup and may enable MCP only when every security self-test passes. No override exists.
@@ -20,4 +20,9 @@ Adopt [setup-assistant.md](../architecture/setup-assistant.md):
 - Auto-fixing environment problems, e.g. pip installs: rejected by the owner's requirement.
 
 ## Validation gates
-Spike S5 (older-build feasibility, parameters, clipboard and browser-open APIs, pre-save hook). Phase 1A acceptance ([phase-1](../milestones/phase-1-core-server.md)).
+- **S5 (executed 2026-11-22 on 2025.32440, [findings](../research/2026-11-22-s5-compatibility-2025.32440.md)):**
+  - **Pass:** custom-parameter APIs, the `ui.clipboard` text round-trip, `onStart` firing on project load, bundled Python 3.11.10 and libraries, and the bind gate's fail-closed behaviour.
+  - **Warn:** the `projectpresave` hook exists, but firing was not exercised. Menu `.default` and same-frame pulse nuances (see findings).
+  - **Unknown:** the end-to-end browser launch (`ui.viewFile` exists, but no verified listener can exist on that build).
+  - **Fail (security):** loopback binding is impossible on 2025.32440. On builds without `localaddress`, the web Setup Assistant is unavailable and guidance falls back to parameters and an internal DAT.
+- **Open:** S1 on 2025.33230+, including the browser launch and the HTTP header/body behaviour. Phase 1A acceptance ([phase-1](../milestones/phase-1-core-server.md)).

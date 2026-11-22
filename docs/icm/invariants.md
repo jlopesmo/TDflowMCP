@@ -17,7 +17,7 @@
 
 ## Engineering guardrails
 
-P-1 to P-13 come from ADRs 0002–0009, which are Conditionally Accepted. They bind once their validation gates pass, and a failed gate reopens them. P-14 to P-17 come from Proposed ADRs 0010–0013.
+P-1 to P-13 come from ADRs 0002–0009, which are Conditionally Accepted. They bind once their validation gates pass, and a failed gate reopens them. P-14 comes from ADR-0010 (Conditionally Accepted). P-15 to P-17 come from Proposed ADRs 0011–0013.
 
 - P-1 Bind to `127.0.0.1` by default; any non-loopback exposure requires TLS and a new ADR ([0002](../decisions/0002-in-process-mcp-host.md)).
 - P-2 Validate `Origin` (MCP spec MUST) and `Host` (defence in depth) on every request, before any TouchDesigner access. Dashboard requests require an exact Origin plus a CSRF token.
@@ -33,7 +33,7 @@ P-1 to P-13 come from ADRs 0002–0009, which are Conditionally Accepted. They b
 - P-11 Agents cannot save the host `.toe` unless an approval-gated grant allows it (not offered in Phase 1).
 - P-12 Audit writes an intent event before any mutation; mutations fail closed if audit is unavailable.
 - P-13 A kill switch suspends all agents immediately.
-- P-14 The component never listens before a user action, and never listens unless the loopback bind self-test passes ([ADR-0010](../decisions/0010-setup-assistant-and-component-parameters.md)).
+- P-14 The component never listens before a user action, and never activates a listener on a build whose Web Server DAT lacks `localaddress` (S5). No application request is served until the effective loopback-only binding is verified, and failed or ambiguous verification closes the listener immediately ([ADR-0010](../decisions/0010-setup-assistant-and-component-parameters.md), [§8.2](../architecture/security-model.md#82-bind-verification-gate)).
 - P-15 Custom parameters, generated agent instructions and project memory never contain tokens or other long-lived secrets.
 - P-16 Agent-authored memory and handoff text is labelled with its author and treated as untrusted data. Only server-derived facts are labelled verified ([ADR-0012](../decisions/0012-session-continuity.md)).
 - P-17 Raw operator tools are hard-denied on the `tdflowProject` COMP. Memory changes go through memory tools with revision checks ([ADR-0013](../decisions/0013-project-memory-model.md)).

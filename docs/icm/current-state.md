@@ -1,42 +1,46 @@
 # TDflowMCP — Current state
 
-**Observed 2026-11-22, branch `dev` (Phase 0 revision).** This file records evidence only. Plans live in the [roadmap](roadmap.md).
+**Observed 2026-11-22, branch `dev`. Phase 1A has started (S5 executed; TD-independent preparation in progress).** This file records evidence only. Plans live in the [roadmap](roadmap.md).
 
 ## Verified
-- Private GitHub repository `jlopesmo/TDflowMCP`. It was empty before Phase 0, and unauthenticated API requests return 404 (consistent with private).
-- Phase 0 foundation commits `82b64f1` and `b70000a` were pushed to `origin/dev` (push output observed). The revision commit and `main` creation are recorded under [Phase 0 commit record](#phase-0-commit-record).
-- The documentation set exists:
-  - ICM, product vision (P1–P17), research records and two independent review records;
-  - architecture (system, security, setup, integration, continuity/memory, tools, stack, source rules);
-  - ADRs 0001–0013, milestones (Phase 0; Phase 1A/1B/1C), operations, RepoInspire register and agent instructions.
-- The owner's original bridge was supplied, reviewed and preserved:
-  - the audit and extracted source are committed in `reference/historical/mcp_bridge/` (hashes in its README);
-  - the `.tox` is kept git-ignored, and its SHA-256 matches the audit.
-- `tools/check_docs.py` and its unit tests pass locally (see [validation-index](validation-index.md)).
+- Private repository `jlopesmo/TDflowMCP`. `main` was created at `066dbd0` (Phase 0 foundation) and was **not changed** after that. Development continues on `dev`.
+- **Phase 0 docs:** ICM, vision P1–P17, research and review records, architecture, ADRs 0001–0013, milestones, operations and the RepoInspire register. The original bridge is preserved in `reference/historical/`.
+- **ADR status:** ADR-0010 (Setup Assistant) is **Conditionally Accepted** for Phase 1A (owner, 2026-11-22). The startup rule is now unambiguous ([security model §8.2](../architecture/security-model.md#82-bind-verification-gate)): no application request is served before the effective loopback-only binding is verified, failure closes the listener immediately, and builds without `localaddress` never activate a listener.
+- **Spike S5 executed on TouchDesigner 2025.32440** in a disposable, text-generated project only ([findings](../research/2026-11-22-s5-compatibility-2025.32440.md)).
+  - **Pass:**
+    - build identification; Python 3.11.10; required libraries including `jsonschema` 4.23.0;
+    - custom-parameter APIs, the `ui.clipboard` text round-trip, and `onStart` firing on load (the pre-save hook exists, but its firing is untested);
+    - callbacks run on the main thread;
+    - the OS listener-table reader (cross-checked against `netstat` in-session);
+    - the bind gate's fail-closed behaviour.
+  - **Fail (security):** the Web Server DAT has **no `localaddress`** and binds `0.0.0.0`, so **2025.32440 cannot meet TDflowMCP's security requirements**.
+  - **Unknown on this build:** browser launch end-to-end, HTTP header/body/latency behaviour, and port-conflict behaviour (they need a verified listener, so they move to S1).
+  - **Deviation:** one unsafe test step (a second listener after the gate had closed) was recorded and corrected.
+- **TD-independent Phase 1A preparation (code exists, unit-tested; not integrated with TouchDesigner):**
+  - `src/tdflowmcp/net/bindverify.py`: capability check (step 0), verdict, and the `VERIFYING → SERVING`/`CLOSED` state machine;
+  - `src/tdflowmcp/net/oslisteners.py`: OS listener-table parser and reader;
+  - `src/tdflowmcp/gate.py`: per-route gate;
+  - `src/tdflowmcp/compat.py`: compatibility checks;
+  - `src/setup/troubleshooting.json`.
+  - **76 unit tests pass** on CPython 3.11.8 **and** on TouchDesigner's bundled Python 3.11.10 (1 test skipped: non-Windows only). This includes the fixes from [review 3](../research/2026-11-22-s5-review.md): terminal `CLOSED`, `CLOSING`/`STUCK` close confirmation, path validation, header and body hardening, a required PID filter, and the fact contract. Boundary tests prove that `src/tdflowmcp` imports neither `td` nor process or installer modules.
+- The doc checker passes (see [validation-index](validation-index.md)).
 
 ## Not implemented (nothing below exists)
-- No component, custom parameters, Setup Assistant, compatibility checks, MCP server, policy engine, identity, audit store, Skills bundle, continuity services, `tdflowProject`, dashboard, Code Mode, build pipeline, `.tox` or in-TD tests.
-- No TouchDesigner session has been launched. No TD project has been opened or modified. No third-party binary (e.g. TDMCP) has been downloaded.
+- No TD adapter, component shell, custom-parameter build, Setup Assistant page, listener integration, `.tox` builder or in-TD test runner.
+- No MCP protocol, policy engine, identity, audit store, Skills, continuity services, `tdflowProject` or dashboard.
+- No production `.tox`.
+- No third-party binary has been downloaded.
 
 ## Not observed / unverified
-- **CI:** no GitHub Actions run has been observed for any commit. There is no `gh` CLI, the repo is private, and a credential-based API read was denied in this environment ([roadmap B3](roadmap.md#open-blockers-and-owner-actions)).
+- **CI:** no GitHub Actions run has been observed for any commit. No GitHub integration is available in this environment (no `gh`, no GitHub connector; a credential-based API read was denied earlier), and the repository is private ([B3](roadmap.md#open-blockers-and-owner-actions)).
+- Everything that depends on TouchDesigner **2025.33230+** (S1–S4, and S5's remaining unknowns), because that build is not installed ([B1](roadmap.md#open-blockers-and-owner-actions)).
 - Cloudflare's codemode/mcp page could not be fetched first-hand (TLS interception).
-- TDMCP and TDMCPSkills facts are documentation-level only, from the official repos; nothing was tested hands-on.
+- TDMCP and TDMCPSkills facts are documentation-level only; nothing was tested hands-on.
 
-## Known gaps / blockers
-See [roadmap — open blockers](roadmap.md#open-blockers-and-owner-actions). The main ones:
-- TD 2025.33230+ is not installed locally (B1).
-- CI observation (B3).
-- The GitHub default branch (B4).
-
-## Phase 0 commit record
-- `82b64f1`: Phase 0 foundation. `b70000a`: push evidence record. Both are on `origin/dev`.
-- `066dbd0`: Phase 0 revision (owner features, resequencing, decisions, bridge reference, review 2 fixes). Pre-commit checks passed: `check_docs` 47 files / 0 problems; unittest 14 OK.
-- **`main` was created at `066dbd0`** and pushed on 2026-11-22. Observed with `git ls-remote origin`: `refs/heads/main` and `refs/heads/dev` both at `066dbd021fc9…`. Development continues on `dev`. This record was added by the follow-up commit on `dev` only.
-- GitHub's push response offered "create a pull request for main", consistent with `dev` still being the default branch (B4; switch in GitHub settings).
-- CI for these pushes: **not observed** (B3).
+## Commit record
+- `82b64f1`, `b70000a`, `066dbd0`, `380d317`: Phase 0, as recorded previously. `main` = `066dbd0`.
+- The S5/Phase 1A-prep commit is reported in this change's hand-off and recorded by a follow-up commit on `dev`.
 
 ## Next action
-1. The owner reviews the revision and accepts or revises ADR-0010 (needed before 1A).
-2. The owner resolves B1 (install TD 2025.33230+).
-3. Phase 1A spikes start, in disposable projects only.
+1. **Testing gate:** S1–S4 and 1A acceptance need TouchDesigner 2025.33230+ (B1). Work stops there until it is available.
+2. Until then, the only safe TD-independent next step is the **TD adapter interface design + fakes** for items 9–10 (no TouchDesigner), and only with owner go-ahead.

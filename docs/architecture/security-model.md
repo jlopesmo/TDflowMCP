@@ -6,7 +6,7 @@
 
 | Threat | Example | Primary control |
 |---|---|---|
-| Other local process or web page hitting the port | DNS rebinding from a browser tab; a page served by another localhost port; malware on localhost | Loopback bind (verified at startup), Host + Origin validation, bearer token on every MCP request, Origin + CSRF token on every dashboard request |
+| Other local process or web page hitting the port | DNS rebinding from a browser tab; a page served by another localhost port; malware on localhost | Loopback bind verified before any application request is served (§8.2), Host + Origin validation, bearer token on every MCP request, Origin + CSRF token on every dashboard request |
 | Over-privileged agent | Agent told to edit `/project1/fx` deletes `/project1/output` | Server-side scoped CRUD grants, deny by default |
 | **Code execution hidden inside "data" edits** | Setting a parameter *expression* (`__import__('os')…`, `op('/project1/secret').text`), writing text into an Execute/Script/callback DAT, creating an Execute/Web Client/TCP/Script operator, pulsing a script-running parameter | These are classified as the **`execute`** action, not `update`/`create` (§3.3). Executable op types are default-denied |
 | Prompt-injected agent | DAT text instructs the agent to run code | `execute` off by default; approval with the **full raw content** shown; scopes still apply to facade calls |
@@ -127,9 +127,16 @@ TD's main thread cannot pre-empt running Python. Limits are therefore:
 
 ## 8. Network posture
 
-- Bind `127.0.0.1` only. At startup the component verifies the effective bind and **refuses to start** unless loopback-only is positively confirmed. Firewalls and Windows routing can make a self-connection test pass or fail wrongly, so an **ambiguous result counts as failure** (fail closed). Spike S1 defines the evidence that counts: the DAT's reported address, a socket-level check of the listening address, and the non-loopback connection attempt. Remote/LAN access is out of scope for Phases 1–3 and needs an ADR (TLS via the Web Server DAT `secure` parameter, plus mTLS).
+- Bind `127.0.0.1` only, enforced by the bind-verification gate (§8.2). Remote/LAN access is out of scope for Phases 1–3 and needs an ADR (TLS via the Web Server DAT `secure` parameter, plus mTLS).
 
 ### 8.1 Per-route gate table
+
+**Before any route rule:**
+- The path (query stripped) must be canonical. `..`, `.`, `//`, `\`, percent-encoding, non-ASCII and control characters → `400 BAD_PATH`, and the router uses only the gate's validated path.
+- Conflicting duplicates of security-relevant headers (Host, Origin, Content-Length, Transfer-Encoding, Sec-Fetch-Site, Content-Type, X-TDflow-*) → `400`.
+- `Content-Length` must be digits only and ≤ the cap.
+- A body sent with `Transfer-Encoding` is accepted only when the actual received length is checked against the cap (and against `Content-Length`, if present).
+- Implemented as pure logic in `src/tdflowmcp/gate.py` (unit-tested; not yet integrated).
 
 | Route | Method | Requirements (all must hold) |
 |---|---|---|
@@ -142,6 +149,20 @@ TD's main thread cannot pre-empt running Python. Limits are therefore:
 
 Responses never include `Access-Control-Allow-*` headers.
 
+### 8.2 Bind-verification gate
+
+0. **Pre-activation capability check.** If the build's Web Server DAT has no `localaddress` parameter, the listener is **never activated**: no socket is opened, the state becomes `Error: BIND_UNSUPPORTED`, and guidance goes only to parameters and an internal DAT. Spike S5 found that TouchDesigner 2025.32440 lacks `localaddress` and binds `0.0.0.0`, so on such builds even a short verification window would expose a port on every interface.
+1. **Activate the listener in `VERIFYING` state.** A listening socket cannot be verified before it exists. While `VERIFYING`, the request gate answers **every** request with `503 TDFLOW_VERIFYING` and runs no application route: no `/setup`, `/mcp`, `/api`, `/ui` or `/.well-known` content, and no TD access. The operating system may accept TCP connections during this window, but no application data is ever served.
+2. **Verify the effective binding** before any application request is served. Positive evidence of a loopback-only binding is required:
+   - the OS listening-socket table, **filtered to this TouchDesigner process's PID**, shows only loopback addresses (`127.0.0.1` and/or `::1`) for `<port>`, with no `0.0.0.0`, `::`, IPv4-mapped or other non-loopback entry;
+   - a connection attempt to each non-loopback local address on `<port>` does not connect. A probe can only **fail** the verdict: S5 showed a timeout happens even when nothing listens, so it proves nothing.
+   - The socket appears asynchronously, seconds after `active` is set (S5: 2.0–3.5 s). Only a bounded "no listener for this process yet" result is re-checked on later frames; any other ambiguity closes the listener.
+3. **Pass → `SERVING`.** The gate starts routing application requests.
+4. **Fail or ambiguous → close immediately, then confirm.** If the socket table is unavailable, any non-loopback entry appears, or a non-loopback connection succeeds, the Web Server DAT is deactivated **in the same callback that reached the verdict**. The OS releases the socket asynchronously (S5: `onServerStop` about 0.06 s later), so closure is confirmed on a later frame from the socket table. The state becomes `CLOSING` and then, once a later-frame table check shows no socket, `CLOSED` with `Error: BIND_UNVERIFIED`. If the socket does not disappear within a bounded number of checks, the state becomes `STUCK` (`CLOSE_UNCONFIRMED`) and the user is told to restart TouchDesigner. Guidance goes only to parameters and an internal DAT. There is no retry with weaker checks, no override, and **no automatic restart**: `CLOSED` is terminal until the user explicitly acts again (`Opensetup`), and `CLOSING`/`STUCK` never re-open.
+5. Re-verify after any change to `Port`, `localaddress` or `active`, and after the listener restarts.
+
+The exact evidence sources and their reliability on each TD build are established by spikes S5 (2025.32440) and S1 (2025.33230+) ([S5 findings](../research/2026-11-22-s5-compatibility-2025.32440.md)).
+
 - `Host` must be `127.0.0.1:<port>` or `localhost:<port>` (defence in depth against DNS rebinding; not itself a spec requirement).
 - TDflowMCP core makes no **non-loopback** outbound network calls. The only outbound request is the loopback port-ownership probe (`GET http://127.0.0.1:<port>/.well-known/tdflowmcp`) during conflict detection. It has a timeout of at most 200 ms, runs off the main thread or in non-blocking steps, and its answer is **untrusted**: it is shown only as "responds like TDflowMCP vX" and never drives any automatic action.
 
@@ -151,7 +172,7 @@ Calls are serialized on TD's main thread. Concurrent agents can still interleave
 
 ## 10. Setup Assistant and integration safety
 
-- The Setup listener starts only on a user action (`Opensetup` or `Enablemcp`) and only after the loopback-bind self-test passes. If the bind cannot be verified, nothing listens; guidance is shown in parameters and an internal DAT.
+- The Setup listener starts only on a user action (`Opensetup` or `Enablemcp`). It serves application requests only after the bind-verification gate (§8.2) passes, and it is closed immediately if verification fails or is ambiguous. Guidance is then shown only in parameters and an internal DAT.
 - Phase 1A Setup is read-only: status, checks, troubleshooting text and "Tell Your Coding Agent". From 1B, actions (create or disable tokens, choose scope presets, enable MCP, Skills writes) require a paired admin session (§2.5).
 - **No unauthorized changes:** TDflowMCP never installs packages or software, never changes TouchDesigner preferences or Python search paths, never edits firewall or OS settings, never writes coding-agent configuration of any kind (MCP server entries, permission or approval settings), and never kills processes. MCP client connection is **instruction-only**: the user runs the generated command or pastes the snippet. The only file writes are **Skills files**, in assisted-write mode. They require a preview, explicit confirmation, a hash manifest and an audit event, and may target only the registry-listed skills directories ([agent integration §3](agent-integration.md#3-client-aware-installation-consent-first)).
 - **Secrets:** custom parameters are saved into the `.toe`, so they never hold tokens. Pairing uses non-secret match codes (§2.5). Tokens are displayed once, in the Setup page only.

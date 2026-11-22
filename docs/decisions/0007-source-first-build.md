@@ -24,6 +24,6 @@ Commit the `.tox` binary as source (not diffable; merge conflicts); depend on Em
 - TouchDesigner requires a license and typically an interactive, GPU-capable desktop session. A self-hosted runner therefore needs a logged-in Windows session and a licensed TD install. Hosted CI runs only the `td`-free unit tests.
 
 ## Validation gates
-- **S2:** an unattended `.tox` build from text on 2025.33230+ in a disposable project.
+- **S2:** an unattended `.tox` build from text on 2025.33230+ in a disposable project. **Partial evidence (S5, 2025.32440):** a `.toe` was generated from text with `toecollapse`, and TD ran it unattended and quit itself (exit code 0). The expanded-format DAT text header is documented in the [S5 findings §4](../research/2026-11-22-s5-compatibility-2025.32440.md#4-side-findings-useful-for-s2s3). This does not satisfy S2, which requires a `.tox` with custom parameters on the target build.
 - **S3:** the in-TD runner emits JSON results.
 - If either fails, this ADR reopens before any production `.tox` work.

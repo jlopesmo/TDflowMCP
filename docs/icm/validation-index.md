@@ -8,9 +8,12 @@ This file lists every check that exists, how to run it, and its last **executed 
 |---|---|---|---|
 | Doc checker | `python tools/check_docs.py` | Required files, relative links/images + anchors, ADR status vs index, privacy patterns in `.md/.py/.yml/.yaml/.json/.txt` | See runs below |
 | Doc checker unit tests | `python -m unittest discover -s tests -t .` | `tools/check_docs.py` | See runs below |
-| CI workflow `docs.yml` | GitHub Actions on push to `dev`/`main` and on every pull request | Both of the above on Python 3.11, Ubuntu + Windows | **Not observed.** The private repo, no `gh` CLI, and a denied credential-based API read mean no run status, URL or log has been seen for any commit. Owner action [B3](roadmap.md#open-blockers-and-owner-actions) |
+| CI workflow `docs.yml` | GitHub Actions on push to `dev`/`main` and on every pull request | Doc checker + all unit tests on Python 3.11, Ubuntu + Windows | **Not observed.** The repo is private, and no GitHub integration is available in this environment: no `gh` CLI, no GitHub connector (checked 2026-11-22), and a credential-based API read was denied. No run status, URL or log has been seen for any commit. Owner action [B3](roadmap.md#open-blockers-and-owner-actions) |
 | Independent documentation review | separate agent, read-only | All docs + tooling | Review 1 and review 2, see runs below |
-| Compatibility checks, protocol/policy/audit unit tests, in-TD tests, `.tox` build | — | — | **Do not exist** (Phase 1A/1B) |
+| Core unit tests (`tests/unit/`) | `python -m unittest discover -s tests -t .` (same command) | `net.bindverify`, `net.oslisteners`, `gate`, `compat`, troubleshooting data, `td`-free/no-subprocess boundaries | See runs below |
+| TD bundled-Python parity | `"C:\Program Files\Derivative\TouchDesigner.2025.32440\bin\python.exe" -m unittest discover -s tests -t .` | The same suite on TD's interpreter (no TouchDesigner process) | See runs below |
+| Spike S5 (2025.32440) | `spikes/s5/` copied to `.tmp/s5/`, then `python -I s5_harness.py` (and `TDFLOW_S5_NO_WS=1`) | Runtime, libraries, parameters, clipboard, Web Server DAT, binding, gate | Executed; see [S5 findings](../research/2026-11-22-s5-compatibility-2025.32440.md) |
+| Protocol/policy/audit tests, in-TD tests, `.tox` build, S1–S4 | — | — | **Do not exist / not executed** (need TD 2025.33230+ or later phases) |
 
 ## Runs
 
@@ -22,6 +25,13 @@ This file lists every check that exists, how to run it, and its last **executed 
 | 2026-11-22 | — | Independent review 2 (revision) | 21 findings (3 High, 11 Medium, 7 Low), all addressed; see [review 2](../research/2026-11-22-phase-0-revision-review.md) |
 | 2026-11-22 | Windows 11, CPython 3.11.8 | `check_docs.py` (revision, pre-commit) | Pass: `47 markdown files, 0 problem(s)` |
 | 2026-11-22 | Windows 11, CPython 3.11.8 | unit tests (revision, pre-commit) | Pass: `Ran 14 tests in 0.238s OK` |
+| 2026-11-22 | TouchDesigner 2025.32440 (disposable `s5.toe`) | S5 full run | Exit code 0; bind gate **CLOSED** (verdict fail: `0.0.0.0:9480`, non-loopback connect succeeded); 1 request in `VERIFYING` → 503; no 200 served before or after the verdict |
+| 2026-11-22 | TouchDesigner 2025.32440 (no Web Server DAT) | S5 params-only run | Exit code 0; late pulse → `onPulse`; `onValueChange` fired; no listener |
+| 2026-11-22 | Windows 11, CPython 3.11.8 | unit tests (S5 + 1A prep, before review 3) | Pass: `Ran 58 tests … OK (skipped=1)` |
+| 2026-11-22 | TD 2025.32440 bundled Python 3.11.10 | unit tests (parity, before review 3) | Pass: `Ran 58 tests … OK (skipped=1)` |
+| 2026-11-22 | — | Independent review 3 (S5 + 1A prep) | 25 findings (2 High, 10 Medium, 13 Low); dispositions in [review 3](../research/2026-11-22-s5-review.md) |
+| 2026-11-22 | Windows 11, CPython 3.11.8 | unit tests (after review-3 fixes) | Pass: `Ran 76 tests in 0.280s OK (skipped=1)` |
+| 2026-11-22 | TD 2025.32440 bundled Python 3.11.10 | unit tests (parity, after review-3 fixes) | Pass: `Ran 76 tests in 0.315s OK (skipped=1)` |
 
 ## Local environment facts (file inspection only, 2026-11-22)
 
