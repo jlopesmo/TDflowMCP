@@ -39,7 +39,7 @@
 
 ## Commit record
 - `82b64f1`, `b70000a`, `066dbd0`, `380d317`: Phase 0, as recorded previously. `main` = `066dbd0`.
-- The S5/Phase 1A-prep commit is reported in this change's hand-off and recorded by a follow-up commit on `dev`.
+- `377841c`: S5 on 2025.32440, bind-gate wording, TD-independent 1A prep, review-3 fixes. Pushed to `origin/dev` and observed with `git ls-remote` (`refs/heads/dev` = `377841c…`, `refs/heads/main` = `066dbd0…`, so `main` is unchanged). This record was added by the follow-up commit. CI for this push: **not observed**.
 
 ## Next action
 1. **Testing gate:** S1–S4 and 1A acceptance need TouchDesigner 2025.33230+ (B1). Work stops there until it is available.
