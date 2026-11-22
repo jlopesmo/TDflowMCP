@@ -67,7 +67,7 @@
 - `82b64f1`, `b70000a`, `066dbd0`, `380d317`: Phase 0. `main` = `066dbd0`.
 - `377841c`, `ec259ed`: S5 and 1A prep.
 - `591b01e`, `3d0081e`: S6 embedded transport.
-- Phase 1A commit: component, builder, in-TD tests, S4/S7, review 5. Recorded by the follow-up commit after the push is observed. CI: **not observed**.
+- `e680b47`: Phase 1A (component, builder, in-TD tests, S4/S7, review 5). Pushed to `origin/dev` and observed with `git ls-remote` (`refs/heads/dev` = `e680b47…`, `refs/heads/main` = `066dbd0…`, so `main` is unchanged). This record was added by the follow-up commit. CI: **not observed**.
 
 ## Phase 1B prerequisites (next)
 1. **Decisions (owner):**
