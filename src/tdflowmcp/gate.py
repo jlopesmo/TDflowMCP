@@ -24,7 +24,9 @@ _DIGITS = re.compile(r"[0-9]{1,10}")   # ASCII only; str.isdigit() accepts e.g. 
 class GateConfig:
     port: int = 9480
     max_body_bytes: int = 1024 * 1024
-    setup_reads_need_admin: bool = False   # False in Phase 1A (read-only Setup); True from 1B
+    setup_reads_need_admin: bool = False   # True would require the admin session for every Setup read
+    # Setup reads that always need the paired admin session (Phase 1B): agent/session information.
+    admin_read_prefixes: tuple = ("/setup/api/agents", "/setup/api/sessions")
 
     @property
     def canonical_origin(self) -> str:
@@ -79,6 +81,8 @@ def classify(path: str) -> str:
         return "well_known"
     if path == "/api/events":
         return "events"
+    if path in ("/setup/api/pair", "/setup/api/pair/status"):
+        return "pair"
     if path.startswith("/setup/api/") or path.startswith("/api/"):
         return "api"
     if path == "/setup" or path.startswith("/setup/") or path == "/ui" or path.startswith("/ui/"):
@@ -169,6 +173,23 @@ def decide(method: str, raw_path: str, headers: Mapping[str, str], state: Listen
             return d(False, 403, "BAD_ORIGIN")
         return Decision(True, 101, "OK", route, "admin_session+csrf", "", path)
 
+    if route == "pair":
+        # Pairing needs no session yet (it creates one), but it is a browser route: custom header,
+        # same-origin fetch, and for the POST an exact Origin. Rate limiting happens on the main thread.
+        if _h(headers, "X-TDflow-Request") != "1":
+            return d(False, 403, "MISSING_REQUEST_HEADER")
+        if fetch_site is not None and fetch_site != "same-origin":
+            return d(False, 403, "CROSS_SITE_FETCH")
+        if method == "POST" and path == "/setup/api/pair":
+            if origin != cfg.canonical_origin:
+                return d(False, 403, "BAD_ORIGIN")
+            return d(True, 200, "OK", "pair")
+        if method == "GET" and path == "/setup/api/pair/status":
+            if origin is not None and origin != cfg.canonical_origin:
+                return d(False, 403, "BAD_ORIGIN")
+            return d(True, 200, "OK", "pair")
+        return d(False, 405, "METHOD_NOT_ALLOWED")
+
     # route == "api"
     if method == "GET":
         if _h(headers, "X-TDflow-Request") != "1":
@@ -177,6 +198,10 @@ def decide(method: str, raw_path: str, headers: Mapping[str, str], state: Listen
             return d(False, 403, "CROSS_SITE_FETCH")
         if origin is not None and origin != cfg.canonical_origin:
             return d(False, 403, "BAD_ORIGIN")
+        admin_read = any(path == p or path.startswith(p + "/") for p in cfg.admin_read_prefixes)
+        if admin_read:
+            # Cookies are not port-isolated, so admin reads also need the in-page CSRF token (review 6).
+            return d(True, 200, "OK", "admin_session+csrf")
         needs_admin = path.startswith("/api/") or cfg.setup_reads_need_admin
         return d(True, 200, "OK", "admin_session" if needs_admin else "")
     if method in MUTATING:

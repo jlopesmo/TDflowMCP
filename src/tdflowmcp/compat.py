@@ -169,6 +169,37 @@ def check_net_port(f: Mapping) -> CheckResult:
     return CheckResult("net.port", "fail", f"port {port} in use by {who}", "net.port.in_use")
 
 
+def security_selftest(port: int = 9480) -> bool:
+    """sec.selftest (setup-assistant §3): the gate rejects foreign and other-port Origins on /mcp and the
+    Setup API, never grants preflights, requires a bearer token, and binding is only 127.0.0.1."""
+    from tdflowmcp.gate import GateConfig, decide
+    from tdflowmcp.net.bindverify import ListenerState, embedded_capability, Verdict
+    cfg = GateConfig(port=port)
+    host = {"Host": f"127.0.0.1:{port}", "Content-Type": "application/json"}
+    S = ListenerState.SERVING
+    checks = [
+        decide("POST", "/mcp", dict(host, Origin="http://evil.example"), S, cfg).code == "BAD_ORIGIN",
+        decide("POST", "/mcp", dict(host, Origin="http://127.0.0.1:5173"), S, cfg).code == "BAD_ORIGIN",
+        decide("POST", "/mcp", host, S, cfg).next == "agent_token",
+        decide("OPTIONS", "/mcp", dict(host, Origin="http://evil.example"), S, cfg).code == "PREFLIGHT_DENIED",
+        decide("POST", "/setup/api/tokens", dict(host, Origin=cfg.canonical_origin), S, cfg).code == "MISSING_CSRF",
+        decide("GET", "/setup/api/agents", dict(host, **{"X-TDflow-Request": "1"}), S, cfg).next == "admin_session+csrf",
+        decide("GET", "/setup/", dict(host, Host="evil.example"), S, cfg).code == "BAD_HOST",
+        decide("POST", "/mcp", host, ListenerState.VERIFYING, cfg).status == 503,
+        embedded_capability("0.0.0.0").verdict is Verdict.FAIL,
+    ]
+    return all(checks)
+
+
+def check_sec_selftest(f: Mapping) -> CheckResult:
+    v = f.get("selftest")
+    if not isinstance(v, bool):
+        return CheckResult("sec.selftest", "unknown", "security self-test not run")
+    if v:
+        return CheckResult("sec.selftest", "pass", "gate, Origin, preflight, token and bind self-tests pass")
+    return CheckResult("sec.selftest", "fail", "a security self-test failed; MCP cannot be enabled", "sec.selftest.failed")
+
+
 def check_datadir(f: Mapping) -> CheckResult:
     w = f.get("datadir_writable")
     if not isinstance(w, bool):
@@ -200,7 +231,7 @@ def check_agent_clients(f: Mapping) -> CheckResult:
 
 CHECKS: Sequence[Callable[[Mapping], CheckResult]] = (
     check_td_build, check_py_version, check_py_deps, check_net_capability, check_net_bind,
-    check_net_port, check_datadir, check_instances, check_agent_clients,
+    check_net_port, check_datadir, check_instances, check_agent_clients, check_sec_selftest,
 )
 
 

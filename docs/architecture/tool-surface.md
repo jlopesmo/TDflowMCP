@@ -1,6 +1,6 @@
-# MCP tool surface (proposed)
+# MCP tool surface
 
-**Status: Proposed** (it follows the Conditionally Accepted [ADR-0009](../decisions/0009-permission-model.md)). No tool is implemented. MCP tools arrive in Phase 1B; Phase 1A ships the Setup Assistant only, with no MCP tools. Names use the `tdflow_` prefix so they don't collide with other TD MCP servers a client may have loaded. Every tool declares its required actions and target resolver, using the [action classification](security-model.md#33-action-classification-of-tool-effects-security-critical).
+**Status:** the 14 core tools plus `tdflow_session_note` and `tdflow_session_list` are **implemented in Phase 1B** (tool-surface version `1`). They are registered in [`src/tdflowmcp/tools.py`](../../src/tdflowmcp/tools.py), executed by [`src/td_adapter/tdops.py`](../../src/td_adapter/tdops.py), and verified in TouchDesigner 2025.32440 by the Phase 1B acceptance suite. They follow the Conditionally Accepted [ADR-0009](../decisions/0009-permission-model.md). Later-phase tools remain proposals. Names use the `tdflow_` prefix so they don't collide with other TD MCP servers a client may have loaded. Every tool declares its required actions and target resolver, using the [action classification](security-model.md#33-action-classification-of-tool-effects-security-critical).
 
 ## Phase 1B core tools (14)
 
@@ -11,15 +11,15 @@
 | `tdflow_list_operators` | read `path/*` | readOnly | Children with type and family, paginated; protected subtrees filtered |
 | `tdflow_get_operator` | read `path` | readOnly | Type, flags, inputs/outputs, errors/warnings |
 | `tdflow_get_parameters` | read `path` | readOnly | Values, modes, expressions, defaults (paginated by page name) |
-| `tdflow_set_parameters` | update `path`; **+ execute** when setting an expression/bind/export mode | idempotent | Set values (and, with `execute`, expressions/modes). Returns previous values |
+| `tdflow_set_parameters` | update `path`; **+ execute** for `expressions` and Python-style parameters (denied in Phase 1) | idempotent | Set constant values; returns previous values. Parameter denylist (extensions, callbacks, external tox, scripts…). Pulses not supported |
 | `tdflow_create_operator` | create `parent/*`; **+ execute** for executable/network op types | | Create by type and name; optional position |
 | `tdflow_delete_operator` | delete `path/**` | destructive | Delete. Global rules may require approval, which means deny in Phase 1 |
 | `tdflow_connect` | update `dst`, read `src` | | Wire operators by connector index |
 | `tdflow_disconnect` | update `dst`, read `src` | | Remove a wire |
 | `tdflow_get_dat_text` | read `path` | readOnly | DAT text, size-capped |
-| `tdflow_set_dat_text` | update `path`; **+ execute** for DATs TD executes | | Replace DAT text |
+| `tdflow_set_dat_text` | update `path`; **+ execute** unless the DAT is data (Table DAT, or Text DAT tagged `tdflowdata` by the user) | | Replace DAT text. Undo via a durable TDflowMCP snapshot (TD's undo does not cover DAT text, S4) |
 | `tdflow_get_errors` | read `path/**` | readOnly | Errors and warnings under a scope (filtered) |
-| `tdflow_undo` | inverse actions on the audited targets | | Undo the agent's own last audited action, only while it is on top of TD's undo stack (else `UNDO_CONFLICT`) |
+| `tdflow_undo` | inverse actions on the audited targets | | Undo the agent's own newest audited change, only if TD's undo stack is exactly as it was right after that change (S4b), else `UNDO_CONFLICT`. Reports `verified` after checking the restored state |
 
 `tdflow_approval_status` is deferred to Phase 2B together with the approval flow.
 

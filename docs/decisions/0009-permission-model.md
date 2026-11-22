@@ -23,6 +23,7 @@ Tool-level allowlists only (too coarse; cannot express "edit only /project1/fx")
 Target resolution is security-critical. Each resolver needs dedicated tests covering path traversal, shortcuts, global OP shortcuts, clones/replicants and operators created during the call.
 
 ## Validation gates
-- Phase 1B acceptance item 1 (scoped allow/deny, expression-as-execute, protection of instances, ancestors and `tdflowProject`) and Phase 1A acceptance item 4 (Origin gate).
-- The policy engine reaches its branch-coverage target.
-- Any bypass found in review blocks Phase 1C.
+- **Phase 1B acceptance item 1: passed** in the in-TD suite on the packaged `.tox`. It covers scoped allow/deny, expression-as-execute, and protection of instances, ancestors and `tdflowProject`. **Phase 1A acceptance item 4: passed.**
+- **Revision (review 6):** creation uses an **allowlist** of operator types in Phase 1. Reference, file and Python-style parameters, wires into DATs, and DAT text without the user's `tdflowdata` tag are classified as `execute`. Clone and shortcut parameters are denied.
+- The policy engine's branch-coverage target is **not measured** (no coverage tool available; none installed).
+- Any bypass found in review blocks Phase 1C. **Review 6 found three High classification gaps; all are fixed and re-tested** ([review 6](../research/2026-11-22-phase-1b-review.md)).

@@ -79,11 +79,23 @@ class BrowserRouteTests(unittest.TestCase):
         d = decide("GET", "/setup/api/status", h(X_TDflow_Request="1"), S, GateConfig(setup_reads_need_admin=True))
         self.assertEqual(d.next, "admin_session")
 
+    def test_pair_route(self):
+        ok = decide("POST", "/setup/api/pair", h(Origin="http://127.0.0.1:9480", X_TDflow_Request="1"), S, CFG)
+        self.assertEqual((ok.allow, ok.route, ok.next), (True, "pair", "pair"))
+        self.assertEqual(decide("POST", "/setup/api/pair", h(X_TDflow_Request="1"), S, CFG).code, "BAD_ORIGIN")
+        self.assertEqual(decide("POST", "/setup/api/pair", h(Origin="http://127.0.0.1:9480"), S, CFG).code,
+                         "MISSING_REQUEST_HEADER")
+        st = decide("GET", "/setup/api/pair/status", h(X_TDflow_Request="1"), S, CFG)
+        self.assertEqual((st.allow, st.next), (True, "pair"))
+        self.assertEqual(decide("GET", "/setup/api/pair/status", h(X_TDflow_Request="1", Sec_Fetch_Site="cross-site"),
+                                S, CFG).code, "CROSS_SITE_FETCH")
+        self.assertEqual(decide("GET", "/setup/api/agents", h(X_TDflow_Request="1"), S, CFG).next, "admin_session+csrf")
+
     def test_mutations_need_exact_origin_and_csrf(self):
-        ok = decide("POST", "/setup/api/pair", h(Origin="http://127.0.0.1:9480", X_TDflow_CSRF="t"), S, CFG)
+        ok = decide("POST", "/setup/api/tokens", h(Origin="http://127.0.0.1:9480", X_TDflow_CSRF="t"), S, CFG)
         self.assertEqual((ok.allow, ok.next), (True, "admin_session+csrf"))
-        self.assertEqual(decide("POST", "/setup/api/pair", h(X_TDflow_CSRF="t"), S, CFG).code, "BAD_ORIGIN")
-        self.assertEqual(decide("POST", "/setup/api/pair", h(Origin="http://127.0.0.1:5173", X_TDflow_CSRF="t"),
+        self.assertEqual(decide("POST", "/setup/api/tokens", h(X_TDflow_CSRF="t"), S, CFG).code, "BAD_ORIGIN")
+        self.assertEqual(decide("POST", "/setup/api/tokens", h(Origin="http://127.0.0.1:5173", X_TDflow_CSRF="t"),
                                 S, CFG).code, "BAD_ORIGIN")
         self.assertEqual(decide("DELETE", "/api/tokens/1", h(Origin="http://127.0.0.1:9480"), S, CFG).code,
                          "MISSING_CSRF")

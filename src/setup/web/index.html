@@ -10,7 +10,7 @@
 <body>
 <header>
   <h1>TDflowMCP Setup</h1>
-  <p class="sub">Local setup assistant for this TouchDesigner project. Read-only; reachable from this computer only.</p>
+  <p class="sub">Local setup assistant for this TouchDesigner project, reachable from this computer only. Changing agent access needs this browser to be paired from inside TouchDesigner.</p>
 </header>
 <main>
   <section id="status-section" aria-labelledby="h-status">
@@ -25,7 +25,52 @@
       <dt>Port status</dt><dd id="portstatus">–</dd>
       <dt>Local-only check</dt><dd id="gate">–</dd>
       <dt>MCP</dt><dd id="mcp">–</dd>
+      <dt>MCP endpoint</dt><dd id="endpoint">–</dd>
     </dl>
+  </section>
+
+  <section id="admin-section" aria-labelledby="h-admin">
+    <h2 id="h-admin">Agents and access</h2>
+    <div id="pair-box">
+      <p class="hint">Managing agent tokens needs a paired browser. Pairing is approved inside TouchDesigner, so only someone at the TouchDesigner machine can grant it.</p>
+      <div class="row">
+        <button id="pair" type="button">Request pairing</button>
+        <span id="pair-status" role="status"></span>
+      </div>
+      <p id="pair-code" class="code" hidden></p>
+    </div>
+    <div id="admin" hidden>
+      <div class="row">
+        <span class="badge" id="admin-badge">Paired</span>
+        <button id="logout" type="button" class="secondary">Unpair this browser</button>
+      </div>
+      <h3>Create an agent token</h3>
+      <form id="token-form" autocomplete="off">
+        <label>Agent name <input id="t-name" maxlength="64" required value="Claude Code"></label>
+        <label>Role
+          <select id="t-role"><option value="builder">builder (read, create, update, delete)</option><option value="observer">observer (read only)</option></select>
+        </label>
+        <label>Scope <input id="t-scope" maxlength="256" required></label>
+        <fieldset id="t-actions"><legend>Actions (within the role)</legend>
+          <label><input type="checkbox" value="read" checked> read</label>
+          <label><input type="checkbox" value="create" checked> create</label>
+          <label><input type="checkbox" value="update" checked> update</label>
+          <label><input type="checkbox" value="delete" checked> delete</label>
+        </fieldset>
+        <button type="submit">Create token</button>
+        <span id="token-status" role="status"></span>
+      </form>
+      <div id="token-once" hidden>
+        <p class="warn">This token is shown only once. Store it as the <code>TDFLOW_TOKEN</code> environment variable. Never paste it into project files or a committed config.</p>
+        <div class="row"><button id="copy-token" type="button">Copy token</button><span id="copy-token-status" role="status"></span></div>
+        <pre id="token-value" class="secret" tabindex="0"></pre>
+      </div>
+      <h3>Agents</h3>
+      <table id="agents"><thead><tr><th scope="col">Agent</th><th scope="col">Role</th><th scope="col">Scopes</th><th scope="col">Tokens</th></tr></thead><tbody></tbody></table>
+      <h3>Recent sessions</h3>
+      <table id="sessions"><thead><tr><th scope="col">Session</th><th scope="col">Agent</th><th scope="col">Last activity</th><th scope="col">Calls</th></tr></thead><tbody></tbody></table>
+      <p id="audit" class="hint"></p>
+    </div>
   </section>
 
   <section aria-labelledby="h-checks">

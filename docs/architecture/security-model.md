@@ -1,6 +1,6 @@
 # Security and permission model
 
-**Status:** Design, not implemented. [ADR-0009](../decisions/0009-permission-model.md) and [ADR-0005](../decisions/0005-dashboard.md) are Conditionally Accepted (owner, 2026-11-22). The §10–§11 additions come from Proposed ADRs [0010](../decisions/0010-setup-assistant-and-component-parameters.md)–[0013](../decisions/0013-project-memory-model.md). Accepted security invariants are listed in [invariants.md](../icm/invariants.md). Revised after the [Phase 0 independent review](../research/2026-11-22-phase-0-independent-review.md).
+**Status:** Design. **Phase 1B implements §2.1–2.5, §3, §4 (approval ⇒ deny), §6 and §8–9** for the 16 Phase 1B tools ([Phase 1B record](../research/2026-11-22-phase-1b-mcp-core.md)); §5 (code execution) remains disabled; §7 cooperative budgets apply only as pre-checks (`max_ops_per_call`, size caps); §10–§11 memory parts are Phase 2A. [ADR-0009](../decisions/0009-permission-model.md) and [ADR-0005](../decisions/0005-dashboard.md) are Conditionally Accepted (owner, 2026-11-22). The §10–§11 additions come from Proposed ADRs [0010](../decisions/0010-setup-assistant-and-component-parameters.md)–[0013](../decisions/0013-project-memory-model.md). Accepted security invariants are listed in [invariants.md](../icm/invariants.md). Revised after the [Phase 0 independent review](../research/2026-11-22-phase-0-independent-review.md).
 
 ## 1. Threat model
 
@@ -36,7 +36,11 @@ Named grant bundles. Proposed built-ins: `observer` (read), `builder` (read + cr
 MCP 2026-07-28 is stateless, so a **session** in TDflowMCP is a dashboard/audit grouping: consecutive requests from one `token_id` with the same client info, ending after a configurable idle gap (proposed 15 min). Legacy `initialize` clients also report their declared client info. Sessions are an observability construct and never an authorization input.
 
 ### 2.4 Kill switch
-A single "Suspend all agents" control is available as a TD component parameter (`Suspendagents`, Phase 1B) and as a dashboard button (Phase 2B). It rejects every MCP request with `SUSPENDED` until it is cleared, and the change itself is audited. Each agent can also be disabled individually.
+A single "Suspend all agents" control is available as a TD component parameter (`Suspendagents`, **implemented in Phase 1B**) and as a dashboard button (Phase 2B).
+- It rejects every MCP request with `SUSPENDED` until it is cleared, and the change itself is audited.
+- **Queued requests are invalidated:** jobs are re-checked when they are dispatched on the main thread, so a request queued just before the switch never runs (in-TD test).
+- The engine checks the flag again before executing.
+- Each agent's tokens can also be revoked individually; revocation is immediate.
 
 ### 2.5 Dashboard and Setup admin sessions
 The Setup Assistant (1B+) and the Governance Dashboard (2B) share one admin credential, separate from agent tokens.

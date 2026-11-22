@@ -1,6 +1,6 @@
 # ADR-0013 — Shared project-memory model and optional `tdflowProject` COMP
 
-**Status:** Proposed (2026-11-22). The requirements (P16, P17) are owner-approved; this model awaits acceptance. Implementation is Phase 2A.
+**Status:** Conditionally Accepted (owner, 2026-11-22; roadmap D12), subject to the validation gates below. Memory tools are Phase 2A. Phase 1B already enforces decision 5's hard deny: raw operator tools cannot touch a `tdflowProject` COMP.
 
 ## Context
 Host projects need ICM, decisions, roadmap, tasks and continuity records. These can live inside the `.toe`, in a `tdflowProject` COMP, or in an external Git repository. Keeping both as editable truth creates conflicting authoritative records, which the owner explicitly forbids.
@@ -21,8 +21,10 @@ Adopt [continuity-and-memory.md §1–3](../architecture/continuity-and-memory.m
 - Embedded-only memory: poor diffs and review.
 
 ## Validation gates
+Phase 1B (passed 2026-11-22): raw operator tools are denied on a tagged `tdflowProject` COMP, for reads and writes (rule H4), in the in-TD suite.
+
 Phase 2A:
 - A stale write is rejected.
 - A mismatched `Projectid` blocks linking.
 - A migration in both directions preserves records and hashes.
-- Raw operator tools are denied on `tdflowProject`.
+- Raw operator tools are denied on `tdflowProject` (already verified in Phase 1B).

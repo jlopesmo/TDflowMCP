@@ -161,6 +161,19 @@
       "allowed_actions": [
         "rerun_checks"
       ]
+    },
+    "sec.selftest.failed": {
+      "title": "A built-in security self-test failed",
+      "cause": "The component's own request-gate or binding checks did not behave as required, so MCP stays disabled.",
+      "confirm": "Pulse Run Diagnostics; the sec.selftest check stays fail.",
+      "steps": [
+        "Do not try to work around this check.",
+        "Report the TouchDesigner build and TDflowMCP version to the maintainers; use a released TDflowMCP build."
+      ],
+      "docs": [],
+      "allowed_actions": [
+        "rerun_checks"
+      ]
     }
   }
 }

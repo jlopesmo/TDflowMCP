@@ -2,7 +2,12 @@
 
 A source-first, AI-powered TouchDesigner development environment: an MCP server packaged as a reusable `.tox`, with server-side permissions, agent identity, audit logging, approvals, a local browser dashboard, safe experimentation and optional Code Mode orchestration.
 
-> **Status: Phase 0 (foundation, revised 2026-11-22).** This repository contains research, architecture and project documentation only. **No component, Setup Assistant, server or dashboard is implemented yet.** See [current state](docs/icm/current-state.md).
+> **Status: Phase 1B complete (2026-11-22), development builds only.**
+> - The source-built `TDflowMCP.tox` (TouchDesigner 2025.32440+) provides the local-only Setup Assistant (1A) and a secure MCP core (1B): 16 scoped, audited tools with verified undo, plus pairing, agent tokens and a kill switch.
+> - There is no arbitrary code execution, no governance dashboard (2B) and no agent onboarding or Skills (1C) yet.
+> - Nothing is released.
+>
+> See [current state](docs/icm/current-state.md) and [build and test](docs/operations/build-and-test.md).
 
 **Planned user experience** (design, not built): drag `TDflowMCP.tox` into a project → pulse **Open Setup** → the browser Setup Assistant runs compatibility checks and guides pairing, agent tokens and enabling MCP → copy **Tell Your Coding Agent** into Claude Code → work under enforced, audited scopes → resume later from verified handoffs.
 

@@ -17,6 +17,9 @@ RULES = ("Do not install software, change TouchDesigner, operating-system, firew
 
 
 def _state_sentence(state: str, error_code: str, port: int) -> str:
+    if state in ("Enabled", "Suspended"):
+        return (f"{state}. MCP is served at http://127.0.0.1:{port}/mcp (this computer only)"
+                + (". All agents are currently suspended by the user." if state == "Suspended" else "."))
     if state == "Setup":
         return (f"Setup. The Setup Assistant is running at http://127.0.0.1:{port}/setup/ and is reachable "
                 "from this computer only.")
@@ -39,8 +42,12 @@ def build(state: str, error_code: str, port: int, td_build: str, checks: Sequenc
         "## Setup",
         f"- TDflowMCP component v{version} is installed in a TouchDesigner {td_build or '(unknown build)'} project.",
         f"- State: {_state_sentence(state, error_code, port)}",
-        "- MCP access is not available in this version (Phase 1A). Do not try to connect an MCP client, "
-        "and do not write MCP or agent configuration for TDflowMCP yet.",
+        (f"- MCP endpoint: http://127.0.0.1:{port}/mcp (Streamable HTTP). Authenticate with a bearer token that the "
+         "user creates on the Setup page and stores as the TDFLOW_TOKEN environment variable. Never write the token "
+         "into project files. Call tdflow_whoami first to see your scopes; every change is audited."
+         if state in ("Enabled", "Suspended") else
+         "- MCP access is not enabled. The user turns it on with the component's Enable MCP toggle after creating "
+         "an agent token on the Setup page. Do not write MCP or agent configuration for TDflowMCP yourself."),
         f"- Compatibility checks: {summary(checks) if checks else 'not run yet (pulse Run Diagnostics)'}.",
         "",
         "## Repair",

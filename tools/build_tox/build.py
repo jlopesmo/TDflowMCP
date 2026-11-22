@@ -70,12 +70,15 @@ def plan(out_tox: str) -> dict:
     parts = sorted([("module", n, v["sha256"]) for n, v in modules.items()] +
                    [("dat", n, v["sha256"]) for n, v in dats.items() if n != "tellagent"] +
                    [("callback", n, v["sha256"]) for n, v in callbacks.items()] +
-                   [("parameters", "", sha(json.dumps(params, sort_keys=True)))])
+                   [("parameters", "", sha(json.dumps(params, sort_keys=True))),
+                    ("active_tools", "", sha(json.dumps(sorted(m.get("active_tools", [])))))])
     source_digest = sha(json.dumps(parts))
     embedded = {
         "schema": "tdflowmcp.embedded/1", "name": m["name"], "version": version, "tool_surface": tool_surface,
         "min_td_build": m["min_td_build"], "source_digest": source_digest,
-        "modules": {n: {"dat": v["dat"], "sha256": v["sha256"], "package": v["package"]} for n, v in modules.items()},
+        "active_tools": sorted(m.get("active_tools", [])),
+        "modules": {n: {"dat": v["dat"], "sha256": v["sha256"], "package": v["package"], "path": v["path"]}
+                    for n, v in modules.items()},
         "dats": {n: {k: v for k, v in d.items() if k in ("serve", "content_type", "sha256", "path")}
                  for n, d in dats.items()},
         "callbacks": {n: {"type": c["type"], "sha256": c["sha256"]} for n, c in callbacks.items()},

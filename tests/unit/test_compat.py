@@ -95,7 +95,7 @@ class CheckRuleTests(unittest.TestCase):
             "webserver_par_names": S5_FACTS["webserver_par_names"] + ["localaddress"],
             "bind_evidence": verdict(["127.0.0.1"], []), "port_listeners_other": [],
             "datadir_writable": True, "instances": 1,
-            "clients": {"claude-code": {"selected": True, "support": "primary"}},
+            "clients": {"claude-code": {"selected": True, "support": "primary"}}, "selftest": True,
         }
         results = compat.run_checks(facts)
         self.assertTrue(all(r.result == "pass" for r in results), [(r.id, r.result) for r in results])
@@ -186,3 +186,11 @@ class TroubleshootingDataTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SelfTestTests(unittest.TestCase):
+    def test_security_selftest_passes_and_feeds_check(self):
+        self.assertTrue(compat.security_selftest(9480))
+        self.assertEqual(compat.check_sec_selftest({"selftest": True}).result, "pass")
+        self.assertEqual(compat.check_sec_selftest({"selftest": False}).remediation_id, "sec.selftest.failed")
+        self.assertEqual(compat.check_sec_selftest({}).result, "unknown")

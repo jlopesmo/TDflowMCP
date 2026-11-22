@@ -15,9 +15,11 @@ This file lists every check that exists, how to run it, and its last **executed 
 | Spike S5 (2025.32440) | `spikes/s5/` copied to `.tmp/s5/`, then `python -I s5_harness.py` (and `TDFLOW_S5_NO_WS=1`) | Runtime, libraries, parameters, clipboard, Web Server DAT, binding, gate | Executed; see [S5 findings](../research/2026-11-22-s5-compatibility-2025.32440.md) |
 | `.tox` build (S2) | `python -I tools/build_tox/build.py [--check-reproducible]` | Source-first build, embedded hash self-check, reproducibility | See runs below |
 | In-TD integration suite (S3) | `python -I tests/td/run_td_tests.py [--mode real_browser]` | The packaged component in a disposable project: parameters, lifecycle, binding, LAN, gate, MCP disabled, Setup page, clipboard/browser failures, timeouts, conflicts, re-init, deletion, paused timeline, secrets | See runs below |
+| Phase 1B in-TD acceptance | `python -I tests/td/run_td_mcp_tests.py` | Packaged `.tox`: pairing and admin API, tokens, Enable MCP, both MCP eras, 16 tools, scoped allow/deny + hard denies + review-6 classification, verified undo + conflicts, kill switch incl. queued request, audit fail-closed/integrity/tamper, revocation, secrets, restart persistence | See runs below |
+| Secret scan | `python tools/scan_secrets.py` | Every git-tracked file (CI step) | See runs below |
 | Spikes S4 / S7 | `python -I spikes/s4/run_s4.py .tmp/s4`, `python -I spikes/s7/run_s7.py .tmp/s7` | Undo semantics; frame callbacks with the timeline paused | Executed; see [S4](../research/2026-11-22-s4-undo-semantics.md), [S7](../../spikes/s7/README.md) |
 | Spike S6 (2025.32440) | `spikes/s6/` copied to `.tmp/s6/`, `python -I build_toe.py`, then `python -I s6_harness.py main` and `… conflict` with `TDFLOW_SRC` set | Embedded transport in TD: binding, LAN, threads, lifecycle, timeouts, conflicts, load, frame impact, recovery, static Setup page + headless browser, gate/auth/kill switch | Executed; see [S6 findings](../research/2026-11-22-s6-embedded-python-transport.md) |
-| Protocol/policy/audit tests, S1 | — | — | **Do not exist / not executed** (Phase 1B; S1 optional) |
+| Live coding-agent session, policy branch coverage, S1 | — | — | **Not executed** (1C item 21; no coverage tool; S1 optional) |
 
 ## Runs
 
@@ -56,6 +58,16 @@ This file lists every check that exists, how to run it, and its last **executed 
 | 2026-11-22 | Windows 11, CPython 3.11.8 / TD Python 3.11.10 | unit tests (final) | Pass: `Ran 142 tests … OK (skipped=1)` on both |
 | 2026-11-22 | TouchDesigner 2025.32440 (disposable) | **In-TD full suite (final)** | **Pass: 48/48 in TD + 69/69 harness**; rc 0; other TD processes untouched |
 | 2026-11-22 | TouchDesigner 2025.32440 (disposable) | **Real default-browser run (final)** | **Pass: 12/12 + 5/5**; the browser fetched `/setup/`, `app.js`, `/setup/api/status` |
+| 2026-11-22 | TouchDesigner 2025.32440 (disposable, 2 launches) | S4b undo stack / interleaving / save-reload | rc 0 both; results in [S4 record](../research/2026-11-22-s4-undo-semantics.md) |
+| 2026-11-22 | TD Python 3.11.10 | audit append latency (300 appends, `synchronous=FULL`) | p50 5.3 ms, p95 6.0 ms, max 9.2 ms; ADR-0006 latency gate **open** |
+| 2026-11-22 | TouchDesigner 2025.32440 | Phase 1B suite, runs before review 6 | 40/41 + 87/98 (bugs: `td.ParMode`, `get_parameters`, an existence leak, float detail lost an outcome); fixed → 41/41 + 99/99 pass |
+| 2026-11-22 | — | Independent review 6 (Phase 1B security) | 3 High, 8 Medium, 9 Low; dispositions in [review 6](../research/2026-11-22-phase-1b-review.md) |
+| 2026-11-22 | Windows 11, CPython 3.11.8 / TD Python 3.11.10 | unit tests (final) | Pass: `Ran 204 tests … OK` (skipped=2 / skipped=1) |
+| 2026-11-22 | Windows 11, CPython 3.11.8 | `scan_secrets.py` (final) | Pass: 0 findings (tracked files, plus all new untracked files before commit) |
+| 2026-11-22 | TouchDesigner 2025.32440 | `.tox` build + `--check-reproducible` (final) | Pass: SHA-256 `52d039eb7fefe241…`; source digest equal; expanded diff `.build`, `local/time/cframe.ts` |
+| 2026-11-22 | TouchDesigner 2025.32440 (disposable, 2 launches) | **Phase 1B in-TD acceptance (final)** | **Pass: 41/41 in TD + 110/110 harness**; rc 0; audit 39 intent / 39 outcome / 30 deny |
+| 2026-11-22 | TouchDesigner 2025.32440 (disposable) | **Phase 1A suite on the 1B build (final)** | **Pass: 49/49 + 69/69** |
+| 2026-11-22 | TouchDesigner 2025.32440 + default browser | **Real-browser run (final)** | **Pass: 13/13 + 5/5** |
 
 ## Local environment facts (file inspection only, 2026-11-22)
 

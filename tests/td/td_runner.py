@@ -22,7 +22,8 @@ ROOT = os.environ.get("TDFLOW_SRC_ROOT", "")
 MODE = os.environ.get("TDFLOW_TEST_MODE", "full")
 MAIN = threading.main_thread()
 EXPECTED_PARS = ["Version", "Status", "Statusdetail", "Opensetup", "Stopserver", "Rundiagnostics", "Setupurl",
-                 "Port", "Portstatus", "Compatsummary", "Tellagent", "Copytellagent", "Projectroot", "Datadir",
+                 "Port", "Portstatus", "Compatsummary", "Tellagent", "Copytellagent", "Enablemcp", "Suspendagents",
+                 "Pairingrequest", "Approvepairing", "Rejectpairing", "Agentsummary", "Projectroot", "Datadir",
                  "Loglevel"]
 
 R = {"mode": MODE, "tests": [], "harness": {}, "frames": [], "errors": []}
@@ -95,13 +96,13 @@ def script():
     T("load.version", comp.par.Version.eval().startswith(ext.version), version=comp.par.Version.eval())
     T("load.readonly", all(getattr(comp.par, n).readOnly for n in
                            ("Version", "Status", "Statusdetail", "Setupurl", "Portstatus", "Compatsummary",
-                            "Tellagent", "Datadir")))
+                            "Tellagent", "Datadir", "Pairingrequest", "Agentsummary")))
+    T("load.mcp_off_by_default", not comp.par.Enablemcp.eval() and not comp.par.Suspendagents.eval())
     man = json.loads(comp.op("manifest").text)
     mism = [n for n, m in man["modules"].items() if sha_text(comp.op("src").op(m["dat"]).text) != m["sha256"]]
     T("load.embedded_matches_manifest", not mism, mismatches=mism)
     if ROOT:
-        src_mism = [n for n, m in man["modules"].items()
-                    if m["sha256"] != sha_file("src/" + n.replace(".", "/") + ("/__init__.py" if m.get("package") else ".py"))]
+        src_mism = [n for n, m in man["modules"].items() if m["sha256"] != sha_file(m["path"])]
         src_mism += [n for n, d in man["dats"].items() if d.get("path") and d["sha256"] != sha_file(d["path"])]
         T("load.embedded_matches_repo_source", not src_mism, mismatches=src_mism)
     T("load.no_transport", ext.ctl.transport is None)
@@ -109,6 +110,14 @@ def script():
         "<tdflowmcp-embedded:") for n in man["modules"]))
     if MODE == "real_browser":
         yield from real_browser(comp, ext)
+        return
+    if MODE in ("mcp", "mcp_restart"):
+        mcp = __import__("td_runner_mcp")
+        ext.launcher = lambda url: True                   # never open the user's browser in this suite
+        if MODE == "mcp":
+            comp.par.Opensetup.pulse()
+            yield until(lambda: comp.par.Status.eval() == "Setup", 10, "open_mcp")
+        yield from mcp.run(comp, ext, T, frames, until, checkpoint, R, restart=(MODE == "mcp_restart"))
         return
     g = yield checkpoint("loaded", {"pid": os.getpid()})
 
@@ -165,7 +174,7 @@ def script():
 
     # Timeout: the harness has a request in flight while the main thread is blocked.
     yield checkpoint("block_ready", {})
-    time.sleep(3.0)
+    time.sleep(6.0)                                  # longer than the 5 s job timeout
     yield frames(10)
     yield checkpoint("block_done", {})
 
@@ -268,7 +277,9 @@ def script():
     T("starting.stop_wins", comp.par.Status.eval() == "Off" and not own_listening(9480) and len(calls) == n_calls,
       status=comp.par.Status.eval())
 
-    # Idle stop.
+    # Idle stop, on a port no open Setup tab polls (an open tab counts as activity, by design).
+    comp.par.Port = 9481
+    yield frames(3)
     comp.par.Opensetup.pulse()
     yield until(lambda: comp.par.Status.eval() == "Setup", 10, "idle_open")
     ext.ctl.idle_seconds = 2.0
@@ -277,6 +288,8 @@ def script():
       detail=comp.par.Statusdetail.eval())
     ext.ctl.idle_seconds = 1800.0
     yield checkpoint("idle_stopped", {"pid": os.getpid()})
+    comp.par.Port = 9480
+    yield frames(3)
 
     # A second TDflowMCP component in the same project cannot take the port.
     comp.par.Opensetup.pulse()
@@ -356,7 +369,7 @@ def real_browser(comp, ext):
         for rec in list(t._audit_ring) if t else []:
             if rec.get("path") in ("/setup/", "/setup/app.js", "/setup/api/status") and rec.get("status") == 200:
                 seen[rec["path"]] = rec["code"]
-        return "/setup/api/status" in seen
+        return all(k in seen for k in ("/setup/", "/setup/app.js", "/setup/api/status"))   # an old tab may poll too
     yield until(browser_hit, 45, "browser")
     T("real.browser_loaded_page_and_ran_js", "/setup/" in seen and "/setup/app.js" in seen
       and "/setup/api/status" in seen, seen=seen, launch=ext.ctl.launch_status)

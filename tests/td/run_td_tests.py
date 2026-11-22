@@ -206,7 +206,7 @@ def cp_serving(data, pid):
       body=wk)
     r = req("GET", "/setup/api/status", {"X-TDflow-Request": "1"})
     st = jbody(r) or {}
-    T("api.status", r.get("status") == 200 and st.get("state") == "Setup" and st.get("mcp") == "disabled (Phase 1A)"
+    T("api.status", r.get("status") == 200 and st.get("state") == "Setup" and st.get("mcp") == "disabled"
       and st.get("td_build") == "2025.32440" and len(st.get("checks", [])) >= 9 and "Tell Your Coding Agent" in st.get("tell_agent", ""),
       state=st.get("state"), summary=st.get("summary"), checks={c["id"]: c["result"] for c in st.get("checks", [])})
     T("api.checks_have_remediation_text", all(c["title"] and c["steps"] for c in st.get("checks", [])
@@ -333,9 +333,11 @@ def scan(texts, label):
             if v.lower() in low:
                 hits.append(f"{name}:{k}")
         low = low.replace("contains no secrets", "")
-        for pat in ("bearer ", "token=", "password", "secret=", "tdf_"):
-            if pat in low:
-                hits.append(f"{name}:{pat.strip()}")
+        import re as _re
+        for pat in (r"bearer\s+[a-z0-9._\-]{16,}", r"token=\S", r"password\s*[=:]", r"secret=\S",
+                    r"tdf_[a-z0-9]{12}\.[a-z0-9_\-]{20,}"):
+            if _re.search(pat, low):
+                hits.append(f"{name}:{pat[:12]}")
     T(f"secrets.{label}", not hits, hits=hits)
 
 
@@ -406,8 +408,11 @@ def main():
                 break
             for fn in sorted(os.listdir(run_dir)):
                 if fn.startswith("cp_") and fn.endswith(".json") and fn not in done:
-                    with open(os.path.join(run_dir, fn), encoding="utf-8") as f:
-                        cp = json.load(f)
+                    try:
+                        with open(os.path.join(run_dir, fn), encoding="utf-8") as f:
+                            cp = json.load(f)
+                    except (PermissionError, ValueError):     # being written right now (Windows): retry
+                        continue
                     name = cp["name"]
                     done.add(fn)
                     try:

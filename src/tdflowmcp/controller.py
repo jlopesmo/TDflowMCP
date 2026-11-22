@@ -142,12 +142,12 @@ class Controller:
         self._log("error", code=code)
 
     # ---- user actions (main thread) -------------------------------------------------------------
-    def open_setup(self) -> str:
+    def open_setup(self, launch: bool = True) -> str:
         if self.state is CompState.SETUP:
-            self._launch_wanted = True                      # re-open the page
+            self._launch_wanted = self._launch_wanted or launch      # re-open the page
             return "launch"
         if self.state is CompState.STARTING:
-            self._launch_wanted = True
+            self._launch_wanted = self._launch_wanted or launch
             return "pending"
         if self.state is CompState.STOPPING:
             self.message = "Still stopping the previous listener. Pulse Open Setup again in a moment."
@@ -187,7 +187,7 @@ class Controller:
         self.portstatus = "this component (verifying)"
         self.state, self.error_code = CompState.STARTING, ""
         self.message = "Verifying that the listener is reachable from this computer only…"
-        self._launch_wanted = True
+        self._launch_wanted = launch
         self.launch_status = ""
         self._start_ev(bound[0])
         self._log("starting", port=self.port)

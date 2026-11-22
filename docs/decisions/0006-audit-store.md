@@ -17,7 +17,7 @@ JSONL append files (simpler, weaker querying); storing audit inside the `.toe` (
 Hash chaining detects tampering but does not prevent a local admin from deleting the file. This is documented in the [security model](../architecture/security-model.md).
 
 ## Validation gates
-- Tamper detection relative to a checkpoint.
-- Mutations fail closed when the store is unavailable.
-- Auth-failure aggregation under flood.
-- Measured write latency on TD's main thread is within the Phase 1B targets. Otherwise this ADR reopens for batching.
+- **Tamper detection relative to a checkpoint: passed** (unit and in-TD). This includes a recomputed unkeyed chain caught by the keyed checkpoint, and a deleted checkpoints file. Checkpoints are written every 50 events, at Enable MCP and at shutdown.
+- **Mutations fail closed when the store is unavailable: passed.** Reads also fail closed. A failed outcome write suspends all agents.
+- **Auth-failure aggregation: implemented** (one `auth_fail_burst` event per 10 s) and observed in the in-TD run. No flood test was run.
+- **Write latency: OPEN.** Measured ≈ 5.3 ms p50 / 6.0 ms p95 per append with `synchronous=FULL` on the test machine, so ≈ 11 ms per call (intent + outcome). That exceeds the 5 ms per-read overhead target. Options for the owner: keep full durability; use `synchronous=NORMAL` in WAL (durable across application crashes, not power loss); or batch read events. Not changed unilaterally ([record](../research/2026-11-22-phase-1b-mcp-core.md)).

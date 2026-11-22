@@ -3,49 +3,320 @@
   "name": "TDflowMCP",
   "version_from": "src/tdflowmcp/__init__.py",
   "min_td_build": "2025.32440",
-  "tags": ["TDflowMCP"],
+  "tags": [
+    "TDflowMCP"
+  ],
   "modules": {
-    "tdflowmcp": {"path": "src/tdflowmcp/__init__.py", "package": true},
-    "tdflowmcp.compat": {"path": "src/tdflowmcp/compat.py"},
-    "tdflowmcp.controller": {"path": "src/tdflowmcp/controller.py"},
-    "tdflowmcp.gate": {"path": "src/tdflowmcp/gate.py"},
-    "tdflowmcp.setupapi": {"path": "src/tdflowmcp/setupapi.py"},
-    "tdflowmcp.tellagent": {"path": "src/tdflowmcp/tellagent.py"},
-    "tdflowmcp.net": {"path": "src/tdflowmcp/net/__init__.py", "package": true},
-    "tdflowmcp.net.bindverify": {"path": "src/tdflowmcp/net/bindverify.py"},
-    "tdflowmcp.net.evidence": {"path": "src/tdflowmcp/net/evidence.py"},
-    "tdflowmcp.net.oslisteners": {"path": "src/tdflowmcp/net/oslisteners.py"},
-    "tdflowmcp.net.pyhttp": {"path": "src/tdflowmcp/net/pyhttp.py"}
+    "tdflowmcp": {
+      "path": "src/tdflowmcp/__init__.py",
+      "package": true
+    },
+    "tdflowmcp.admin": {
+      "path": "src/tdflowmcp/admin.py"
+    },
+    "tdflowmcp.compat": {
+      "path": "src/tdflowmcp/compat.py"
+    },
+    "tdflowmcp.controller": {
+      "path": "src/tdflowmcp/controller.py"
+    },
+    "tdflowmcp.engine": {
+      "path": "src/tdflowmcp/engine.py"
+    },
+    "tdflowmcp.gate": {
+      "path": "src/tdflowmcp/gate.py"
+    },
+    "tdflowmcp.identity": {
+      "path": "src/tdflowmcp/identity.py"
+    },
+    "tdflowmcp.net": {
+      "path": "src/tdflowmcp/net/__init__.py",
+      "package": true
+    },
+    "tdflowmcp.net.bindverify": {
+      "path": "src/tdflowmcp/net/bindverify.py"
+    },
+    "tdflowmcp.net.evidence": {
+      "path": "src/tdflowmcp/net/evidence.py"
+    },
+    "tdflowmcp.net.oslisteners": {
+      "path": "src/tdflowmcp/net/oslisteners.py"
+    },
+    "tdflowmcp.net.pyhttp": {
+      "path": "src/tdflowmcp/net/pyhttp.py"
+    },
+    "tdflowmcp.policy": {
+      "path": "src/tdflowmcp/policy.py"
+    },
+    "tdflowmcp.protocol": {
+      "path": "src/tdflowmcp/protocol.py"
+    },
+    "tdflowmcp.schema": {
+      "path": "src/tdflowmcp/schema.py"
+    },
+    "tdflowmcp.setupapi": {
+      "path": "src/tdflowmcp/setupapi.py"
+    },
+    "tdflowmcp.store": {
+      "path": "src/tdflowmcp/store.py"
+    },
+    "tdflowmcp.tellagent": {
+      "path": "src/tdflowmcp/tellagent.py"
+    },
+    "tdflowmcp.tools": {
+      "path": "src/tdflowmcp/tools.py"
+    },
+    "tdflowmcp_td": {
+      "path": "src/td_adapter/__init__.py",
+      "package": true
+    },
+    "tdflowmcp_td.tdops": {
+      "path": "src/td_adapter/tdops.py"
+    }
   },
   "dats": {
-    "loader": {"path": "src/td_adapter/loader.py"},
-    "TDflowMCPExt": {"path": "src/td_adapter/extension.py"},
-    "troubleshooting": {"path": "src/setup/troubleshooting.json"},
-    "web_index_html": {"path": "src/setup/web/index.html", "serve": "/setup/", "content_type": "text/html; charset=utf-8"},
-    "web_app_css": {"path": "src/setup/web/app.css", "serve": "/setup/app.css", "content_type": "text/css; charset=utf-8"},
-    "web_app_js": {"path": "src/setup/web/app.js", "serve": "/setup/app.js", "content_type": "text/javascript; charset=utf-8"},
-    "tellagent": {"text": "", "note": "Runtime copy of the Tell Your Coding Agent text (no secrets)"}
+    "loader": {
+      "path": "src/td_adapter/loader.py"
+    },
+    "TDflowMCPExt": {
+      "path": "src/td_adapter/extension.py"
+    },
+    "troubleshooting": {
+      "path": "src/setup/troubleshooting.json"
+    },
+    "web_index_html": {
+      "path": "src/setup/web/index.html",
+      "serve": "/setup/",
+      "content_type": "text/html; charset=utf-8"
+    },
+    "web_app_css": {
+      "path": "src/setup/web/app.css",
+      "serve": "/setup/app.css",
+      "content_type": "text/css; charset=utf-8"
+    },
+    "web_app_js": {
+      "path": "src/setup/web/app.js",
+      "serve": "/setup/app.js",
+      "content_type": "text/javascript; charset=utf-8"
+    },
+    "tellagent": {
+      "text": "",
+      "note": "Runtime copy of the Tell Your Coding Agent text (no secrets)"
+    }
   },
   "callbacks": {
-    "frame_exec": {"type": "execute", "path": "src/td_adapter/callbacks_execute.py"},
-    "par_exec": {"type": "parameterexecute", "path": "src/td_adapter/callbacks_parexec.py"}
+    "frame_exec": {
+      "type": "execute",
+      "path": "src/td_adapter/callbacks_execute.py"
+    },
+    "par_exec": {
+      "type": "parameterexecute",
+      "path": "src/td_adapter/callbacks_parexec.py"
+    }
   },
-  "extension": {"dat": "TDflowMCPExt", "class": "TDflowMCPExt", "promote": true},
+  "extension": {
+    "dat": "TDflowMCPExt",
+    "class": "TDflowMCPExt",
+    "promote": true
+  },
   "parameters": [
-    {"page": "TDflowMCP", "name": "Version", "type": "Str", "label": "Version", "readonly": true, "default": "{version}", "help": "Component version and tool-surface version"},
-    {"page": "TDflowMCP", "name": "Status", "type": "Str", "label": "Status", "readonly": true, "default": "Off", "help": "Controller state and error code"},
-    {"page": "TDflowMCP", "name": "Statusdetail", "type": "Str", "label": "Status Detail", "readonly": true, "default": "Off. Pulse Open Setup to start the local Setup Assistant.", "help": "What is happening, including browser-launch and clipboard failures"},
-    {"page": "TDflowMCP", "name": "Opensetup", "type": "Pulse", "label": "Open Setup", "help": "Run checks, start the local-only Setup Assistant and open it in your browser"},
-    {"page": "TDflowMCP", "name": "Stopserver", "type": "Pulse", "label": "Stop Server", "help": "Stop the listener"},
-    {"page": "TDflowMCP", "name": "Rundiagnostics", "type": "Pulse", "label": "Run Diagnostics", "help": "Re-run the compatibility checks"},
-    {"page": "TDflowMCP", "name": "Setupurl", "type": "Str", "label": "Setup URL", "readonly": true, "default": "", "help": "Address of the Setup Assistant while it is running"},
-    {"page": "TDflowMCP", "name": "Port", "type": "Int", "label": "Port", "default": 9480, "min": 1024, "max": 65535, "help": "Listener port. Never changed automatically; changing it stops the listener"},
-    {"page": "TDflowMCP", "name": "Portstatus", "type": "Str", "label": "Port Status", "readonly": true, "default": "not checked", "help": "free / this component / in use by another process"},
-    {"page": "TDflowMCP", "name": "Compatsummary", "type": "Str", "label": "Compatibility", "readonly": true, "default": "not run", "help": "pass / warn / fail / unknown counts"},
-    {"page": "TDflowMCP", "name": "Tellagent", "type": "Str", "label": "Tell Your Agent", "readonly": true, "default": "Not checked yet", "help": "State of the coding-agent instructions"},
-    {"page": "TDflowMCP", "name": "Copytellagent", "type": "Pulse", "label": "Copy Tell Agent", "help": "Copy the Tell Your Coding Agent text to the clipboard"},
-    {"page": "TDflowMCP", "name": "Projectroot", "type": "Str", "label": "Project Root", "default": "/project1", "help": "Host project root for future agent scopes (Phase 1B); unused in 1A"},
-    {"page": "TDflowMCP", "name": "Datadir", "type": "Str", "label": "Data Directory", "readonly": true, "default": "%LOCALAPPDATA%\\TDflowMCP", "help": "Where runtime state will live (nothing is stored in Phase 1A)"},
-    {"page": "TDflowMCP", "name": "Loglevel", "type": "Menu", "label": "Log Level", "default": "info", "menu": ["error", "warning", "info", "debug"], "help": "Diagnostic log level"}
+    {
+      "page": "TDflowMCP",
+      "name": "Version",
+      "type": "Str",
+      "label": "Version",
+      "readonly": true,
+      "default": "{version}",
+      "help": "Component version and tool-surface version"
+    },
+    {
+      "page": "TDflowMCP",
+      "name": "Status",
+      "type": "Str",
+      "label": "Status",
+      "readonly": true,
+      "default": "Off",
+      "help": "Controller state and error code"
+    },
+    {
+      "page": "TDflowMCP",
+      "name": "Statusdetail",
+      "type": "Str",
+      "label": "Status Detail",
+      "readonly": true,
+      "default": "Off. Pulse Open Setup to start the local Setup Assistant.",
+      "help": "What is happening, including browser-launch and clipboard failures"
+    },
+    {
+      "page": "TDflowMCP",
+      "name": "Opensetup",
+      "type": "Pulse",
+      "label": "Open Setup",
+      "help": "Run checks, start the local-only Setup Assistant and open it in your browser"
+    },
+    {
+      "page": "TDflowMCP",
+      "name": "Stopserver",
+      "type": "Pulse",
+      "label": "Stop Server",
+      "help": "Stop the listener"
+    },
+    {
+      "page": "TDflowMCP",
+      "name": "Rundiagnostics",
+      "type": "Pulse",
+      "label": "Run Diagnostics",
+      "help": "Re-run the compatibility checks"
+    },
+    {
+      "page": "TDflowMCP",
+      "name": "Setupurl",
+      "type": "Str",
+      "label": "Setup URL",
+      "readonly": true,
+      "default": "",
+      "help": "Address of the Setup Assistant while it is running"
+    },
+    {
+      "page": "TDflowMCP",
+      "name": "Port",
+      "type": "Int",
+      "label": "Port",
+      "default": 9480,
+      "min": 1024,
+      "max": 65535,
+      "help": "Listener port. Never changed automatically; changing it stops the listener"
+    },
+    {
+      "page": "TDflowMCP",
+      "name": "Portstatus",
+      "type": "Str",
+      "label": "Port Status",
+      "readonly": true,
+      "default": "not checked",
+      "help": "free / this component / in use by another process"
+    },
+    {
+      "page": "TDflowMCP",
+      "name": "Compatsummary",
+      "type": "Str",
+      "label": "Compatibility",
+      "readonly": true,
+      "default": "not run",
+      "help": "pass / warn / fail / unknown counts"
+    },
+    {
+      "page": "TDflowMCP",
+      "name": "Tellagent",
+      "type": "Str",
+      "label": "Tell Your Agent",
+      "readonly": true,
+      "default": "Not checked yet",
+      "help": "State of the coding-agent instructions"
+    },
+    {
+      "page": "TDflowMCP",
+      "name": "Copytellagent",
+      "type": "Pulse",
+      "label": "Copy Tell Agent",
+      "help": "Copy the Tell Your Coding Agent text to the clipboard"
+    },
+    {
+      "page": "TDflowMCP",
+      "name": "Enablemcp",
+      "type": "Toggle",
+      "label": "Enable MCP",
+      "default": false,
+      "help": "Turn on the MCP endpoint for agents with tokens (only after the local-only check and the preconditions pass)"
+    },
+    {
+      "page": "TDflowMCP",
+      "name": "Suspendagents",
+      "type": "Toggle",
+      "label": "Suspend Agents",
+      "default": false,
+      "help": "Kill switch: reject every agent request, including queued ones"
+    },
+    {
+      "page": "TDflowMCP",
+      "name": "Pairingrequest",
+      "type": "Str",
+      "label": "Pairing Request",
+      "readonly": true,
+      "default": "",
+      "help": "Match code of the pending browser pairing request (not a secret)"
+    },
+    {
+      "page": "TDflowMCP",
+      "name": "Approvepairing",
+      "type": "Pulse",
+      "label": "Approve Pairing",
+      "help": "Approve the pending browser pairing request if its code matches the Setup page"
+    },
+    {
+      "page": "TDflowMCP",
+      "name": "Rejectpairing",
+      "type": "Pulse",
+      "label": "Reject Pairing",
+      "help": "Reject the pending browser pairing request"
+    },
+    {
+      "page": "TDflowMCP",
+      "name": "Agentsummary",
+      "type": "Str",
+      "label": "Agents",
+      "readonly": true,
+      "default": "0 agent(s)",
+      "help": "Number of agents and paired admin sessions"
+    },
+    {
+      "page": "TDflowMCP",
+      "name": "Projectroot",
+      "type": "Str",
+      "label": "Project Root",
+      "default": "/project1",
+      "help": "Host project root for future agent scopes (Phase 1B); unused in 1A"
+    },
+    {
+      "page": "TDflowMCP",
+      "name": "Datadir",
+      "type": "Str",
+      "label": "Data Directory",
+      "readonly": true,
+      "default": "%LOCALAPPDATA%\\TDflowMCP",
+      "help": "Where runtime state will live (nothing is stored in Phase 1A)"
+    },
+    {
+      "page": "TDflowMCP",
+      "name": "Loglevel",
+      "type": "Menu",
+      "label": "Log Level",
+      "default": "info",
+      "menu": [
+        "error",
+        "warning",
+        "info",
+        "debug"
+      ],
+      "help": "Diagnostic log level"
+    }
+  ],
+  "active_tools": [
+    "tdflow_connect",
+    "tdflow_create_operator",
+    "tdflow_delete_operator",
+    "tdflow_disconnect",
+    "tdflow_get_dat_text",
+    "tdflow_get_errors",
+    "tdflow_get_operator",
+    "tdflow_get_parameters",
+    "tdflow_list_operators",
+    "tdflow_project_info",
+    "tdflow_session_list",
+    "tdflow_session_note",
+    "tdflow_set_dat_text",
+    "tdflow_set_parameters",
+    "tdflow_undo",
+    "tdflow_whoami"
   ]
 }

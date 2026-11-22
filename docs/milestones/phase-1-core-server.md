@@ -39,15 +39,15 @@ Phase 1 must not start production `.tox` or MCP server implementation until Phas
 
 | # | Item | Output / acceptance |
 |---|---|---|
-| 11 | Policy engine (scopes, action classification, hard denies incl. instance/ancestor/`tdflowProject` tags, read filtering, approval ⇒ deny) | ≥ 95 % branch coverage target; table-driven tests |
-| 12 | Identity + token store (`tdf_<id>.<secret>`), kill switch | Unit tests; tokens never logged |
-| 13 | Protocol layer (2026-07-28 + legacy `initialize`) | Conformance tests |
-| 14 | Tool registry (mandatory actions/classification/resolver) | Registering a tool without a resolver fails a test |
-| 15 | Audit store (intent/outcome, JCS chain, HMAC args, keyed checkpoints, fail-closed, flood aggregation) + session grouping | Tamper and fail-closed tests |
-| 16 | TD adapter: main-thread execution, undo blocks, path normalization | In-TD tests |
-| 17 | 14 core tools + `tdflow_session_note`/`tdflow_session_list` ([tool surface](../architecture/tool-surface.md#phase-1b-core-tools-14)) | Per tool: allow, deny, audit and undo tests |
-| 18 | Setup actions: reverse pairing (`Pairingrequest`, `Approvepairing`), admin session, token create/disable (shown once), scope presets, `Enablemcp` preconditions, `Suspendagents`, recent-sessions list | Per-route gate tests; MCP stays off unless preconditions pass |
-| 18a | **TDMCP functional comparison.** The official release is downloaded per ADR-0008 §6 into git-ignored `reference/third_party/`, with version, URL, SHA-256 and terms recorded. Same scenarios on both: read subtree, set parameter, create + wire, errors, undo. Disposable project only | Comparison record in `docs/research/`. No TDMCP code or Skills incorporated |
+| 11 | **(Done)** Policy engine (scopes, action classification, hard denies incl. instance/ancestor/`tdflowProject` tags, read filtering, approval ⇒ deny) | Table-driven tests. The ≥ 95 % branch-coverage target is **not measured**: no coverage tool is installed and none was added |
+| 12 | **(Done)** Identity + token store (`tdf_<id>.<secret>`), kill switch (incl. queued requests) | Unit tests; tokens never logged (in-TD secrets scans) |
+| 13 | **(Done)** Protocol layer (2026-07-28 stateless + legacy `initialize`) | Conformance tests (unit) plus both eras in TD. A live Claude Code session is a 1C item (21) |
+| 14 | **(Done)** Tool registry (mandatory actions/classification/resolver; `active_tools` gate in the manifest) | Registering a tool without a resolver fails a test |
+| 15 | **(Done)** Audit store (intent/outcome, canonical-JSON chain, HMAC args, keyed checkpoints, fail-closed, flood aggregation) + session grouping | Tamper and fail-closed tests (unit + in-TD). Write latency ≈ 5.3 ms per append (`synchronous=FULL`): ADR-0006 latency gate **open** |
+| 16 | **(Done)** TD adapter: main-thread execution, undo blocks, path normalization, verified undo, DAT snapshots (S4b) | In-TD tests |
+| 17 | **(Done)** 14 core tools + `tdflow_session_note`/`tdflow_session_list` ([tool surface](../architecture/tool-surface.md#phase-1b-core-tools-14)) | Per tool: allow, deny, audit and undo tests |
+| 18 | **(Done)** Setup actions: reverse pairing (`Pairingrequest`, `Approvepairing`), admin session, token create/revoke (shown once), scope presets, `Enablemcp` preconditions, `Suspendagents`, recent-sessions list | Per-route gate tests; MCP stays off unless preconditions pass |
+| 18a | **(Done as a documentation comparison; hands-on not possible: TDMCP requires 2025.33230+, [record](../research/2026-11-22-tdmcp-comparison.md))** **TDMCP functional comparison.** The official release is downloaded per ADR-0008 §6 into git-ignored `reference/third_party/`, with version, URL, SHA-256 and terms recorded. Same scenarios on both: read subtree, set parameter, create + wire, errors, undo. Disposable project only | Comparison record in `docs/research/`. No TDMCP code or Skills incorporated |
 | 19 | Phase 1B security review (independent agent + owner) | Findings resolved or recorded; any bypass blocks 1C |
 
 **1B acceptance:**

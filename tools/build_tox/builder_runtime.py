@@ -149,6 +149,10 @@ def on_frame(me, frame):
                   and res["checks"]["status_param"] == "Off" and res["checks"]["listener"] == "Off"
                   and res["checks"]["independent_time"])
             if ok:
+                # Runtime-published status values (e.g. the host-specific Datadir key) never ship in the .tox.
+                for spec in plan["parameters"]:
+                    if spec.get("readonly") and "default" in spec:
+                        getattr(comp.par, spec["name"]).val = spec["default"]
                 comp.save(plan["out"])
                 res["saved"] = os.path.exists(plan["out"])
             res["ok"] = bool(ok and res.get("saved"))

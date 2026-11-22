@@ -1,6 +1,6 @@
 # Setup Assistant, component parameters, compatibility and troubleshooting
 
-**Status:** Design for owner-approved requirements P9–P12 and P14 ([ADR-0010](../decisions/0010-setup-assistant-and-component-parameters.md)). **The Phase 1A part is implemented** in the development build of `TDflowMCP.tox` (2026-11-22). It is verified in TouchDesigner 2025.32440 by the in-TD suite; see [Phase 1A component record](../research/2026-11-22-phase-1a-component.md). The 1B/1C rows remain design only.
+**Status:** Design for owner-approved requirements P9–P12 and P14 ([ADR-0010](../decisions/0010-setup-assistant-and-component-parameters.md)). **The Phase 1A part is implemented** in the development build of `TDflowMCP.tox` (2026-11-22). It is verified in TouchDesigner 2025.32440 by the in-TD suite; see [Phase 1A component record](../research/2026-11-22-phase-1a-component.md). **The Phase 1B part (pairing, agent tokens, Enable MCP, Suspend Agents, agent and session information) is implemented** and verified by the Phase 1B in-TD acceptance suite. The 1C rows remain design only.
 
 ## 1. Component states
 
@@ -10,8 +10,8 @@
 | **Starting** (1A, transient) | 127.0.0.1:`Port`, `VERIFYING` | 503 | 503 | 503 | `Opensetup` pulse; ends in Setup or Error |
 | **Setup** | 127.0.0.1:`Port` | read-only (1A); paired actions (1B) | 503 `MCP_DISABLED` | 404 until Phase 2B | verification passed |
 | **Stopping** (1A, transient) | closing | — | — | — | `Stopserver`, a Port change, a failed check, project exit or component deletion; ends when the OS table confirms the socket is gone |
-| **Enabled** (reserved; 1B) | 127.0.0.1:`Port` | available | active (policy-enforced) | Phase 2B | `Enablemcp` on, after preconditions (§4). Not reachable in 1A |
-| **Suspended** (reserved; 1B) | 127.0.0.1:`Port` | available | `SUSPENDED` for all agents | Phase 2B | `Suspendagents` on (kill switch). Not reachable in 1A |
+| **Enabled** (1B) | 127.0.0.1:`Port` | available | active (policy-enforced) | Phase 2B | `Enablemcp` on, after preconditions (§4). Starts the listener if needed (no browser) |
+| **Suspended** (1B) | 127.0.0.1:`Port` | available | `SUSPENDED` for all agents, including queued requests | Phase 2B | `Suspendagents` on (kill switch) |
 | **Error** | none | — | — | — | `PORT_IN_USE` (another process listens on the port, on any address: never shared), `BIND_UNSUPPORTED` (Web Server DAT transport without `localaddress`: never activated), `BIND_UNVERIFIED` (closed by the gate), `CLOSE_UNCONFIRMED` (socket did not disappear: restart TouchDesigner), port conflict, storage failure. Leaving Error needs an explicit user action |
 
 The component **never listens until the user acts** (pulse or toggle). After the user acts, the listener is activated in a non-serving `VERIFYING` state (every request gets `503`). Application requests are served only after the effective loopback-only binding is positively verified. If verification fails or is ambiguous, the listener is **closed immediately**, the state becomes `Error: BIND_UNVERIFIED`, and the only guidance channel is the component's parameters and an in-component text DAT, never a less-secure listener ([security model §8.2](security-model.md#82-bind-verification-gate)). While serving, the binding is re-verified every 10 s. In Setup state with MCP disabled, the listener auto-stops after 30 min without requests. If the component is deleted, the extension shuts the listener down at once (`onDestroyTD`). As a backstop, the transport closes itself when the main thread has stopped pumping for 20 s (heartbeat).
@@ -39,10 +39,11 @@ Page **TDflowMCP** (TouchDesigner custom parameter names are capitalised-then-lo
 | `Datadir` | Str, read-only | `%LOCALAPPDATA%\TDflowMCP` | 1A | Location of runtime state, displayed unexpanded (no username saved into the `.toe`). The per-project `<key>` arrives with the first stored state (1B). Nothing is written in 1A |
 | `Tellagent` | Str, read-only | — | 1A | One-line state of the agent instructions (e.g. `Ready: connect · v0.1`) |
 | `Copytellagent` | Pulse | — | 1A | Copy the full "Tell Your Coding Agent" text to the clipboard with `ui.clipboard`. Success is verified by reading it back; failure is reported in `Statusdetail`. The text is also shown on the Setup page (with its own Copy button) and in the internal `tellagent` DAT |
-| `Enablemcp` | Toggle | **Off** | 1B | Enable `/mcp`; refused unless preconditions (§4) pass |
-| `Suspendagents` | Toggle | Off | 1B | Kill switch |
-| `Pairingrequest` | Str, read-only | empty | 1B | Non-secret match code of the single pending browser pairing request, e.g. `Pending: K7Q-42M (12:01:05)` ([security model §2.5](security-model.md#25-dashboard-and-setup-admin-sessions)) |
-| `Approvepairing` / `Rejectpairing` | Pulse | — | 1B | Approve or reject the pending request **from inside TD**. Approval turns that browser's cookie into an admin session |
+| `Enablemcp` | Toggle | **Off** | 1B (**implemented**) | Enable `/mcp`; refused, and switched back off, unless preconditions (§4) pass. Status Detail names the blocking checks. Never re-enabled silently after a reload |
+| `Suspendagents` | Toggle | Off | 1B (**implemented**) | Kill switch; audited |
+| `Pairingrequest` | Str, read-only | empty | 1B (**implemented**) | Non-secret match code of the single pending browser pairing request, e.g. `Pending: K7Q-42M (12:01:05)` ([security model §2.5](security-model.md#25-dashboard-and-setup-admin-sessions)) |
+| `Approvepairing` / `Rejectpairing` | Pulse | — | 1B (**implemented**) | Approve or reject the pending request **from inside TD**. Approval turns that browser's cookie into an admin session |
+| `Agentsummary` | Str, read-only | — | 1B (**implemented**) | Number of agents and paired admin sessions |
 | `Loglevel` | Menu | `info` | 1A | Diagnostic log level |
 
 Parameters never hold tokens or other long-lived secrets, because parameter values are saved into the `.toe`.
@@ -93,7 +94,12 @@ Only allowlisted fields are included. Never included: tokens, environment-derive
   - All server data is rendered with `textContent`.
   - The Copy button uses `navigator.clipboard` and falls back to selecting the text with an explanation.
   - No write endpoint exists.
-- 1B (paired admin session, exact Origin + CSRF, [security model §2.5](security-model.md#25-dashboard-and-setup-admin-sessions)): pairing request, create/disable agent tokens (each token shown once), choose scopes from a preset, enable MCP.
+- 1B (**implemented**; paired admin session, exact Origin + CSRF, [security model §2.5](security-model.md#25-dashboard-and-setup-admin-sessions)):
+  - Pairing: `POST /setup/api/pair` and `GET /setup/api/pair/status`. The browser shows the match code; approval happens only inside TD.
+  - Agents: `GET /setup/api/agents` lists agents, recent sessions and audit integrity.
+  - Tokens: `POST /setup/api/tokens` creates one. Role observer or builder; one scope inside `Projectroot`; an optional subset of actions. Each token is shown once.
+  - `POST /setup/api/tokens/revoke` and `POST /setup/api/logout`.
+  - Enabling MCP stays a TouchDesigner parameter (`Enablemcp`); it is not a web action.
 - 1C: client selection, connection instructions, Skills preview/install/update.
 
 It is deliberately separate from the Phase 2B Governance Dashboard (`/ui/`), sharing only the gate, admin session and static-file serving.

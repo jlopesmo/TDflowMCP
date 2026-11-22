@@ -53,7 +53,8 @@ _FORBIDDEN_RESPONSE = ("access-control-", "content-length", "transfer-encoding",
                        "content-type", "date", "x-tdflow-request-id") + tuple(k.lower() for k, _ in SECURITY_HEADERS)
 _TOKEN = re.compile(r"^[A-Za-z0-9!#$%&'*+.^_`|~-]+$")
 # Request headers handed to the main-thread dispatcher (never Authorization or Cookie).
-FORWARDED_HEADERS = ("content-type", "accept", "user-agent", "mcp-protocol-version", "x-tdflow-request")
+FORWARDED_HEADERS = ("content-type", "accept", "user-agent", "mcp-protocol-version", "mcp-method", "mcp-name",
+                     "x-tdflow-request")
 _EADDRINUSE = {98, 48, 10048, 10013}  # Linux, macOS, WSAEADDRINUSE, WSAEACCES (exclusive owner)
 _BUSY_BODY = b'{"error":"TDFLOW_BUSY"}\n'
 _BUSY_RAW = (b"HTTP/1.1 503 Service Unavailable\r\nContent-Type: application/json\r\nContent-Length: "
@@ -662,8 +663,12 @@ class EmbeddedHTTPTransport:
             except OSError:
                 pass
 
+    @staticmethod
+    def _unauth(job: Job) -> bool:
+        return job.principal is None or str(job.principal).startswith("pair:")
+
     def _release_unauth(self, job: Job) -> None:
-        if job.principal is None:
+        if self._unauth(job):
             with self._lock:
                 self._unauth_pending = max(0, self._unauth_pending - 1)
 
@@ -672,7 +677,7 @@ class EmbeddedHTTPTransport:
         with self._lock:
             if self._closing:
                 return error(503, "TDFLOW_CLOSING")
-            if job.principal is None:
+            if self._unauth(job):
                 # Unauthenticated jobs get a small separate quota so they cannot starve /mcp (review 4, M).
                 if self._unauth_pending >= self.unauth_queue_max:
                     self._stats["busy_unauth"] = self._stats.get("busy_unauth", 0) + 1
@@ -681,7 +686,7 @@ class EmbeddedHTTPTransport:
             try:
                 self._q.put_nowait(job)              # under the lock: begin_close cannot miss it
             except queue.Full:
-                if job.principal is None:
+                if self._unauth(job):
                     self._unauth_pending -= 1
                 self._stats["busy"] = self._stats.get("busy", 0) + 1
                 return busy

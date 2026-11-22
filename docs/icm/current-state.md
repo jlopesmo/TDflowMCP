@@ -1,78 +1,74 @@
 # TDflowMCP — Current state
 
-**Observed 2026-11-22, branch `dev`. Phase 1A is complete** (owner GO, D11): a development build of `TDflowMCP.tox` passes its in-TouchDesigner acceptance suite and a real default-browser run on TouchDesigner **2025.32440**, the minimum and tested build (D10). No TD upgrade is needed. This file records evidence only. Plans live in the [roadmap](roadmap.md).
+**Observed 2026-11-22, branch `dev`. Phase 1B (secure MCP core) is complete** (owner D12). The packaged development build passes its in-TouchDesigner security and functionality acceptance suite on TouchDesigner **2025.32440**, after independent review 6. Phase 1A stays verified on the same build. This file records evidence only. Plans live in the [roadmap](roadmap.md).
 
 ## Verified
-- Private repository `jlopesmo/TDflowMCP`. `main` = `066dbd0` (Phase 0 foundation), **unchanged**. Development continues on `dev`.
+- **Repository:** private `jlopesmo/TDflowMCP`. `main` = `066dbd0` (Phase 0 foundation), **unchanged**. Development continues on `dev`.
 - **ADRs:**
-  - 0002 (embedded loopback transport): Conditionally Accepted; revised after S6; component integration verified.
-  - 0007 (source-first build): Conditionally Accepted; gates S2 and S3 passed.
-  - 0010 (Setup Assistant): Conditionally Accepted; Phase 1A acceptance passed.
-  - 0011–0013: still Proposed.
-- **Spikes (all in disposable, text-generated projects only):**
-  - S5: the 2025.32440 *Web Server DAT* is unsafe (it binds `0.0.0.0`) and is never used there.
-  - S6: the embedded Python transport is safe on 2025.32440.
-  - **S2:** source-first build.
-  - **S3:** in-TD runner.
-  - **S4:** undo semantics: everything except DAT text is undoable inside a block; nothing outside one.
-  - **S7:** an independent local timeline keeps the component serving while the project timeline is paused.
-
-  Records: [S4](../research/2026-11-22-s4-undo-semantics.md), [S5](../research/2026-11-22-s5-compatibility-2025.32440.md), [S6](../research/2026-11-22-s6-embedded-python-transport.md), [Phase 1A](../research/2026-11-22-phase-1a-component.md).
-- **Development build** (`tools/build_tox/build.py`): `build/TDflowMCP.tox` v`0.1.0.dev1`, SHA-256 `46eab026c8ee87e847c12bc057b00d83313b053d22df265907738fb7e8d43f8b`, built with TD 2025.32440. The `.tox` is **git-ignored and not a release artifact**; rebuild it from source with one command.
-  - **Embedded:** 11 core modules, the TD adapter, the Setup page, troubleshooting data and a hash manifest.
-  - **Parameters:** 15 custom parameters.
-  - **Reproducibility:** the source digest is reproducible; the binary differs only by TD metadata.
-- **Phase 1A component** (verified by the in-TD suite, 48/48 + 69/69, and the real-browser run, 12/12 + 5/5):
-  - **States and parameters:**
-    - Controller states Off · Starting · Setup · Stopping · Error. Enabled and Suspended are reserved and unreachable.
-    - Parameters Open Setup / Stop Server / Run Diagnostics / Copy Tell Agent; dynamic Status, Status Detail, Setup URL, Port Status, Compatibility, Tell Your Agent; Port 9480.
-  - **Listener safety:**
-    - No listener before Open Setup.
-    - 503 until the loopback-only binding is verified.
-    - LAN not reachable; re-verification every 10 s.
-    - Conflict detection, including another component in the same project; the port is never changed silently.
-  - **Threading and robustness:**
-    - Main-thread-only TD operations.
-    - Queue timeouts (504, never dispatched) and error recovery.
-    - Stop and restart; stop during Starting; idle stop.
-    - Extension re-init; deletion (listener gone in 0.01 s); project-exit handler.
-    - Serving continues with the project timeline paused.
-  - **No MCP, no code execution:** `/mcp` returns `503 MCP_DISABLED` for every request; there are no write endpoints and no code-execution routes.
-  - **Discovery:** `/.well-known/tdflowmcp` returns only `{product, version}`.
-  - **Secrets scan:** no secrets or paths in parameters, the agent text, diagnostics, HTTP responses or the TD log (failure path included).
-  - **Failure reporting:** browser-launch and clipboard failures are reported in Status Detail.
-- **Embedded Setup Assistant:**
-  - Read-only status, compatibility and dependency/port diagnostics, troubleshooting guidance.
-  - Dynamic Tell Your Coding Agent setup and repair text, with Copy, served from assets inside the `.tox`.
-  - Opened in the real default browser from Open Setup.
-- **142 unit tests pass** on CPython 3.11.8 and on TD's bundled Python 3.11.10 (1 skipped: non-Windows only).
-- **Doc checker** passes.
-- **Independent reviews:** review 4 (transport) and [review 5](../research/2026-11-22-phase-1a-review.md) (component: no High; all findings fixed or mitigated).
+  - 0002, 0003, 0006, 0007, 0009 and 0010: Conditionally Accepted, with Phase 1 gates recorded.
+  - **0012 and 0013: Conditionally Accepted** (owner D12).
+  - 0011: still Proposed (needed before 1C).
+  - **ADR-0006 write-latency gate: open** (≈ 5.3 ms per audit append with `synchronous=FULL`; owner decision).
+- **Phase 1A** ([record](../research/2026-11-22-phase-1a-component.md)): the component, embedded transport, bind gate and Setup Assistant. Re-verified on the 1B build: 49/49 + 69/69; real default browser 13/13 + 5/5.
+- **Phase 1B** ([record](../research/2026-11-22-phase-1b-mcp-core.md), [review 6](../research/2026-11-22-phase-1b-review.md)), in the development build `build/TDflowMCP.tox` v`0.2.0.dev1` (tool surface `1`, SHA-256 `52d039eb…`, git-ignored, not a release):
+  - **Policy:** server-side deny-by-default CRUD+execute scopes with hard denies:
+    - TDflowMCP instances and their subtrees, including reads;
+    - on ancestors: delete, rename, flags, extensions and cloning;
+    - `tdflowProject`, `/sys`, `/local`, `/ui`, and anything outside `Projectroot`.
+  - **Classification:** a creation **allowlist**. Expressions, Python, reference and file parameters, wires into DATs, and DAT text not tagged `tdflowdata` by the user are all `execute`, which is denied. **No arbitrary Python execution exists.**
+  - **Identity:** salted-hash tokens, created and revoked only from a browser session paired by approval **inside TD**; CSRF on admin reads and writes; server-side logout.
+  - **Durable SQLite audit:** intent before and outcome after every call; hash chain plus keyed checkpoints; tamper detection; **fail closed** (no audit, no call); a failed outcome write suspends all agents; session grouping and notes persist across a TD restart.
+  - **Kill switch** (`Suspendagents`): rejects every call, including requests already queued.
+  - **Enable MCP:** only after its preconditions pass.
+  - **MCP protocol:** 2026-07-28 stateless and the legacy `initialize` flow; conformance tests.
+  - **Tools:** 16 (14 core plus session note and session list), every call checked by policy and audited.
+  - **Verified undo:** for set parameters, create, delete, connect, disconnect and DAT text (snapshot). `UNDO_CONFLICT` after human, other-agent or restart interleaving (S4b).
+  - **Final in-TD acceptance:** **41/41 + 110/110** over two launches (`mcp`, `mcp_restart`); TD exit code 0; no listener left; other TD processes untouched.
+- **Spikes:**
+  - S4 (undo) and **S4b** (stack introspection, interleaving, ids, save/reload) ([S4 record](../research/2026-11-22-s4-undo-semantics.md));
+  - **S7** (paused timeline).
+- **TDMCP comparison:** documentation only ([record](../research/2026-11-22-tdmcp-comparison.md)). TDMCP requires 2025.33230+, so nothing was downloaded.
+- **Tests and checks:**
+  - **204 unit tests** pass on CPython 3.11.8 (2 skipped) and TD Python 3.11.10 (1 skipped; that run includes the `jsonschema` cross-check).
+  - The doc checker passes.
+  - The **secret scan** (new CI step) finds nothing in the repository.
 
 ## Not implemented (nothing below exists)
-- **MCP core:** protocol layer, policy engine, identity/token store, durable audit store, pairing/admin session, Enable MCP / Suspend Agents, MCP tools.
-- **Later phases:** client connection instructions, Skills, continuity services, `tdflowProject`, dashboard.
-- **Releases:** no release packaging, no committed `.tox`.
-- **Dev mode:** file-synced DATs (ADR-0007 §3) are not implemented; builds embed the text.
+- **Withheld by design:**
+  - approvals and the approval flow (2B);
+  - arbitrary, raw or Code Mode Python execution (3, approval-gated);
+  - project save.
+- **Later phases:**
+  - the governance dashboard (2B);
+  - checkpoints, handoffs and memory tools (2A);
+  - client connection instructions, Skills, `.tox` packaging and releases (1C).
+- **Dev mode:** file-synced DATs are not implemented.
 
 ## Not observed / unverified
-- **CI:** no GitHub Actions run has been observed for any commit (no GitHub integration here; [B3](roadmap.md#open-blockers-and-owner-actions)).
-- **Literal mouse drag:** a mouse drag of the `.tox` was not automated. `loadTox`, the same component-load path, was tested.
-- **S4 open cases:** undo interleaving with user edits, and after save/reload.
-- **Other environments:** newer TD builds and macOS are untested; S1 (Web Server DAT comparison) is optional.
-- **Cloudflare:** the codemode/mcp page could not be fetched first-hand.
-- **TDMCP / TDMCPSkills:** facts are documentation-level only.
+- **CI:** no GitHub Actions run has been observed for any commit ([B3](roadmap.md#open-blockers-and-owner-actions)). The new secret-scan step has run locally only.
+- **Live coding-agent session:** a live Claude Code (or other client) session against the endpoint is a 1C item. The acceptance suite uses its own MCP client for both protocol eras.
+- **Policy branch coverage:** not measured (no coverage tool installed).
+- **Hands-on TDMCP comparison:** needs a machine with TD 2025.33230+.
+- **Literal mouse drag:** not automated; `loadTox`, the same load path, is tested.
+- **Cloudflare / TDMCPSkills:** facts remain documentation-level.
 
 ## Commit record
 - `82b64f1`, `b70000a`, `066dbd0`, `380d317`: Phase 0. `main` = `066dbd0`.
-- `377841c`, `ec259ed`: S5 and 1A prep.
-- `591b01e`, `3d0081e`: S6 embedded transport.
-- `e680b47`: Phase 1A (component, builder, in-TD tests, S4/S7, review 5). Pushed to `origin/dev` and observed with `git ls-remote` (`refs/heads/dev` = `e680b47…`, `refs/heads/main` = `066dbd0…`, so `main` is unchanged). This record was added by the follow-up commit. CI: **not observed**.
+- `377841c`, `ec259ed`: S5. `591b01e`, `3d0081e`: S6. `e680b47`, `9939af9`: Phase 1A.
+- Phase 1B commit: recorded by the follow-up commit after the push is observed. CI: **not observed**.
 
-## Phase 1B prerequisites (next)
-1. **Decisions (owner):**
-   - Accept or revise ADR-0012 (session logs) and ADR-0013 (`tdflowProject` hard deny) before 1B ([B5](roadmap.md#open-blockers-and-owner-actions)).
-   - Decide whether to keep the in-memory transport audit ring until the 1B audit store exists.
-2. **Undo:** a design for DAT-text inverse snapshots (S4), plus the S4 interleaving and restart tests.
-3. **Engineering:** policy engine, identity/token store with hashed tokens, the audit store (fail-closed, flood aggregation), the pairing/admin session, Enable MCP / Suspend Agents, then the protocol layer and the 14 core tools, each under main-thread undo blocks.
-4. **Process:** an observed CI run (B3) and CI secret scanning (item 6).
+## Phase 1C prerequisites (next)
+1. **Owner decisions:**
+   - Accept or revise ADR-0011 (agent integration and Skills) (B5).
+   - Decide the ADR-0006 latency gate: keep `synchronous=FULL`, use WAL `NORMAL`, or batch read events.
+2. **Process:** an observed CI run (B3) with the new secret-scan step.
+3. **1C engineering:**
+   - the client registry with support levels (item 20);
+   - "Tell Your Coding Agent" connection instructions with a `${TDFLOW_TOKEN}` placeholder, plus a **live Claude Code session** against a disposable project (item 21; also ADR-0003's live-client gate);
+   - the Skills bundle with assisted writes (22);
+   - version management (23);
+   - `.tox` packaging and the install guide (24).
+4. **Follow-ups from review 6** (documented residual risks):
+   - anchor checkpoints outside `Datadir` (e.g. DPAPI);
+   - bind and export propagation;
+   - mitigating denial of service on pairing.

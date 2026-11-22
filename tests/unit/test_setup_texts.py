@@ -22,7 +22,7 @@ class TellAgentTests(unittest.TestCase):
         text = tellagent.build("Error", "PORT_IN_USE", 9480, "2025.32440", checks, TROUBLE, "0.1.0")
         self.assertIn("## Setup", text)
         self.assertIn("## Repair", text)
-        self.assertIn("MCP access is not available", text)
+        self.assertIn("MCP access is not enabled", text)
         self.assertIn("Do not install software", text)
         self.assertIn(TROUBLE["entries"]["net.port.in_use"]["title"], text)
         self.assertIn("Listener error PORT_IN_USE", text)
