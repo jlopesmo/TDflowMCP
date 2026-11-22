@@ -1,10 +1,10 @@
 # ADR-0007 — Source-first development, packaging and testing
 
-**Status:** Conditionally Accepted (owner, 2026-11-22), subject to spikes S2 and S3. Revision: the declared minimum and build target is **TD 2025.32440** (owner D10, 2026-11-22; previously a provisional 2025.33230+).
+**Status:** Conditionally Accepted (owner, 2026-11-22); **validation gates S2 and S3 passed 2026-11-22** ([Phase 1A record](../research/2026-11-22-phase-1a-component.md)). Revision: the declared minimum and build target is **TD 2025.32440** (owner D10, 2026-11-22; previously a provisional 2025.33230+).
 
 ## Decision
 1. `src/` text is the truth, and `TDflowMCP.tox` is built from it ([rules](../architecture/source-of-truth.md)).
-2. **Build:** `tools/build_tox` runs inside TouchDesigner, launched with a startup script against an empty build `.toe`. It constructs the COMP from `src/component/manifest.json`, embeds DAT contents, saves `build/TDflowMCP.tox`, and writes `TDflowMCP.json` (version, TD build used, sha256). The exact TD command-line or automation mechanism is **unproven**; proving it is Phase 1 spike S2.
+2. **Build:** `tools/build_tox` runs inside TouchDesigner, launched with a generated disposable builder `.toe` (`tools/tdtoe.py`; no committed binary input). It constructs the COMP from `src/component/manifest.json`, embeds DAT contents with SHA-256, saves `build/TDflowMCP.tox`, and writes `TDflowMCP.json` (version, source digest, TD build used, sha256). **Proven in S2.** Reproducibility is defined by the source digest: raw `.tox` bytes differ per build only by TD metadata (`.build` timestamp, the playing local timeline's current frame).
 3. **Dev mode:** DATs reference `src/` files through the `file` parameter for live editing. Release mode embeds the file contents.
 4. **Tests:**
    - `tests/unit/`: stdlib `unittest` on CPython 3.11, covering protocol, policy, registry, audit, identity and approvals with no `td` import. Runs in CI.
@@ -24,6 +24,6 @@ Commit the `.tox` binary as source (not diffable; merge conflicts); depend on Em
 - TouchDesigner requires a license and typically an interactive, GPU-capable desktop session. A self-hosted runner therefore needs a logged-in Windows session and a licensed TD install. Hosted CI runs only the `td`-free unit tests.
 
 ## Validation gates
-- **S2:** an unattended `.tox` build from text on the minimum build (2025.32440) in a disposable project. **Partial evidence (S5, 2025.32440):** a `.toe` was generated from text with `toecollapse`, and TD ran it unattended and quit itself (exit code 0). The expanded-format DAT text header is documented in the [S5 findings §4](../research/2026-11-22-s5-compatibility-2025.32440.md#4-side-findings-useful-for-s2s3). This does not satisfy S2, which requires a `.tox` with custom parameters on the target build.
-- **S3:** the in-TD runner emits JSON results.
+- **S2 (passed 2026-11-22):** an unattended `.tox` build from text with 15 custom parameters on 2025.32440, verified by builder self-checks and a two-build reproducibility comparison.
+- **S3 (passed 2026-11-22):** the in-TD runner loads the built `.tox` into a disposable project, drives it, and emits JSON results (`build/td-test-results*.json`).
 - If either fails, this ADR reopens before any production `.tox` work.

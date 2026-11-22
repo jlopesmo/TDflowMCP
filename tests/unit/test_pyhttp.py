@@ -72,6 +72,7 @@ class Harness:
         self.auth = TokenAuthenticator()
         self.auth.add(TOKEN, "agent-1")
         kw.setdefault("io_timeout", 2.0)
+        kw.setdefault("mcp_enabled", True)
         self.t = EmbeddedHTTPTransport("127.0.0.1", 0, state_fn=lambda: self.state, authenticator=self.auth, **kw)
         self.t.set_static({"/setup/": ("text/html; charset=utf-8", b"<!doctype html><p>setup</p>"),
                            "/setup/app.js": ("text/javascript", b"console.log(1)")})
@@ -554,6 +555,51 @@ class Review4Tests(unittest.TestCase):
     def test_l_unreadable_other_listener_table_is_ambiguous(self):
         ev = bv.verdict(["127.0.0.1"], [], {}, sockname="127.0.0.1", others=None)
         self.assertIs(ev.verdict, bv.Verdict.AMBIGUOUS)
+
+
+class Phase1ATests(unittest.TestCase):
+    def test_mcp_disabled_before_auth_and_dispatch(self):
+        h = Harness(mcp_enabled=False)
+        try:
+            p = h.port
+            for hdr in (mcp_headers(p), {"Content-Type": "application/json"}):
+                st, _, body = req(p, "POST", "/mcp", hdr, b"{}")
+                self.assertEqual((st, code(body)), (503, "MCP_DISABLED"))
+            for method, hdr in (("POST", dict(mcp_headers(p), Origin="http://evil.example")), ("GET", {}),
+                                ("POST", {"Content-Type": "text/plain"}), ("OPTIONS", {"Origin": "http://evil.example"})):
+                st, hd, body = req(p, method, "/mcp", hdr, b"{}" if method == "POST" else b"")
+                self.assertEqual((st, code(body)), (503, "MCP_DISABLED"), method)
+                self.assertFalse([k for k in hd if k.startswith("access-control")])
+            self.assertEqual(req(p, "POST", "/mcp", mcp_headers(p), b"{}", host="evil.example")[0], 403)
+            self.assertEqual(h.dispatched_on, [])
+            self.assertNotIn("auth_fail", h.t.stats())
+        finally:
+            h.close()
+
+    def test_heartbeat_watchdog_closes_orphaned_listener(self):
+        h = Harness(heartbeat_timeout=0.3)
+        p = h.port
+        end = time.monotonic() + 5
+        while not h.t.is_closed() and time.monotonic() < end:
+            time.sleep(0.05)
+        self.assertTrue(h.t.is_closed())
+        self.assertEqual(h.t.close_reason, "heartbeat_lost")
+        with self.assertRaises(OSError):
+            socket.create_connection(("127.0.0.1", p), timeout=1).close()
+
+    def test_pumping_keeps_the_watchdog_quiet(self):
+        h = Harness(heartbeat_timeout=0.3)
+        try:
+            end = time.monotonic() + 1.0
+            while time.monotonic() < end:
+                h.t.pump(h.dispatch)
+                time.sleep(0.02)
+            self.assertTrue(h.t.healthy())
+            before = h.t.last_activity
+            req(h.port)
+            self.assertGreater(h.t.last_activity, before)
+        finally:
+            h.close()
 
 
 class CloseRestartTests(unittest.TestCase):

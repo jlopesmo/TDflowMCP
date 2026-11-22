@@ -11,7 +11,7 @@ Only Accepted ADRs bind implementation. Work that depends on a **Proposed** ADR 
 | ADR | Title | Status |
 |---|---|---|
 | [0001](0001-product-scope.md) | Product scope, pillars and sequencing | Conditionally Accepted (owner 2026-11-22) |
-| [0002](0002-in-process-mcp-host.md) | Host the MCP server inside TouchDesigner via an embedded loopback transport (stdlib Python HTTP by default; Web Server DAT optional); no separate Node server | Conditionally Accepted (owner 2026-11-22; revised after S6; remaining gate: component integration) |
+| [0002](0002-in-process-mcp-host.md) | Host the MCP server inside TouchDesigner via an embedded loopback transport (stdlib Python HTTP by default; Web Server DAT optional); no separate Node server | Conditionally Accepted (owner 2026-11-22; revised after S6; component integration verified in Phase 1A) |
 | [0003](0003-protocol-implementation.md) | Hand-rolled MCP protocol layer instead of the official Python SDK | Conditionally Accepted (owner 2026-11-22) |
 | [0004](0004-code-mode-strategy.md) | Code Mode as an optional, policy-checked facade (not a sandbox) | Conditionally Accepted as direction (owner 2026-11-22; Phase 3) |
 | [0005](0005-dashboard.md) | Governance dashboard (separate from setup) | Conditionally Accepted (owner 2026-11-22; Phase 2B) |

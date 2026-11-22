@@ -13,8 +13,11 @@ This file lists every check that exists, how to run it, and its last **executed 
 | Core unit tests (`tests/unit/`) | `python -m unittest discover -s tests -t .` (same command) | `net.bindverify`, `net.oslisteners`, `net.pyhttp` (real loopback sockets, ephemeral ports), `gate`, `compat`, troubleshooting data, `td`-free/no-subprocess boundaries | See runs below |
 | TD bundled-Python parity | `"C:\Program Files\Derivative\TouchDesigner.2025.32440\bin\python.exe" -m unittest discover -s tests -t .` | The same suite on TD's interpreter (no TouchDesigner process) | See runs below |
 | Spike S5 (2025.32440) | `spikes/s5/` copied to `.tmp/s5/`, then `python -I s5_harness.py` (and `TDFLOW_S5_NO_WS=1`) | Runtime, libraries, parameters, clipboard, Web Server DAT, binding, gate | Executed; see [S5 findings](../research/2026-11-22-s5-compatibility-2025.32440.md) |
+| `.tox` build (S2) | `python -I tools/build_tox/build.py [--check-reproducible]` | Source-first build, embedded hash self-check, reproducibility | See runs below |
+| In-TD integration suite (S3) | `python -I tests/td/run_td_tests.py [--mode real_browser]` | The packaged component in a disposable project: parameters, lifecycle, binding, LAN, gate, MCP disabled, Setup page, clipboard/browser failures, timeouts, conflicts, re-init, deletion, paused timeline, secrets | See runs below |
+| Spikes S4 / S7 | `python -I spikes/s4/run_s4.py .tmp/s4`, `python -I spikes/s7/run_s7.py .tmp/s7` | Undo semantics; frame callbacks with the timeline paused | Executed; see [S4](../research/2026-11-22-s4-undo-semantics.md), [S7](../../spikes/s7/README.md) |
 | Spike S6 (2025.32440) | `spikes/s6/` copied to `.tmp/s6/`, `python -I build_toe.py`, then `python -I s6_harness.py main` and `… conflict` with `TDFLOW_SRC` set | Embedded transport in TD: binding, LAN, threads, lifecycle, timeouts, conflicts, load, frame impact, recovery, static Setup page + headless browser, gate/auth/kill switch | Executed; see [S6 findings](../research/2026-11-22-s6-embedded-python-transport.md) |
-| Protocol/policy/audit tests, in-TD component tests, `.tox` build, S1–S4 | — | — | **Do not exist / not executed** (later Phase 1A items and phases; S1 optional) |
+| Protocol/policy/audit tests, S1 | — | — | **Do not exist / not executed** (Phase 1B; S1 optional) |
 
 ## Runs
 
@@ -42,6 +45,17 @@ This file lists every check that exists, how to run it, and its last **executed 
 | 2026-11-22 | TouchDesigner 2025.32440 (disposable `s6.toe`) | S6 main (after review 4) | **Pass 66/66**; exit code 0; 924 dispatches on `MainThread`, 0 elsewhere; LAN connect not connected; no listener after exit |
 | 2026-11-22 | TouchDesigner 2025.32440 (disposable `s6.toe`) | S6 conflict (after review 4) | **Pass 4/4**; `PORT_IN_USE`, TD never listened; exit code 0 |
 | 2026-11-22 | Windows 11, CPython 3.11.8 | `check_docs.py` (S6, pre-commit) | Pass: `53 markdown files, 0 problem(s)` |
+| 2026-11-22 | TouchDesigner 2025.32440 (disposable) | S4 undo spike (2 runs) | Exit code 0; results in [S4](../research/2026-11-22-s4-undo-semantics.md) |
+| 2026-11-22 | TouchDesigner 2025.32440 (disposable) | `.tox` build + `--check-reproducible` (before review 5) | Pass: builder checks OK; source digest equal; expanded diff `.build` only |
+| 2026-11-22 | TouchDesigner 2025.32440 (disposable) | In-TD suite, first run | 34/35 + 58/59: a controller bug (re-open launch never consumed) and a test race; both fixed |
+| 2026-11-22 | TouchDesigner 2025.32440 (disposable) | In-TD suite + real browser (before review 5) | Pass: 35/35 + 59/59; 12/12 + 5/5 |
+| 2026-11-22 | — | Independent review 5 (Phase 1A component) | 16 findings (0 High, 3 Medium, 13 Low); dispositions in [review 5](../research/2026-11-22-phase-1a-review.md) |
+| 2026-11-22 | TouchDesigner 2025.32440 (disposable) | In-TD suite with the paused-timeline test (before S7 fix) | **Froze**: frame callbacks stop while the root timeline is paused; the harness ended its own TD at the deadline (rc 1). This led to S7 |
+| 2026-11-22 | TouchDesigner 2025.32440 (disposable) | S7 (3 runs) | Without `independent`: no frames (killed by timeout, own process only). With `independent`: 141 vs 1 frames during the pause; rc 0 |
+| 2026-11-22 | TouchDesigner 2025.32440 (disposable) | `.tox` build + `--check-reproducible` (final) | Pass: SHA-256 `46eab026…`; source digest equal; expanded diff `.build`, `local/time/cframe.ts` |
+| 2026-11-22 | Windows 11, CPython 3.11.8 / TD Python 3.11.10 | unit tests (final) | Pass: `Ran 142 tests … OK (skipped=1)` on both |
+| 2026-11-22 | TouchDesigner 2025.32440 (disposable) | **In-TD full suite (final)** | **Pass: 48/48 in TD + 69/69 harness**; rc 0; other TD processes untouched |
+| 2026-11-22 | TouchDesigner 2025.32440 (disposable) | **Real default-browser run (final)** | **Pass: 12/12 + 5/5**; the browser fetched `/setup/`, `app.js`, `/setup/api/status` |
 
 ## Local environment facts (file inspection only, 2026-11-22)
 

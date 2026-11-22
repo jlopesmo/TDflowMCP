@@ -1,22 +1,24 @@
 # Setup Assistant, component parameters, compatibility and troubleshooting
 
-**Status: Proposed design** for owner-approved requirements P9–P12 and P14 ([ADR-0010](../decisions/0010-setup-assistant-and-component-parameters.md)). Not implemented. API details marked **[verify]** must be confirmed in spike S5.
+**Status:** Design for owner-approved requirements P9–P12 and P14 ([ADR-0010](../decisions/0010-setup-assistant-and-component-parameters.md)). **The Phase 1A part is implemented** in the development build of `TDflowMCP.tox` (2026-11-22). It is verified in TouchDesigner 2025.32440 by the in-TD suite; see [Phase 1A component record](../research/2026-11-22-phase-1a-component.md). The 1B/1C rows remain design only.
 
 ## 1. Component states
 
 | State | Listener | `/setup` | `/mcp` | `/ui` (dashboard) | How entered |
 |---|---|---|---|---|---|
 | **Off** (default after drop-in) | none | — | — | — | Initial; `Stopserver` pulse; idle timeout |
-| **Setup** | 127.0.0.1:`Port` | read-only (1A); paired actions (1B) | 503 `MCP_DISABLED` | 404 until Phase 2B | `Opensetup` pulse |
-| **Enabled** | 127.0.0.1:`Port` | available | active (policy-enforced) | Phase 2B | `Enablemcp` on, after preconditions (§4) |
-| **Suspended** | 127.0.0.1:`Port` | available | `SUSPENDED` for all agents | Phase 2B | `Suspendagents` on (kill switch) |
+| **Starting** (1A, transient) | 127.0.0.1:`Port`, `VERIFYING` | 503 | 503 | 503 | `Opensetup` pulse; ends in Setup or Error |
+| **Setup** | 127.0.0.1:`Port` | read-only (1A); paired actions (1B) | 503 `MCP_DISABLED` | 404 until Phase 2B | verification passed |
+| **Stopping** (1A, transient) | closing | — | — | — | `Stopserver`, a Port change, a failed check, project exit or component deletion; ends when the OS table confirms the socket is gone |
+| **Enabled** (reserved; 1B) | 127.0.0.1:`Port` | available | active (policy-enforced) | Phase 2B | `Enablemcp` on, after preconditions (§4). Not reachable in 1A |
+| **Suspended** (reserved; 1B) | 127.0.0.1:`Port` | available | `SUSPENDED` for all agents | Phase 2B | `Suspendagents` on (kill switch). Not reachable in 1A |
 | **Error** | none | — | — | — | `PORT_IN_USE` (another process listens on the port, on any address: never shared), `BIND_UNSUPPORTED` (Web Server DAT transport without `localaddress`: never activated), `BIND_UNVERIFIED` (closed by the gate), `CLOSE_UNCONFIRMED` (socket did not disappear: restart TouchDesigner), port conflict, storage failure. Leaving Error needs an explicit user action |
 
-The component **never listens until the user acts** (pulse or toggle). After the user acts, the listener is activated in a non-serving `VERIFYING` state (every request gets `503`). Application requests are served only after the effective loopback-only binding is positively verified. If verification fails or is ambiguous, the listener is **closed immediately**, the state becomes `Error: BIND_UNVERIFIED`, and the only guidance channel is the component's parameters and an in-component text DAT, never a less-secure listener ([security model §8.2](security-model.md#82-bind-verification-gate)). In Setup state with MCP disabled, the listener auto-stops after an idle timeout (proposed 30 min).
+The component **never listens until the user acts** (pulse or toggle). After the user acts, the listener is activated in a non-serving `VERIFYING` state (every request gets `503`). Application requests are served only after the effective loopback-only binding is positively verified. If verification fails or is ambiguous, the listener is **closed immediately**, the state becomes `Error: BIND_UNVERIFIED`, and the only guidance channel is the component's parameters and an in-component text DAT, never a less-secure listener ([security model §8.2](security-model.md#82-bind-verification-gate)). While serving, the binding is re-verified every 10 s. In Setup state with MCP disabled, the listener auto-stops after 30 min without requests. If the component is deleted, the extension shuts the listener down at once (`onDestroyTD`). As a backstop, the transport closes itself when the main thread has stopped pumping for 20 s (heartbeat).
 
 ## 2. Essential custom parameters
 
-Page **TDflowMCP** (TouchDesigner custom parameter names are capitalised-then-lowercase). S5 verified the creation APIs on 2025.32440. Builder notes from S5:
+Page **TDflowMCP** (TouchDesigner custom parameter names are capitalised-then-lowercase). The 1A rows are **built** from [`src/component/manifest.json`](../../src/component/manifest.json) and verified in TD. Builder notes from S5:
 - a menu's `.default` does not change its current value, so `.val` must be set explicitly;
 - a `readOnly` parameter can still be set by script, which suits status parameters;
 - a pulse fired on the same frame its Parameter Execute DAT is created is not delivered, so callbacks must be wired at least one frame before use.
@@ -24,17 +26,19 @@ Page **TDflowMCP** (TouchDesigner custom parameter names are capitalised-then-lo
 | Parameter | Type | Default | Phase | Behaviour |
 |---|---|---|---|---|
 | `Version` | Str, read-only | build version | 1A | Component version + tool-surface version |
-| `Status` | Str, read-only | `Off` | 1A | Current state + error code |
-| `Opensetup` | Pulse | — | 1A | Run checks, start the Setup listener if allowed, and only after the bind gate passes open `http://127.0.0.1:<Port>/setup/` with `ui.viewFile` (the API exists on 2025.32440; the end-to-end launch is unverified, to be checked in S1) |
-| `Stopserver` | Pulse | — | 1A | Stop listener (forces `Enablemcp` off) |
-| `Port` | Int | **9480** | 1A | Listener port; changes take effect on restart; never changed automatically |
-| `Portstatus` | Str, read-only | — | 1A | `free` / `in use (responds like TDflowMCP vX; unverified)` / `in use by another process` |
-| `Runchecks` | Pulse | — | 1A | Re-run compatibility checks |
+| `Status` | Str, read-only | `Off` | 1A | Current state + error code (`Off`, `Starting`, `Setup`, `Stopping`, `Error: <code>`) |
+| `Statusdetail` | Str, read-only | — | 1A | Plain-language detail, including **browser-launch and clipboard failures** (with the URL to open manually) |
+| `Opensetup` | Pulse | — | 1A | Run checks, start the Setup listener if allowed, and only after the bind gate passes open `http://127.0.0.1:<Port>/setup/` in the default browser. Uses Python's `webbrowser` on a background thread, which never touches TD. Verified end-to-end on 2025.32440. Pulsing again while serving re-opens the page |
+| `Stopserver` | Pulse | — | 1A | Stop listener (forces `Enablemcp` off in 1B). From `Error`, it acknowledges the error and returns to `Off` |
+| `Setupurl` | Str, read-only | empty | 1A | The Setup address while serving |
+| `Port` | Int | **9480** (1024–65535) | 1A | Listener port. Never changed automatically. Changing it while active stops the listener; the new port is used on the next `Opensetup` |
+| `Portstatus` | Str, read-only | `not checked` | 1A | `this component` / `in use by another process` / `in use (responds like TDflowMCP vX; unverified)` |
+| `Rundiagnostics` | Pulse | — | 1A | Re-run compatibility checks. Shown as "Run Diagnostics"; previously proposed as `Runchecks` (renamed by the owner, 2026-11-22) |
 | `Compatsummary` | Str, read-only | — | 1A | e.g. `9 pass · 1 warn · 0 fail` |
-| `Projectroot` | Str | `/project1` | 1A | Host project root for scopes (agents can never target outside it) |
-| `Datadir` | Str, read-only | — | 1A | Location of runtime state, displayed unexpanded as `%LOCALAPPDATA%\TDflowMCP\<key>` (no username saved into the `.toe`) |
+| `Projectroot` | Str | `/project1` | 1A (unused until 1B) | Host project root for scopes (agents can never target outside it) |
+| `Datadir` | Str, read-only | `%LOCALAPPDATA%\TDflowMCP` | 1A | Location of runtime state, displayed unexpanded (no username saved into the `.toe`). The per-project `<key>` arrives with the first stored state (1B). Nothing is written in 1A |
 | `Tellagent` | Str, read-only | — | 1A | One-line state of the agent instructions (e.g. `Ready: connect · v0.1`) |
-| `Copytellagent` | Pulse | — | 1A | Copy the full "Tell Your Coding Agent" text to the clipboard with `ui.clipboard` (round-trip verified in S5). The text is also shown on the Setup page and in an internal DAT |
+| `Copytellagent` | Pulse | — | 1A | Copy the full "Tell Your Coding Agent" text to the clipboard with `ui.clipboard`. Success is verified by reading it back; failure is reported in `Statusdetail`. The text is also shown on the Setup page (with its own Copy button) and in the internal `tellagent` DAT |
 | `Enablemcp` | Toggle | **Off** | 1B | Enable `/mcp`; refused unless preconditions (§4) pass |
 | `Suspendagents` | Toggle | Off | 1B | Kill switch |
 | `Pairingrequest` | Str, read-only | empty | 1B | Non-secret match code of the single pending browser pairing request, e.g. `Pending: K7Q-42M (12:01:05)` ([security model §2.5](security-model.md#25-dashboard-and-setup-admin-sessions)) |
@@ -83,7 +87,12 @@ Only allowlisted fields are included. Never included: tokens, environment-derive
 ## 7. Setup Assistant (web)
 
 `/setup/` — a single static page (vanilla HTML/JS, no build, no CDN) plus JSON endpoints:
-- 1A (read-only): `GET /setup/api/status` (state + checks), `GET /setup/api/tellagent`, troubleshooting view. Every read requires the `X-TDflow-Request: 1` header and a valid Host ([gate table](security-model.md#81-per-route-gate-table)).
+- 1A (read-only, **implemented**): `GET /setup/api/status` (state, checks with remediation, Tell Your Coding Agent text) and `GET /setup/api/tellagent` (plain text). The page renders status, checks, troubleshooting and the agent text, and polls every 2 s.
+  - Every read requires the `X-TDflow-Request: 1` header and a valid Host ([gate table](security-model.md#81-per-route-gate-table)).
+  - Assets are Text DATs inside the `.tox`, served from an immutable snapshot under a CSP with no inline script.
+  - All server data is rendered with `textContent`.
+  - The Copy button uses `navigator.clipboard` and falls back to selecting the text with an explanation.
+  - No write endpoint exists.
 - 1B (paired admin session, exact Origin + CSRF, [security model §2.5](security-model.md#25-dashboard-and-setup-admin-sessions)): pairing request, create/disable agent tokens (each token shown once), choose scopes from a preset, enable MCP.
 - 1C: client selection, connection instructions, Skills preview/install/update.
 

@@ -190,6 +190,8 @@ Implemented in `src/tdflowmcp/net/pyhttp.py` (stdlib only: `http.server`, `socke
   - Every response carries `Cache-Control: no-store`, `nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, CORP `same-origin` and a CSP (`default-src 'self'; frame-ancestors 'none'`), so the Setup page must not use inline script.
   - Dispatcher headers named `Access-Control-*`, `Content-Length`, `Transfer-Encoding`, `Connection` or `Server`, or containing CR/LF, are dropped.
   - Errors never include exception text.
+- **MCP off in Phase 1A:** components construct the transport with `mcp_enabled=False`. `/mcp` then returns `503 MCP_DISABLED` right after the gate, before authentication, body read or dispatch.
+- **Orphan watchdog:** if the main thread stops pumping for 20 s (component deleted without `onDestroyTD`, or extension lost), the serve thread closes the listener by itself. A long main-thread stall therefore also closes it, which is fail-closed.
 - **Kill switch:** `suspended` rejects every `/mcp` request with `503 SUSPENDED` before dispatch, while `/setup/` stays available. The transport itself can be stopped with `begin_close()`, which fails queued jobs with `TDFLOW_CLOSING`.
 - **Audit:** the transport keeps a bounded in-memory record per request (id, method, validated path, route, status, code, duration, principal), with no headers, bodies or tokens. The main thread drains it into the audit store (Phase 1B).
 - **Residual limits:**

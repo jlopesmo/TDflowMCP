@@ -16,7 +16,7 @@
 
 ## Directory layout
 
-The current tree is in [project-map.md](../icm/project-map.md). Planned additions (not yet created):
+The current tree is in [project-map.md](../icm/project-map.md). Entries marked EXISTS are present; the rest are planned:
 
 ```
 src/
@@ -24,24 +24,25 @@ src/
     protocol/  policy/  registry/  audit/  identity/  approvals/
     gate.py  compat.py  net/   # EXIST (Phase 1A prep): request gate, compatibility checks, bind verification
     continuity/  memory/  integrations/   # planned; pure logic, TD/file access injected
-  td_adapter/           # thin layer that touches `td` (op access, undo, the per-frame transport pump)
+  td_adapter/           # EXISTS: the only layer that touches `td` (extension, loader, callbacks; undo later)
   tools/                # core tool definitions (Phase 1)
   extensions/           # optional tool modules (Phase 4+)
-  setup/                # troubleshooting.json EXISTS; Setup Assistant static page planned (Phase 1A)
+  setup/                # EXISTS: troubleshooting.json, web/ (Setup Assistant page)
   dashboard/            # governance dashboard static UI (Phase 2B) — no build step
   integrations/         # clients.json registry (Phase 1C)
   skills/               # agent Skills bundle sources (Phase 1C)
   project/              # tdflowProject COMP manifest (Phase 2A)
-  component/            # manifest.json describing the COMP layout and custom parameters
+  component/            # EXISTS: manifest.json describing the COMP layout and custom parameters
 reference/historical/   # read-only historical artifacts (exists: mcp_bridge/)
 reference/third_party/  # git-ignored; official third-party releases for hands-on tests only
 spikes/                 # EXISTS: disposable, reproducible spike code (never built or imported)
 tests/
   unit/                 # EXISTS: stdlib unittest, runs in plain CPython 3.11 (CI) and TD's bundled Python
-  td/                   # in-TouchDesigner integration tests + runner
+  td/                   # EXISTS: in-TouchDesigner integration tests + runner
 tools/
   check_docs.py         # Phase 0 (exists)
-  build_tox/            # Phase 1
+  build_tox/            # EXISTS (Phase 1A): source-first builder
+  tdtoe.py tdrun.py     # EXISTS: disposable .toe generator, TD launcher
 ```
 
 **Key boundary:** `src/tdflowmcp/` must not import `td`. All TD access goes through `src/td_adapter/`. This keeps ≥ 80 % of logic testable in CI without TouchDesigner (hypothesis to validate).

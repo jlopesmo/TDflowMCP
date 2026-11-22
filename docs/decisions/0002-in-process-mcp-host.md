@@ -48,7 +48,7 @@ A stdio shim for stdio-only clients is **deferred**. If built, it must be a poli
   - timeouts, port conflict, overload, error recovery and the kill switch;
   - the full gate matrix.
 - **S5 (executed 2026-11-22):** the Web Server DAT on 2025.32440 has no `localaddress` and binds `0.0.0.0`. The bind gate closed it in about 0.5 s without serving anything. The DAT transport is never activated on builds without `localaddress`.
-- **Component integration (Phase 1A items 9–10):** the transport must run under the component controller with the bind gate, in in-TD tests on 2025.32440.
+- **Component integration (Phase 1A items 9–10), passed 2026-11-22** ([record](../research/2026-11-22-phase-1a-component.md)): the transport runs under the component controller with the bind gate, in the in-TD suite on 2025.32440. The component has its own independent local timeline so it keeps serving while the project timeline is paused (S7).
 - **S1 (optional):** Web Server DAT benchmark on a build with `localaddress`. It only decides whether to offer the DAT transport.
 - Port 9480 conflicts are detected and reported. The port is never silently changed.
 - If integration fails, this ADR reopens. The fallback options are listed in the [technology stack](../architecture/technology-stack.md#alternatives-considered).

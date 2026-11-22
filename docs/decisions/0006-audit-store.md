@@ -3,7 +3,7 @@
 **Status:** Conditionally Accepted (owner, 2026-11-22), subject to the Phase 1B audit gates. Revised by the Phase 0 review: intent/outcome events, keyed checkpoints, HMAC arguments ([security model §6](../architecture/security-model.md#6-audit)).
 
 ## Decision
-- SQLite (`sqlite3`; verified present in the local 2025.32440 bundle; presence on the 2025.33230+ target to be confirmed in S1/S5) at `%LOCALAPPDATA%\TDflowMCP\<project-key>\audit.sqlite` (project key defined in [continuity §2](../architecture/continuity-and-memory.md#2-authority-model-avoids-conflicting-authoritative-records)), outside the repository and the `.toe`.
+- SQLite (`sqlite3`; verified present in the 2025.32440 bundle, the minimum supported build (owner D10)) at `%LOCALAPPDATA%\TDflowMCP\<project-key>\audit.sqlite` (project key defined in [continuity §2](../architecture/continuity-and-memory.md#2-authority-model-avoids-conflicting-authoritative-records)), outside the repository and the `.toe`.
 - The `events` table is append-only. The application never issues UPDATE or DELETE on events, and triggers reject them. Each row carries `prev_hash` and `hash` (a SHA-256 chain over canonical JSON).
 - Approvals, agents and policy live in separate tables. Token secrets are stored only as salted hashes.
 - Phase 1 writes are synchronous on the main thread (WAL mode, measured). Batching or async writes only if budgets fail.

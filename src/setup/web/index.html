@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TDflowMCP Setup</title>
+<link rel="stylesheet" href="/setup/app.css">
+<script src="/setup/app.js" defer></script>
+</head>
+<body>
+<header>
+  <h1>TDflowMCP Setup</h1>
+  <p class="sub">Local setup assistant for this TouchDesigner project. Read-only; reachable from this computer only.</p>
+</header>
+<main>
+  <section id="status-section" aria-labelledby="h-status">
+    <h2 id="h-status">Status</h2>
+    <p id="message" class="message" role="status">Loading…</p>
+    <dl id="status" data-state="loading">
+      <dt>State</dt><dd id="state">–</dd>
+      <dt>Component version</dt><dd id="version">–</dd>
+      <dt>TouchDesigner build</dt><dd id="td-build">–</dd>
+      <dt>Address</dt><dd id="url">–</dd>
+      <dt>Port</dt><dd id="port">–</dd>
+      <dt>Port status</dt><dd id="portstatus">–</dd>
+      <dt>Local-only check</dt><dd id="gate">–</dd>
+      <dt>MCP</dt><dd id="mcp">–</dd>
+    </dl>
+  </section>
+
+  <section aria-labelledby="h-checks">
+    <h2 id="h-checks">Compatibility checks</h2>
+    <p id="summary" class="summary">–</p>
+    <table id="checks">
+      <thead><tr><th scope="col">Check</th><th scope="col">Result</th><th scope="col">Evidence</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <p class="hint">To re-run the checks, pulse <strong>Run Diagnostics</strong> on the component.</p>
+  </section>
+
+  <section aria-labelledby="h-trouble">
+    <h2 id="h-trouble">Troubleshooting</h2>
+    <div id="trouble"><p class="hint">No problems reported.</p></div>
+  </section>
+
+  <section aria-labelledby="h-agent">
+    <h2 id="h-agent">Tell Your Coding Agent</h2>
+    <p class="hint">Copy this text into your coding agent. It describes the current setup state and how to repair problems. It contains no secrets.</p>
+    <div class="row">
+      <button id="copy" type="button">Copy instructions</button>
+      <span id="copy-status" role="status"></span>
+    </div>
+    <pre id="tellagent" tabindex="0">–</pre>
+  </section>
+</main>
+<footer><p class="hint">Last updated <span id="updated">never</span>.</p></footer>
+</body>
+</html>

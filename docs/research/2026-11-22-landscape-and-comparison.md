@@ -87,7 +87,7 @@ Legend: ✔ documented · ✘ documented absent · ? unknown · ◐ partial. TDf
 | Performance characteristics | ? (no published benchmarks; large-project behaviour listed as untested) | ◐ checkpoints ~3–6 ms; `save_project` blocks TD 15 s+; main-thread stall flag | ? | ? | targets defined, unmeasured (system design §6) |
 | Deployment | `.tox` from Releases + in-component updater (version/checksum JSON) | `.tox` + self-update (sha256, no downgrade, backup) + per-project `.venv` | npm package + `.tox` | clone + `.tox` | `.tox` + sha256 manifest from GitHub Releases; no updater planned yet |
 | License | restrictive, non-OSI | MIT | MIT | none detected | **owner decision** |
-| Min TD | 2025.33230 | 2025.33230 | ? | ? | **owner decision** |
+| Min TD | 2025.33230 | 2025.33230 | ? | ? | **2025.32440** (owner D10; embedded transport, S6) |
 
 ## 5. Key conclusions [I]
 

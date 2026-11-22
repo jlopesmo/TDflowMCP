@@ -54,7 +54,7 @@ Result scale: **pass** · **warn** · **fail** · **unknown** (not observed).
 **Consequences (no security relaxation):**
 - On builds whose Web Server DAT lacks `localaddress`, TDflowMCP **never activates the listener** (step 0 of the bind-verification gate, error `BIND_UNSUPPORTED`). MCP and the web Setup Assistant are unavailable on those builds, and guidance is given only through parameters and an internal DAT.
 - The runtime gate (§8.2, steps 1–5) stays mandatory on every build, including 2025.33230+.
-- The `td.build` check reports `warn`. The check that **fails** is **`net.capability`**, with remediation "install TouchDesigner 2025.33230 or newer" (TDflowMCP never performs that install). `net.bind` stays `unknown`, because no listener is ever started.
+- At the time, the `td.build` check reported `warn` and **`net.capability`** failed with remediation "install TouchDesigner 2025.33230 or newer". **Superseded (D10, S6):** `td.build` now passes on 2025.32440, `net.capability` passes for the default embedded transport, and it fails only if the Web Server DAT transport is selected. `net.bind` stays `unknown`, because no listener is ever started.
 
 ## 3. Deviation recorded: unsafe step in run 1
 

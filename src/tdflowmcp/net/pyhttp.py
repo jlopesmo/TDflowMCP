@@ -59,6 +59,8 @@ _BUSY_BODY = b'{"error":"TDFLOW_BUSY"}\n'
 _BUSY_RAW = (b"HTTP/1.1 503 Service Unavailable\r\nContent-Type: application/json\r\nContent-Length: "
              + str(len(_BUSY_BODY)).encode() + b"\r\nRetry-After: 1\r\nConnection: close\r\n\r\n" + _BUSY_BODY)
 _LINGER_MAX, _LINGER_SECONDS = 64, 0.5
+# Gate outcomes that still take precedence over MCP_DISABLED (review 5): not serving, bad Host, bad path.
+_MCP_PRECEDENCE = frozenset({"TDFLOW_VERIFYING", "BAD_HOST", "BAD_PATH"})
 
 
 class TransportError(Exception):
@@ -187,7 +189,9 @@ class _Server(ThreadingMixIn, HTTPServer):
 
     def server_bind(self):
         # Never SO_REUSEADDR (on Windows it lets another socket co-bind the port); exclusive instead.
-        if sys.platform == "win32" and hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+        if sys.platform == "win32":
+            if not hasattr(socket, "SO_EXCLUSIVEADDRUSE"):    # review 5: never bind non-exclusively
+                raise OSError(0, "SO_EXCLUSIVEADDRUSE unavailable")
             self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
         self.socket.bind(self.server_address)
         self.server_address = self.socket.getsockname()
@@ -220,6 +224,7 @@ class _Server(ThreadingMixIn, HTTPServer):
     def service_actions(self):
         self.owner._reap()
         self.owner._drain_rejected()
+        self.owner._watchdog()
 
     def handle_error(self, request, client_address):
         self.owner._bump("handler_errors")          # no traceback to the TD console
@@ -282,6 +287,11 @@ class _Handler(BaseHTTPRequestHandler):
         self.close_connection = True
         dec: Decision = decide(self.command, self.path, self.headers, o.effective_state(), o.cfg)
         principal = None
+        if dec.route == "mcp" and not o._mcp_enabled and dec.code not in _MCP_PRECEDENCE \
+                and not dec.code.startswith("DUPLICATE_HEADER"):
+            # Phase 1A: every /mcp request (any method, origin or body) gets MCP_DISABLED once Host,
+            # path and VERIFYING have been checked. Nothing is authenticated, read or dispatched.
+            return self._reply(error(503, "MCP_DISABLED"), rid, dec.route, dec.path, "MCP_DISABLED", t0)
         if not dec.allow:
             extra = [("Location", dec.location)] if dec.location else []
             if dec.status == 503:
@@ -367,7 +377,8 @@ class EmbeddedHTTPTransport:
                  queue_max: int = 32, max_connections: int = 16,
                  io_timeout: float = 5.0, max_connection_seconds: float = 30.0,
                  job_timeout: float = 5.0, dispatch_grace: float = 5.0, audit_max: int = 2048,
-                 unauth_queue_max: int = 4):
+                 unauth_queue_max: int = 4, mcp_enabled: bool = False,
+                 heartbeat_timeout: Optional[float] = None):
         if host not in BIND_HOSTS:
             raise TransportError("BIND_REFUSED", "only the literal 127.0.0.1 may be bound")
         if not (0 <= int(port) <= 65535):
@@ -398,6 +409,13 @@ class EmbeddedHTTPTransport:
         self.last_handler_error = ""
         self.unauth_queue_max = unauth_queue_max
         self._unauth_pending = 0
+        self._mcp_enabled = bool(mcp_enabled)    # Phase 1A components pass False: /mcp -> 503 MCP_DISABLED
+        # Orphan watchdog: if the owner stops pumping for this long (component deleted, extension lost),
+        # the serve thread closes the listener by itself. None disables it (unit tests).
+        self.heartbeat_timeout = heartbeat_timeout
+        self._last_pump = time.monotonic()
+        self.last_activity = time.monotonic()    # last request of any kind (idle timeout input)
+        self.close_reason = ""
 
     # ---- owner-thread API -------------------------------------------------------------------
     def _own(self, what: str):
@@ -435,6 +453,7 @@ class EmbeddedHTTPTransport:
     def pump(self, dispatch: Callable[[Job], Response], max_jobs: int = 8, budget_s: float = 0.004) -> int:
         """Run up to ``max_jobs`` queued requests on this (main) thread within ``budget_s``."""
         self._own("pump")
+        self._last_pump = time.monotonic()
         n, end = 0, time.perf_counter() + budget_s
         while n < max_jobs:
             try:
@@ -484,6 +503,15 @@ class EmbeddedHTTPTransport:
         self._static = snap                      # atomic reference swap
 
     @property
+    def mcp_enabled(self) -> bool:
+        return self._mcp_enabled
+
+    @mcp_enabled.setter
+    def mcp_enabled(self, value: bool) -> None:
+        self._own("mcp_enabled")
+        self._mcp_enabled = bool(value)
+
+    @property
     def suspended(self) -> bool:
         return self._suspended
 
@@ -496,10 +524,14 @@ class EmbeddedHTTPTransport:
         """Kill switch for the transport itself: stop accepting, fail queued jobs, close the socket
         off-thread (never blocks the frame). Idempotent. Confirm with ``is_closed`` and the OS table."""
         self._own("begin_close")
+        self._close_any_thread("owner")
+
+    def _close_any_thread(self, reason: str) -> None:
         with self._lock:                         # pairs with _submit: no job can slip in after the drain
             if self._closing:
                 return
             self._closing = True
+            self.close_reason = reason
         while True:
             try:
                 job = self._q.get_nowait()
@@ -562,6 +594,8 @@ class EmbeddedHTTPTransport:
             self._stats[name] = self._stats.get(name, 0) + n
 
     def _audit(self, rec: dict) -> None:
+        if rec.get("status", 500) < 400:          # only served requests count as activity (idle stop)
+            self.last_activity = time.monotonic()
         if len(self._audit_ring) == self._audit_ring.maxlen:
             self._bump("audit_overflow")
         self._audit_ring.append(rec)
@@ -608,6 +642,13 @@ class EmbeddedHTTPTransport:
             else:
                 keep.append((sock, deadline))
         self._rejected = keep
+
+    def _watchdog(self) -> None:
+        """Serve thread: close an orphaned listener (nobody pumped for ``heartbeat_timeout`` seconds)."""
+        if self.heartbeat_timeout and not self._closing and \
+                time.monotonic() - self._last_pump > self.heartbeat_timeout:
+            self._bump("orphan_closed")
+            self._close_any_thread("heartbeat_lost")   # starts the closer thread; never blocks here
 
     def _reap(self) -> None:
         """Serve-thread housekeeping: cut connections older than ``max_connection_seconds`` (slow clients)."""

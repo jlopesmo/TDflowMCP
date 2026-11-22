@@ -29,4 +29,7 @@ Adopt [setup-assistant.md](../architecture/setup-assistant.md):
   - Loopback-only access was verified, with no off-main-thread TD access.
   - Headless Chrome ran the page's JS, and its `fetch` of `/setup/api/status` passed the gate.
   - HTTP header, body and latency behaviour are now measured. **The web Setup Assistant is available on 2025.32440.**
-- **Open:** the browser launch from TouchDesigner itself (`Opensetup`), and Phase 1A acceptance ([phase-1](../milestones/phase-1-core-server.md)).
+- **Phase 1A acceptance (passed 2026-11-22, [record](../research/2026-11-22-phase-1a-component.md)):**
+  - The built component shows the Setup page from `Opensetup` in the real default browser, and nothing listens before the pulse.
+  - Every acceptance criterion in [phase-1](../milestones/phase-1-core-server.md) is verified in TD.
+  - Parameter naming changes: `Runchecks` → `Rundiagnostics` (owner wording). Added `Statusdetail` and `Setupurl`.

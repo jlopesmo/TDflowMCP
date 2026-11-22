@@ -86,6 +86,13 @@ def verdict(listeners_v4: Optional[Sequence[str]], listeners_v6: Optional[Sequen
     return Evidence(Verdict.PASS, ("loopback_only",), details)
 
 
+def redacted(ev: Optional[Evidence]) -> Optional[Evidence]:
+    """Evidence safe to display or log: reason categories only (no addresses, no PIDs; review 5)."""
+    if ev is None:
+        return None
+    return Evidence(ev.verdict, tuple(dict.fromkeys(r.split(":", 1)[0] for r in ev.reasons)), {})
+
+
 class ListenerState(str, Enum):
     OFF = "OFF"
     VERIFYING = "VERIFYING"
@@ -101,6 +108,8 @@ class BindGate:
     max_attempts: int = 10
     max_verify_seconds: float = 15.0
     max_close_checks: int = 10
+    max_close_seconds: float = 3.0     # review 5: frame-count alone is ~0.1 s at high FPS
+    close_started: Optional[float] = None
     state: ListenerState = ListenerState.OFF
     error_code: str = ""       # 'BIND_UNSUPPORTED' | 'BIND_UNVERIFIED' | 'CLOSE_UNCONFIRMED' | 'PORT_IN_USE'
     #                            | 'BIND_FAILED' | 'TRANSPORT_FAILED'; '' after a user-requested close
@@ -125,6 +134,7 @@ class BindGate:
 
     def _close(self, code: str) -> str:
         self.state, self.error_code, self.close_checks = ListenerState.CLOSING, code, 0
+        self.close_started = None
         return "close_now"
 
     def on_evidence(self, ev: Evidence, now: float = 0.0) -> str:
@@ -156,8 +166,19 @@ class BindGate:
         """Explicit stop (user pulse, or the component being disabled). Confirm with ``confirm_closed``."""
         if self.state in (ListenerState.VERIFYING, ListenerState.SERVING):
             self.state, self.error_code, self.close_checks = ListenerState.CLOSING, "", 0
+            self.close_started = None
             return "close_now"
         return "noop"
+
+    def on_reverify(self, ev: Evidence) -> str:
+        """Periodic re-verification while SERVING: anything but PASS closes now (no retry)."""
+        if self.state is not ListenerState.SERVING:
+            return "noop"
+        self.last = ev
+        if ev.verdict is Verdict.PASS:
+            return "keep"
+        only_shared = ev.reasons and all(r.startswith("port_shared:") for r in ev.reasons)
+        return self._close("PORT_IN_USE" if only_shared else "BIND_UNVERIFIED")
 
     def on_transport_failure(self) -> str:
         """The server thread died or reported a fatal error while open."""
@@ -165,15 +186,20 @@ class BindGate:
             return self._close("TRANSPORT_FAILED")
         return "noop"
 
-    def confirm_closed(self, listeners_v4: Optional[Sequence[str]], listeners_v6: Optional[Sequence[str]]) -> str:
+    def confirm_closed(self, listeners_v4: Optional[Sequence[str]], listeners_v6: Optional[Sequence[str]],
+                       now: Optional[float] = None) -> str:
         """Called on later frames after 'close_now' (S5: the OS releases the socket asynchronously)."""
         if self.state is not ListenerState.CLOSING:
             return "noop"
         self.close_checks += 1
+        if now is not None and self.close_started is None:
+            self.close_started = now
         if listeners_v4 is not None and listeners_v6 is not None and not listeners_v4 and not listeners_v6:
             self.state = ListenerState.CLOSED
             return "closed"
-        if self.close_checks < self.max_close_checks:
+        within_time = now is not None and self.close_started is not None and \
+            now - self.close_started < self.max_close_seconds
+        if self.close_checks < self.max_close_checks or within_time:
             return "recheck_close"
         self.state, self.error_code = ListenerState.STUCK, "CLOSE_UNCONFIRMED"
         return "escalate"
