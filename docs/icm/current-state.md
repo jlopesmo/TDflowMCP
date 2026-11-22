@@ -10,7 +10,9 @@
 - Phase 0 commit and push: see [Phase 0 commit record](#phase-0-commit-record) below.
 
 ## Phase 0 commit record
-Pending at time of writing. Updated by a follow-up commit once the push is confirmed.
+- Foundation commit `82b64f1` pushed to `origin/dev` on 2026-11-22 (new branch; push output confirmed). This record was added by the follow-up commit.
+- `main` does not exist on `origin` (owner decision D6). GitHub may therefore show `dev` as the default branch.
+- CI on this push: **not observed** (no `gh` CLI; check the Actions tab).
 
 ## Not implemented (nothing below exists)
 - No MCP server, protocol layer, policy engine, identity, audit store, dashboard, Code Mode, experiments, build pipeline, `.tox` or in-TD tests.
