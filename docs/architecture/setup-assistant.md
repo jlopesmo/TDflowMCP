@@ -10,7 +10,7 @@
 | **Setup** | 127.0.0.1:`Port` | read-only (1A); paired actions (1B) | 503 `MCP_DISABLED` | 404 until Phase 2B | `Opensetup` pulse |
 | **Enabled** | 127.0.0.1:`Port` | available | active (policy-enforced) | Phase 2B | `Enablemcp` on, after preconditions (§4) |
 | **Suspended** | 127.0.0.1:`Port` | available | `SUSPENDED` for all agents | Phase 2B | `Suspendagents` on (kill switch) |
-| **Error** | none | — | — | — | `BIND_UNSUPPORTED` (no `localaddress`: listener never activated), `BIND_UNVERIFIED` (closed by the gate), `CLOSE_UNCONFIRMED` (socket did not disappear: restart TouchDesigner), port conflict, storage failure. Leaving Error needs an explicit user action |
+| **Error** | none | — | — | — | `PORT_IN_USE` (another process listens on the port, on any address: never shared), `BIND_UNSUPPORTED` (Web Server DAT transport without `localaddress`: never activated), `BIND_UNVERIFIED` (closed by the gate), `CLOSE_UNCONFIRMED` (socket did not disappear: restart TouchDesigner), port conflict, storage failure. Leaving Error needs an explicit user action |
 
 The component **never listens until the user acts** (pulse or toggle). After the user acts, the listener is activated in a non-serving `VERIFYING` state (every request gets `503`). Application requests are served only after the effective loopback-only binding is positively verified. If verification fails or is ambiguous, the listener is **closed immediately**, the state becomes `Error: BIND_UNVERIFIED`, and the only guidance channel is the component's parameters and an in-component text DAT, never a less-secure listener ([security model §8.2](security-model.md#82-bind-verification-gate)). In Setup state with MCP disabled, the listener auto-stops after an idle timeout (proposed 30 min).
 
@@ -49,10 +49,10 @@ Each check yields `{id, result: pass|warn|fail|unknown, evidence, remediation_id
 
 | ID | Check | Pass rule (provisional) |
 |---|---|---|
-| `td.build` | `app.build` / `app.version` | ≥ **2025.33230** → pass; older → `warn: untested build` (MCP enablement then requires every security self-test to pass). Also flags a `.tox` saved by a newer build than the running one |
+| `td.build` | `app.build` / `app.version` | ≥ **2025.32440** (oldest tested build, owner D10) → pass; older → `warn: untested build` (MCP enablement then requires every security self-test to pass). Also flags a `.tox` saved by a newer build than the running one |
 | `py.version` | `sys.version_info` | 3.11.x |
-| `py.deps` | `jsonschema`, `sqlite3`, `ssl`, `hmac`, `secrets` importable; versions recorded | all present |
-| `net.capability` | Pre-activation: does the Web Server DAT expose `localaddress`? ([§8.2 step 0](security-model.md#82-bind-verification-gate)) | present → pass; absent → **fail**, and the listener is never activated (2025.32440: absent, per S5) |
+| `py.deps` | `jsonschema`, `sqlite3`, `ssl`, `hmac`, `secrets`, `http.server`, `socketserver`, `threading`, `queue`, `socket` importable; versions recorded | all present |
+| `net.capability` | Pre-activation, per transport ([§8.2 step 0](security-model.md#82-bind-verification-gate)). Embedded (default): bind host is the literal `127.0.0.1` and exclusive binding is available. Web Server DAT (optional): the DAT exposes `localaddress` | pass → the listener may be activated; fail → never activated. On 2025.32440: embedded **pass** (S6); Web Server DAT **fail** (S5) |
 | `net.bind` | Bind-verification gate: OS listening-socket table + non-loopback connection attempts ([§8.2](security-model.md#82-bind-verification-gate)) | positively verified loopback-only; else listener closed |
 | `net.port` | Port 9480 (or `Port`) free / owned by this instance; identify other TDflowMCP instances via `GET /.well-known/tdflowmcp` on loopback | free or self |
 | `fs.datadir` | Runtime data dir writable, outside project and repo | writable |

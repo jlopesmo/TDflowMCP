@@ -9,8 +9,8 @@ The owner requires a self-contained drag-and-drop `.tox` with essential custom p
 Adopt [setup-assistant.md](../architecture/setup-assistant.md):
 1. Explicit component states (Off → Setup → Enabled / Suspended / Error). The component never listens until the user acts. The listener starts `VERIFYING` and serves no application request until the effective loopback-only binding is verified. Failure closes it immediately ([bind-verification gate](../architecture/security-model.md#82-bind-verification-gate)).
 2. The essential parameter set, phased 1A/1B. Parameters never hold long-lived secrets.
-3. `/setup/` is served by the same Web Server DAT and gate as `/mcp`. It is read-only in 1A; paired, CSRF-protected actions arrive in 1B. It is separate from the `/ui/` governance dashboard (Phase 2B, [ADR-0005](0005-dashboard.md)).
-4. Compatibility checks report pass/warn/fail/unknown with evidence. Provisional target build: **2025.33230+**. Older builds may run Setup and may enable MCP only when every security self-test passes. No override exists.
+3. `/setup/` is served by the same loopback transport and gate as `/mcp` (the embedded Python transport by default, [ADR-0002](0002-in-process-mcp-host.md)). Its HTML/CSS/JS live in Text DATs inside the `.tox` and are served from an immutable snapshot; inline script is not allowed (CSP). It is read-only in 1A; paired, CSRF-protected actions arrive in 1B. It is separate from the `/ui/` governance dashboard (Phase 2B, [ADR-0005](0005-dashboard.md)).
+4. Compatibility checks report pass/warn/fail/unknown with evidence. **Oldest tested and supported build: 2025.32440** (owner D10, 2026-11-22; previously a provisional 2025.33230+ target). Older builds get `warn`, and may enable MCP only when every security self-test passes. No override exists.
 5. Troubleshooting is diagnosis plus instructions. The only automatic actions are TDflowMCP-internal and reversible. Everything else needs explicit, previewed user confirmation, and installs and client-permission edits are never performed.
 6. Default port **9480** with conflict detection. The port is never changed automatically.
 
@@ -24,5 +24,9 @@ Adopt [setup-assistant.md](../architecture/setup-assistant.md):
   - **Pass:** custom-parameter APIs, the `ui.clipboard` text round-trip, `onStart` firing on project load, bundled Python 3.11.10 and libraries, and the bind gate's fail-closed behaviour.
   - **Warn:** the `projectpresave` hook exists, but firing was not exercised. Menu `.default` and same-frame pulse nuances (see findings).
   - **Unknown:** the end-to-end browser launch (`ui.viewFile` exists, but no verified listener can exist on that build).
-  - **Fail (security):** loopback binding is impossible on 2025.32440. On builds without `localaddress`, the web Setup Assistant is unavailable and guidance falls back to parameters and an internal DAT.
-- **Open:** S1 on 2025.33230+, including the browser launch and the HTTP header/body behaviour. Phase 1A acceptance ([phase-1](../milestones/phase-1-core-server.md)).
+  - **Fail (security), Web Server DAT only:** that transport cannot bind loopback-only on 2025.32440 and is never used there.
+- **S6 (executed 2026-11-22 on 2025.32440, [findings](../research/2026-11-22-s6-embedded-python-transport.md)):** the embedded transport served the Setup page from Text DATs.
+  - Loopback-only access was verified, with no off-main-thread TD access.
+  - Headless Chrome ran the page's JS, and its `fetch` of `/setup/api/status` passed the gate.
+  - HTTP header, body and latency behaviour are now measured. **The web Setup Assistant is available on 2025.32440.**
+- **Open:** the browser launch from TouchDesigner itself (`Opensetup`), and Phase 1A acceptance ([phase-1](../milestones/phase-1-core-server.md)).

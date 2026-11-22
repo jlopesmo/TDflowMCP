@@ -7,7 +7,7 @@ Principles (owner): put a **minimal setup experience first**, keep **security-fi
 | Phase | Goal | Key outputs | Acceptance (summary) | Detail |
 |---|---|---|---|---|
 | **0 Foundation** | Research, architecture, ICM, rules | Docs, ADRs 0001–0013, doc checker, CI, `main` created from the verified foundation | Docs check, independent review addressed, CI evidence recorded honestly | [phase-0](../milestones/phase-0-foundation.md) |
-| **1A Setup shell** (**in progress**: S5 done on 2025.32440; gate/compat/bind-verify logic unit-tested; TD-dependent items wait for B1) | A usable component before MCP exists | Spikes S1–S5, gate, compatibility checks, troubleshooting, essential parameters, read-only Setup Assistant, "Tell Your Coding Agent" (setup/repair) | Drop-in → Setup page; bind-verification gate (never activate without `localaddress`); no installs or config changes | [phase-1](../milestones/phase-1-core-server.md#phase-1a--spikes-component-shell-minimal-setup-assistant-no-mcp) |
+| **1A Setup shell** (**in progress**: S5 and S6 done on 2025.32440; the embedded transport works in TD; gate/compat/bind-verify logic unit-tested; no TD upgrade needed) | A usable component before MCP exists | Spikes S2–S6 (S1 optional), gate, compatibility checks, troubleshooting, essential parameters, read-only Setup Assistant, "Tell Your Coding Agent" (setup/repair) | Drop-in → Setup page; bind-verification gate (explicit exclusive `127.0.0.1` bind, port never shared); no installs or config changes | [phase-1](../milestones/phase-1-core-server.md#phase-1a--spikes-component-shell-minimal-setup-assistant-no-mcp) |
 | **1B Secure core** | Enforcement proven | Policy, identity, kill switch, protocol, registry, audit, 14 core tools, session logs, paired Setup actions | Scoped denial incl. expression-as-execute; tamper/fail-closed; independent security review | [phase-1](../milestones/phase-1-core-server.md#phase-1b--secure-mcp-core-enforcement-first) |
 | **1C Agent onboarding** | Agents connect correctly | Client registry, connection instructions, Skills install/update/version mgmt, `.tox` packaging | Claude Code connects from the generated text alone; safe Skills round-trip | [phase-1](../milestones/phase-1-core-server.md#phase-1c--agent-onboarding) |
 | **2A Continuity + project memory** | Work survives sessions and agents | Task checkpoints, verified handoffs, resume section of "Tell Your Coding Agent", `tdflowProject` COMP, single-authority memory | False claims tagged `contradicted`; stale write → `MEMORY_CONFLICT`; mode migration preserves hashes | [continuity](../architecture/continuity-and-memory.md) |
@@ -21,20 +21,21 @@ Principles (owner): put a **minimal setup experience first**, keep **security-fi
 | # | Decision | Owner direction | Status |
 |---|---|---|---|
 | D1 | ADRs 0001–0007, 0009 | **Conditionally approved**, subject to revisions and recorded validation gates | Applied |
-| D2 | Minimum TD build | **2025.33230+ provisional target**. Test older-build feasibility (S5) without bypassing security | Applied. S5 showed **2025.32440 cannot meet the security requirements** (no `localaddress`). Still blocked on B1 |
+| D2 | Minimum TD build | **2025.33230+ provisional target**. Test older-build feasibility (S5) without bypassing security | **Superseded by D10.** S5 showed the 2025.32440 *Web Server DAT* cannot meet the security requirements (no `localaddress`) |
 | D3 | License | **Defer** choosing a public license | Applied (ADR-0008) |
 | D4 | Visibility | **Keep private** | Applied. Anonymous API returns 404, consistent with private |
 | D5 | Original bridge | **Preserve as historical reference** | Applied: audit + source committed under `reference/historical/`; binary hash-recorded (B2) |
 | D6 | `main` | **Create from the approved foundation after corrections and verification**; future development stays on `dev` | Performed after this revision's local checks and review; the observed result is recorded in [current state](current-state.md) |
 | D7 | TD experiments | **Authorized only in isolated disposable projects**; never modify existing user projects | Applied (Phase 1 experiment rule) |
 | D8 | Port | **9480 with conflict detection** | Applied |
+| D10 | Older-build support | **2025.32440 must remain supported if technically feasible; do not require or install a newer build.** Prototype an embedded stdlib Python HTTP transport; if it succeeds, revise ADR-0002, the compatibility policy and Phase 1A (owner direction, 2026-11-22) | Applied: S6 passed. ADR-0002 revised (embedded transport default, Web Server DAT optional); minimum/tested build 2025.32440; compat checks and 1A milestones updated |
 | D9 | ADR-0010 | **Accept ADR-0010 (Setup Assistant) for Phase 1A, subject to its validation gates**; preserve the conditionally accepted architecture; begin 1A with S5 on 2025.32440; stop at the newer-build gate (owner direction, 2026-11-22) | Applied: ADR-0010 is Conditionally Accepted; S5 executed |
 
 ## Open blockers and owner actions
 
 | # | Item | Why it matters | Needed from owner |
 |---|---|---|---|
-| B1 | TD **2025.33230+** is not installed locally (only 2025.32440 and a legacy Python 3.9 build) | **Testing gate.** S1–S4, S5's remaining unknowns and every 1A acceptance criterion need it. S5 proved 2025.32440 cannot host a secure listener | Install 2025.33230+ yourself, or name a machine that has it |
+| B1 | ~~TD 2025.33230+ is not installed locally~~ | **Resolved by D10 + S6 (2026-11-22):** Phase 1A proceeds on 2025.32440. Only the optional S1 (Web Server DAT comparison) needs a build with `localaddress` | None |
 | B2 | Original `mcp_bridge.tox` embeds unreviewed historical `textport_log` rows | The audit and source are preserved in Git; the binary is kept git-ignored (`.tmp/references/`) | Decide whether to commit the binary after reviewing its log rows (non-blocking) |
 | B3 | CI runs not observable from this environment (no `gh`, no GitHub connector, credential-based API read denied; rechecked 2026-11-22) | CI evidence can't be recorded by the agent | Check the Actions tab and paste the result, or connect a read-only GitHub integration |
 | B4 | GitHub default branch is `dev` (first push) | `main` should be default for releases | Switch the default branch to `main` in GitHub settings (UI only) |

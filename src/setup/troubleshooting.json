@@ -3,84 +3,164 @@
   "policy": "Diagnose and instruct only. TDflowMCP never installs software, never changes TouchDesigner/OS/coding-agent configuration, and never kills processes. allowed_actions may only contain TDflowMCP-internal, reversible actions.",
   "entries": {
     "td.build.older": {
-      "title": "TouchDesigner build is older than the supported target",
-      "cause": "This TouchDesigner build predates 2025.33230, the provisional target. Older builds are untested and may lack required security features.",
-      "confirm": "Compare the build shown on the component's Version/Status with 2025.33230.",
-      "steps": ["Install TouchDesigner 2025.33230 or newer yourself (TDflowMCP never installs it).", "Open your project with the newer build and pulse Run checks again."],
-      "docs": ["https://derivative.ca/download"],
-      "allowed_actions": ["rerun_checks"]
+      "title": "TouchDesigner build is older than the oldest tested build",
+      "cause": "This TouchDesigner build predates 2025.32440, the oldest build TDflowMCP has been tested on. It may lack required APIs.",
+      "confirm": "Compare the build shown on the component's Version/Status with 2025.32440.",
+      "steps": [
+        "Use TouchDesigner 2025.32440 or newer (TDflowMCP never installs it).",
+        "Open your project with that build and pulse Run checks again."
+      ],
+      "docs": [
+        "https://derivative.ca/download"
+      ],
+      "allowed_actions": [
+        "rerun_checks"
+      ]
     },
     "td.build.tox_newer": {
       "title": "Component was saved by a newer TouchDesigner build",
       "cause": "A .tox saved by a newer build may not load or behave correctly in an older build.",
       "confirm": "The check evidence shows both builds.",
-      "steps": ["Use a TDflowMCP release built for your TouchDesigner build, or upgrade TouchDesigner yourself."],
+      "steps": [
+        "Use a TDflowMCP release built for your TouchDesigner build, or upgrade TouchDesigner yourself."
+      ],
       "docs": [],
-      "allowed_actions": ["rerun_checks"]
+      "allowed_actions": [
+        "rerun_checks"
+      ]
     },
     "py.version.mismatch": {
       "title": "Unexpected embedded Python version",
       "cause": "TDflowMCP requires TouchDesigner's bundled Python 3.11.x.",
       "confirm": "Check the Python version in the check evidence.",
-      "steps": ["Do not point TouchDesigner at a different Python installation for TDflowMCP.", "Use a supported TouchDesigner build."],
-      "docs": ["https://docs.derivative.ca/Python"],
-      "allowed_actions": ["rerun_checks"]
+      "steps": [
+        "Do not point TouchDesigner at a different Python installation for TDflowMCP.",
+        "Use a supported TouchDesigner build."
+      ],
+      "docs": [
+        "https://docs.derivative.ca/Python"
+      ],
+      "allowed_actions": [
+        "rerun_checks"
+      ]
     },
     "py.deps.missing": {
       "title": "Required bundled Python modules are missing",
       "cause": "A module that TouchDesigner normally bundles could not be imported; the installation or Python search path may be altered.",
       "confirm": "The evidence lists the missing modules.",
-      "steps": ["Check that TouchDesigner preferences do not replace the bundled Python modules.", "Repair or reinstall TouchDesigner yourself if needed. TDflowMCP does not install packages."],
-      "docs": ["https://docs.derivative.ca/Python"],
-      "allowed_actions": ["rerun_checks"]
+      "steps": [
+        "Check that TouchDesigner preferences do not replace the bundled Python modules.",
+        "Repair or reinstall TouchDesigner yourself if needed. TDflowMCP does not install packages."
+      ],
+      "docs": [
+        "https://docs.derivative.ca/Python"
+      ],
+      "allowed_actions": [
+        "rerun_checks"
+      ]
     },
     "net.capability.no_localaddress": {
       "title": "This build cannot restrict the web server to this computer",
-      "cause": "The Web Server DAT in this build has no Local Address parameter, so it would listen on every network interface. TDflowMCP will not start its listener (verified on 2025.32440 in spike S5).",
+      "cause": "The Web Server DAT transport was selected, but the Web Server DAT in this build has no Local Address parameter, so it would listen on every network interface. TDflowMCP will not start it (verified on 2025.32440 in spike S5).",
       "confirm": "The evidence states that localaddress is missing.",
-      "steps": ["Install TouchDesigner 2025.33230 or newer yourself.", "Until then, the Setup Assistant webpage and MCP are unavailable; guidance is shown in the component parameters only."],
-      "docs": ["https://docs.derivative.ca/Web_Server_DAT"],
-      "allowed_actions": ["rerun_checks"]
+      "steps": [
+        "Use the default embedded transport, which binds only to 127.0.0.1 on this build (verified in spike S6).",
+        "Only use the Web Server DAT transport on a build whose Web Server DAT has Local Address."
+      ],
+      "docs": [
+        "https://docs.derivative.ca/Web_Server_DAT"
+      ],
+      "allowed_actions": [
+        "rerun_checks"
+      ]
     },
     "net.bind.unverified": {
       "title": "Loopback-only binding could not be verified",
       "cause": "After starting, the listener did not prove it was bound only to 127.0.0.1, so it was closed immediately.",
       "confirm": "The evidence lists the reasons (non-loopback listener, non-loopback connection, or table unavailable).",
-      "steps": ["Do not try to work around this check; it protects your project from other computers.", "The listener stays closed. Check whether another tool changed TouchDesigner networking settings, then pulse Open Setup yourself to try once more; TDflowMCP never restarts it automatically."],
+      "steps": [
+        "Do not try to work around this check; it protects your project from other computers.",
+        "The listener stays closed. Check whether another tool changed TouchDesigner networking settings, then pulse Open Setup yourself to try once more; TDflowMCP never restarts it automatically."
+      ],
       "docs": [],
-      "allowed_actions": ["rerun_checks"]
+      "allowed_actions": [
+        "rerun_checks"
+      ]
     },
     "net.port.in_use": {
       "title": "The TDflowMCP port is already in use",
-      "cause": "Another process (possibly another TDflowMCP instance) is listening on the configured port.",
+      "cause": "Another process (possibly another TDflowMCP instance) is listening on the configured port, on this computer only or on all network addresses. TDflowMCP never shares the port.",
       "confirm": "The evidence says whether the other listener responds like TDflowMCP (this answer is unverified).",
-      "steps": ["Close the other TouchDesigner project or tool using the port, or choose a different Port and confirm it.", "Update your coding agent's connection afterwards using Tell Your Coding Agent."],
+      "steps": [
+        "Close the other TouchDesigner project or tool using the port, or choose a different Port and confirm it.",
+        "Update your coding agent's connection afterwards using Tell Your Coding Agent."
+      ],
       "docs": [],
-      "allowed_actions": ["rerun_checks", "propose_port"]
+      "allowed_actions": [
+        "rerun_checks",
+        "propose_port"
+      ]
     },
     "fs.datadir.unwritable": {
       "title": "Runtime data directory is not writable",
       "cause": "TDflowMCP stores tokens, policy and audit outside the project, in %LOCALAPPDATA%\\TDflowMCP.",
       "confirm": "The evidence names the directory in %LOCALAPPDATA% form.",
-      "steps": ["Make sure your user account can write to %LOCALAPPDATA%\\TDflowMCP.", "Ask your administrator if the folder is restricted."],
+      "steps": [
+        "Make sure your user account can write to %LOCALAPPDATA%\\TDflowMCP.",
+        "Ask your administrator if the folder is restricted."
+      ],
       "docs": [],
-      "allowed_actions": ["rerun_checks"]
+      "allowed_actions": [
+        "rerun_checks"
+      ]
     },
     "td.instances.multiple": {
       "title": "More than one TDflowMCP component is enabled",
       "cause": "Several enabled instances in one project compete for the port and confuse agents.",
       "confirm": "The evidence shows how many are enabled.",
-      "steps": ["Keep one TDflowMCP component enabled per project."],
+      "steps": [
+        "Keep one TDflowMCP component enabled per project."
+      ],
       "docs": [],
-      "allowed_actions": ["rerun_checks"]
+      "allowed_actions": [
+        "rerun_checks"
+      ]
     },
     "agent.clients.unsupported": {
       "title": "No supported coding agent selected",
       "cause": "The selected coding agents are not yet verified with TDflowMCP.",
       "confirm": "See the client list in the Setup Assistant.",
-      "steps": ["Select Claude Code (primary), or use another client at your own risk."],
+      "steps": [
+        "Select Claude Code (primary), or use another client at your own risk."
+      ],
       "docs": [],
-      "allowed_actions": ["rerun_checks"]
+      "allowed_actions": [
+        "rerun_checks"
+      ]
+    },
+    "net.capability.bind_host": {
+      "title": "The listener address is not this computer only",
+      "cause": "TDflowMCP only ever binds the literal address 127.0.0.1. Any other configured address is refused.",
+      "confirm": "The evidence shows the configured address.",
+      "steps": [
+        "Reset the address to 127.0.0.1. Remote or network access is not supported."
+      ],
+      "docs": [],
+      "allowed_actions": [
+        "rerun_checks"
+      ]
+    },
+    "net.capability.no_exclusive_bind": {
+      "title": "Exclusive port binding is unavailable",
+      "cause": "Without exclusive binding another program could share the TDflowMCP port and intercept requests, so the listener is not started.",
+      "confirm": "The evidence states that exclusive binding is unavailable.",
+      "steps": [
+        "Use a supported TouchDesigner build on Windows 10/11 or macOS; report the build and OS to the TDflowMCP maintainers."
+      ],
+      "docs": [],
+      "allowed_actions": [
+        "rerun_checks"
+      ]
     }
   }
 }

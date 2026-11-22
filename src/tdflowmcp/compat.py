@@ -11,7 +11,10 @@ Fact contract (all keys optional):
            True | version string (incl. "")   -> importable
            False | None                       -> not importable
            {"ok": bool, "version": str}       -> importable iff ok is True
-  webserver_par_names: list[str]
+  transport: "python-http" (default, ADR-0002 rev. 2026-11-22) | "webserver-dat"
+  bind_host: str                   (python-http) the configured bind literal
+  exclusive_bind: bool             (python-http) SO_EXCLUSIVEADDRUSE available (Windows) / not needed (other OS)
+  webserver_par_names: list[str]   (webserver-dat)
   bind_evidence: bindverify.Evidence
   port, port_listeners_other: list of (addr, port, pid) of OTHER processes; port_probe_tdflowmcp: bool
   datadir_writable: bool
@@ -25,9 +28,13 @@ from typing import Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from tdflowmcp.net import bindverify
 
-TARGET_BUILD = (2025, 33230)        # provisional target (owner, 2026-11-22)
+# Oldest build TDflowMCP is tested on and supports (owner D10, 2026-11-22: 2025.32440 stays supported;
+# S6 showed the embedded Python transport meets the security model there).
+MIN_SUPPORTED_BUILD = (2025, 32440)
+TRANSPORTS = ("python-http", "webserver-dat")
 PYTHON_MAJOR_MINOR = (3, 11)
-REQUIRED_MODULES = ("json", "sqlite3", "ssl", "hmac", "hashlib", "secrets", "jsonschema")
+REQUIRED_MODULES = ("json", "sqlite3", "ssl", "hmac", "hashlib", "secrets", "jsonschema",
+                    "http.server", "socketserver", "threading", "queue", "socket")
 RESULTS = ("pass", "warn", "fail", "unknown")
 
 
@@ -62,10 +69,10 @@ def check_td_build(f: Mapping) -> CheckResult:
     if saved and saved > b:
         return CheckResult("td.build", "fail", ev + f"; component saved by newer build {saved[0]}.{saved[1]}",
                            "td.build.tox_newer")
-    if b >= TARGET_BUILD:
+    if b >= MIN_SUPPORTED_BUILD:
         return CheckResult("td.build", "pass", ev)
-    return CheckResult("td.build", "warn", ev + f" is older than the provisional target "
-                       f"{TARGET_BUILD[0]}.{TARGET_BUILD[1]}", "td.build.older")
+    return CheckResult("td.build", "warn", ev + f" is older than the oldest tested build "
+                       f"{MIN_SUPPORTED_BUILD[0]}.{MIN_SUPPORTED_BUILD[1]}", "td.build.older")
 
 
 def _parse_version(v) -> Optional[Tuple[int, ...]]:
@@ -115,6 +122,21 @@ def check_py_deps(f: Mapping) -> CheckResult:
 
 
 def check_net_capability(f: Mapping) -> CheckResult:
+    transport = f.get("transport")
+    if transport not in TRANSPORTS:
+        return CheckResult("net.capability", "unknown", "transport not reported")
+    if transport == "python-http":
+        host, excl = f.get("bind_host"), f.get("exclusive_bind")
+        if not isinstance(host, str) or not isinstance(excl, bool):
+            return CheckResult("net.capability", "unknown", "embedded transport capability not inspected")
+        if bindverify.embedded_capability(host).verdict is not bindverify.Verdict.PASS:
+            return CheckResult("net.capability", "fail", f"bind host {host!r} is not the loopback literal "
+                               "127.0.0.1; the listener will not be activated", "net.capability.bind_host")
+        if not excl:
+            return CheckResult("net.capability", "fail", "exclusive socket binding unavailable; another socket "
+                               "could share the port; the listener will not be activated",
+                               "net.capability.no_exclusive_bind")
+        return CheckResult("net.capability", "pass", "embedded transport binds 127.0.0.1 exclusively")
     pars = f.get("webserver_par_names")
     if pars is None:
         return CheckResult("net.capability", "unknown", "Web Server DAT parameters not inspected")

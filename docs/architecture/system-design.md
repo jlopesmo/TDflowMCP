@@ -18,7 +18,7 @@ flowchart LR
   subgraph TD["TouchDesigner process — host project .toe"]
     subgraph TOX["TDflowMCP.tox (self-contained)"]
       CTRL[Component controller<br/>Off · Setup · Enabled · Suspended · Error]
-      WS[Web Server DAT<br/>127.0.0.1:9480<br/>VERIFYING → SERVING gate]
+      WS[Loopback transport<br/>embedded Python HTTP (default)<br/>127.0.0.1:9480<br/>VERIFYING → SERVING gate]
       GATE[Request gate<br/>Origin · Host · size · rate]
       ADM[Admin session<br/>pairing · CSRF]
       ID[Agent identity<br/>token → agent]
@@ -67,7 +67,7 @@ flowchart LR
 ASCII summary:
 
 ```
- TD user ─parameters─▶ Controller (Off/Setup/Enabled/Suspended/Error) ─▶ Web Server DAT 127.0.0.1:9480
+ TD user ─parameters─▶ Controller (Off/Setup/Enabled/Suspended/Error) ─▶ transport 127.0.0.1:9480
  Browser ─/setup, /ui──┐                                                        │ gate (Origin/Host/size/rate)
  Coding agent ─/mcp────┴──────────────────────────────▶ admin session ◀─────────┤
                                                         identity ─▶ MCP ─▶ registry ─▶ POLICY ─▶ exec (undo) ─▶ network
@@ -79,7 +79,7 @@ ASCII summary:
 | Component | Responsibility | Key constraints |
 |---|---|---|
 | **Component controller** | Owns state transitions and custom parameters ([setup assistant §1–2](setup-assistant.md#1-component-states)) | Never listens before a user action. MCP is off by default |
-| **Web Server DAT** | Single listener for `/setup`, `/mcp`, `/api`, `/ui` | `localaddress=127.0.0.1`. Starts `VERIFYING` (503 to all), serves only after the effective bind is verified loopback-only, and closes immediately on failure ([security model §8.2](security-model.md#82-bind-verification-gate)). Default port 9480 with conflict detection; never re-ports silently |
+| **Transport** | Single listener for `/setup`, `/mcp`, `/api`, `/ui`. **Default: embedded Python HTTP server** (`pyhttp`, handler threads + a main-thread pump). **Optional:** Web Server DAT on builds that have `localaddress`, if it shows a measurable advantage ([ADR-0002](../decisions/0002-in-process-mcp-host.md)) | Binds the literal `127.0.0.1` exclusively. Starts `VERIFYING` (503 to all), serves only after the effective bind is verified loopback-only, and closes immediately on failure ([security model §8.2](security-model.md#82-bind-verification-gate), [§8.3](security-model.md#83-embedded-transport-threading-and-limits)). Default port 9480 with conflict detection; never re-ports silently; never shares the port |
 | **Request gate** | Rejects bad `Origin`/`Host` (403), oversized bodies (413), malformed JSON (400) and floods **before** any TD access | Origin validation is mandatory per spec |
 | **Admin session** | Pairing code → session cookie; exact Origin + CSRF for every `/setup`/`/ui`/`/api` mutation | Agent tokens never grant admin access |
 | **Compatibility + troubleshooting** | Checks and remediation ([setup assistant §3–5](setup-assistant.md#3-compatibility-checks)) | Diagnose and instruct only; no installs or config changes |
@@ -97,9 +97,9 @@ ASCII summary:
 
 ## 3. Request lifecycle (MCP `tools/call`)
 
-1. Web Server DAT `onHTTPRequest` receives a POST to `/mcp`. If the state is not Enabled, it returns 503 `MCP_DISABLED`; if Suspended, it returns `SUSPENDED`.
+1. A transport handler thread receives a POST to `/mcp` (no TD access on this thread).
 2. Gate: Host is loopback, Origin is absent or canonical, body ≤ limit, `Content-Type` is JSON. Otherwise 400/403/413, with aggregated `gate_reject` logging.
-3. Identity: resolve the bearer token. Missing or invalid → 401 + aggregated `auth_fail`.
+3. Identity: resolve the bearer token. Missing or invalid → 401 + aggregated `auth_fail`. If Suspended → `SUSPENDED`. The request is then queued; steps 4–11 run on the main thread via `pump()`. If the state is not Enabled, the dispatcher returns 503 `MCP_DISABLED`.
 4. Protocol: parse JSON-RPC, check the protocol version header against the body, and route the method.
 5. Registry: find the tool, then validate arguments against its input schema.
 6. Target resolution: absolute, normalized operator paths plus actions.
@@ -111,7 +111,7 @@ ASCII summary:
 
 ## 4. Approvals without blocking TouchDesigner
 
-Whether a Web Server DAT callback can defer its response is **unverified** (S1). The design never blocks the cook thread waiting for a human:
+The embedded transport could hold a response open (the handler thread waits on its job), but a waiting human must never hold a job on the main thread. The design therefore never blocks the cook thread waiting for a human:
 - `require_approval` → record a pending call (canonical args digest, agent, resolved targets, policy version, expiry) → respond immediately `{"status":"pending_approval","approval_id":…}`.
 - The human decides in the dashboard, which shows the full raw arguments.
 - `tdflow_approval_status` is read-only. **Execution happens only on the identical re-call** with `_meta.tdflow.approval_id`, after the targets are re-resolved and policy re-evaluated ([security model §4](security-model.md#4-approvals)).
@@ -130,9 +130,15 @@ def capture_top(ctx, path: str, max_px: int = 512) -> ToolResult: ...
 
 Extensions cannot bypass policy, register routes outside `/mcp`, or access tokens or admin sessions. They are disabled until enabled in policy.
 
-## 6. Threading and performance (hypotheses, to be measured)
+## 6. Threading and performance
 
-- All TD object access happens on the main thread. Pure-Python work also runs there in Phase 1. Measure before moving anything to the Thread Manager.
+- All TD object access happens on the main thread. The embedded transport's handler threads do only HTTP parsing, gate, authentication and static serving; everything else is dispatched by the per-frame `pump()` on the main thread.
+- **Measured in S6 on 2025.32440 at 60 fps:**
+  - pump cost 0.01–0.06 ms mean per frame (max 0.26 ms);
+  - frame-time p50/p95 unchanged under load (16.67 / ≤ 16.78 ms);
+  - latency p50 ≈ 17 ms static, ≈ 33 ms MCP `ping`;
+  - 117 req/s with 8 clients.
+- Policy and protocol work also run on the main thread in Phase 1. Measure before moving anything to the Thread Manager.
 - Targets: p95 server overhead ≤ 5 ms per read call excluding the handler; response cap 1 MiB (enforced); 250 ms per-call budget for core tools, enforced **cooperatively**. Runaway Python cannot be pre-empted ([security model §7](security-model.md#7-resource-limits-cooperative)).
 - Compatibility checks must finish in < 1 s and must never block cooking for more than one frame per step (chunked).
 
@@ -143,4 +149,4 @@ Extensions cannot bypass policy, register routes outside `/mcp`, or access token
 - **Ports:** default 9480 (avoids TDMCP 13316, Envoy 9870, 8beeeaaat 9981, Pantani 9980, johnsabath 9988). On a conflict the component reports the owner (another TDflowMCP instance is identified via `/.well-known/tdflowmcp`) and waits for the user to choose.
 - **Client setup:** generated by the Setup Assistant / "Tell Your Coding Agent" with a `${TDFLOW_TOKEN}` placeholder (env-var expansion to be verified per client in 1C). Tokens are never written into repo files.
 - **Claude Desktop:** not supported until the stdio shim or OAuth (deferred). Phase 1 targets Claude Code.
-- **TD builds:** provisional target 2025.33230+. On older builds the listener is activated only if the Web Server DAT supports `localaddress` and the bind gate passes. On 2025.32440 (no `localaddress`, per S5) **neither the web Setup Assistant nor MCP is available**; guidance comes from parameters only.
+- **TD builds:** **2025.32440 is the oldest tested and supported build** (owner D10). The embedded transport meets the security model there (S6). Newer builds use the same transport by default. The Web Server DAT is only an option on builds whose DAT has `localaddress`, and only after it passes the same gate.

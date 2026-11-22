@@ -36,6 +36,10 @@ Thumbs.db
 
 # Local scratch
 .tmp/
+# Spike run output (may contain host details or a run's bearer token)
+spikes/*/results/
+spikes/*/learn/
+spikes/*/browser-profile/
 
 # Third-party reference implementations (e.g. official TDMCP releases) — never committed,
 # kept separate from TDflowMCP source. Provenance is recorded in docs/research/ instead.

@@ -1,7 +1,9 @@
 """Bind-verification gate logic (security-model §8.2), pure and side-effect free.
 
-Step 0 (pre-activation): the Web Server DAT must expose ``localaddress``; otherwise the listener is
-never activated (S5: TouchDesigner 2025.32440 lacks it and binds 0.0.0.0) -> BIND_UNSUPPORTED.
+Step 0 (pre-activation) depends on the transport:
+- Web Server DAT: it must expose ``localaddress``; otherwise the listener is never activated
+  (S5: TouchDesigner 2025.32440 lacks it and binds 0.0.0.0) -> BIND_UNSUPPORTED.
+- Embedded Python transport (``pyhttp``): the configured bind host must be the literal 127.0.0.1.
 Steps 1-4: the listener starts VERIFYING; only positive evidence of a loopback-only binding
 (127.0.0.1 and/or ::1 for this process) yields ``pass``; non-loopback evidence is ``fail``; other
 doubt is ``ambiguous``. A non-pass verdict means *close now*; closure is then confirmed on later
@@ -15,6 +17,7 @@ from typing import Iterable, Mapping, Optional, Sequence
 
 LOOPBACK = frozenset({"127.0.0.1", "::1"})
 REQUIRED_WEBSERVER_PARS = ("localaddress",)
+EMBEDDED_BIND_HOSTS = frozenset({"127.0.0.1"})
 
 
 class Verdict(str, Enum):
@@ -39,24 +42,44 @@ def capability_check(webserver_par_names: Iterable[str]) -> Evidence:
     return Evidence(Verdict.PASS, ("webserver_has_localaddress",))
 
 
+def embedded_capability(bind_host: str) -> Evidence:
+    """Step 0 for the embedded Python transport: only an explicit loopback literal may be bound."""
+    if bind_host in EMBEDDED_BIND_HOSTS:
+        return Evidence(Verdict.PASS, ("explicit_loopback_bind",))
+    return Evidence(Verdict.FAIL, (f"bind_host_not_loopback:{bind_host}",))
+
+
 def verdict(listeners_v4: Optional[Sequence[str]], listeners_v6: Optional[Sequence[str]],
-            probes: Optional[Mapping[str, str]] = None) -> Evidence:
+            probes: Optional[Mapping[str, str]] = None, sockname: Optional[str] = None,
+            others: Optional[Sequence] = ()) -> Evidence:
     """Decide from *this process's* listening addresses on the port plus non-loopback probes.
 
     ``listeners_*`` = None means the OS table was unavailable (-> ambiguous).
     ``probes``: non-loopback address -> 'connected' | 'refused' | 'timeout' | 'error:<n>'.
     A probe can only ever fail the verdict (S5: a timeout occurs even with nothing listening).
+    ``sockname``: the host the transport's own listening socket reports (embedded transport only);
+    a non-loopback value fails, and it never substitutes for the OS table.
+    ``others``: listeners on the same port owned by *other* processes. Any entry fails with
+    ``port_shared``: on Windows a process may hold 0.0.0.0:<port> next to our 127.0.0.1:<port>, and
+    then loopback traffic meant for it reaches us (pyhttp spike finding), so this is a conflict.
+    ``others=None`` means the table could not be read -> ambiguous (review 4, L).
     """
     probes = dict(probes or {})
-    if listeners_v4 is None or listeners_v6 is None:
+    if listeners_v4 is None or listeners_v6 is None or others is None:
         return Evidence(Verdict.AMBIGUOUS, ("listener_table_unavailable",), {"probes": probes})
     v4, v6 = list(listeners_v4), list(listeners_v6)
     bad = [a for a in v4 + v6 if a not in LOOPBACK]
     connected = sorted(a for a, r in probes.items() if r == "connected")
-    details = {"v4": v4, "v6": v6, "probes": probes}
-    if bad or connected:
+    details = {"v4": v4, "v6": v6, "probes": probes, "sockname": sockname}
+    bad_sock = sockname is not None and sockname not in LOOPBACK
+    shared = sorted({str(r[2]) if isinstance(r, (tuple, list)) and len(r) > 2 else "?" for r in (others or ())})
+    if shared:
+        details["others"] = list(others or ())
+    if bad or connected or bad_sock or shared:
         reasons = tuple(f"non_loopback_listener:{a}" for a in bad) + tuple(
-            f"non_loopback_connect:{a}" for a in connected)
+            f"non_loopback_connect:{a}" for a in connected) + (
+            (f"non_loopback_sockname:{sockname}",) if bad_sock else ()) + tuple(
+            f"port_shared:{pid}" for pid in shared)
         return Evidence(Verdict.FAIL, reasons, details)
     if not v4 and not v6:
         return Evidence(Verdict.AMBIGUOUS, ("no_listener_for_process_yet",), details)
@@ -79,7 +102,8 @@ class BindGate:
     max_verify_seconds: float = 15.0
     max_close_checks: int = 10
     state: ListenerState = ListenerState.OFF
-    error_code: str = ""       # 'BIND_UNSUPPORTED' | 'BIND_UNVERIFIED' | 'CLOSE_UNCONFIRMED'
+    error_code: str = ""       # 'BIND_UNSUPPORTED' | 'BIND_UNVERIFIED' | 'CLOSE_UNCONFIRMED' | 'PORT_IN_USE'
+    #                            | 'BIND_FAILED' | 'TRANSPORT_FAILED'; '' after a user-requested close
     attempts: int = 0
     close_checks: int = 0
     started_at: Optional[float] = None
@@ -113,12 +137,33 @@ class BindGate:
             self.state = ListenerState.SERVING
             return "serve"
         if ev.verdict is Verdict.FAIL:
-            return self._close("BIND_UNVERIFIED")
+            only_shared = ev.reasons and all(r.startswith("port_shared:") for r in ev.reasons)
+            return self._close("PORT_IN_USE" if only_shared else "BIND_UNVERIFIED")
         timed_out = self.started_at is not None and (now - self.started_at) > self.max_verify_seconds
         retryable = ev.reasons == ("no_listener_for_process_yet",)
         if retryable and self.attempts < self.max_attempts and not timed_out:
             return "recheck_later"
         return self._close("BIND_UNVERIFIED")
+
+    def on_bind_error(self, code: str) -> str:
+        """The transport could not bind (e.g. PORT_IN_USE). Nothing listens, so CLOSED directly."""
+        if self.state is not ListenerState.VERIFYING:
+            return "noop"
+        self.state, self.error_code, self.last = ListenerState.CLOSED, code or "BIND_FAILED", None
+        return "closed"
+
+    def user_close(self) -> str:
+        """Explicit stop (user pulse, or the component being disabled). Confirm with ``confirm_closed``."""
+        if self.state in (ListenerState.VERIFYING, ListenerState.SERVING):
+            self.state, self.error_code, self.close_checks = ListenerState.CLOSING, "", 0
+            return "close_now"
+        return "noop"
+
+    def on_transport_failure(self) -> str:
+        """The server thread died or reported a fatal error while open."""
+        if self.state in (ListenerState.VERIFYING, ListenerState.SERVING):
+            return self._close("TRANSPORT_FAILED")
+        return "noop"
 
     def confirm_closed(self, listeners_v4: Optional[Sequence[str]], listeners_v6: Optional[Sequence[str]]) -> str:
         """Called on later frames after 'close_now' (S5: the OS releases the socket asynchronously)."""

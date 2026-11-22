@@ -19,10 +19,11 @@ This map lists the repository's actual contents (Phase 0). Planned directories a
 | `docs/operations/` | Git workflow, verification and release procedures | — |
 | `tools/check_docs.py` | Stdlib doc validator (required files, links/anchors, ADR status vs index, privacy patterns) | [validation-index](validation-index.md) |
 | `tests/test_check_docs.py`, `tests/__init__.py` | Unit tests for the doc validator | [validation-index](validation-index.md) |
-| `src/tdflowmcp/` | Pure-Python core (no `td`): `net/bindverify.py`, `net/oslisteners.py`, `gate.py`, `compat.py`. Phase 1A preparation, not integrated | [security model §8](../architecture/security-model.md#8-network-posture), [setup assistant §3](../architecture/setup-assistant.md#3-compatibility-checks) |
+| `src/tdflowmcp/` | Pure-Python core (no `td`): `net/pyhttp.py` (embedded loopback transport), `net/bindverify.py`, `net/oslisteners.py`, `gate.py`, `compat.py`. Exercised inside TD by spike S6; no component shell yet | [security model §8](../architecture/security-model.md#8-network-posture), [setup assistant §3](../architecture/setup-assistant.md#3-compatibility-checks) |
 | `src/setup/troubleshooting.json` | Remediation entries for every warn/fail check; internal actions only | [ADR-0010](../decisions/0010-setup-assistant-and-component-parameters.md) |
 | `tests/unit/` | Unit tests for the core, including the boundary tests | [validation-index](validation-index.md) |
 | `spikes/s5/` | Disposable, reproducible S5 spike code. Never built or imported | [S5 findings](../research/2026-11-22-s5-compatibility-2025.32440.md) |
+| `spikes/s6/` | Disposable S6 spike: toe builder, Setup page assets, in-TD driver, external harness. Its `s6/*` control methods are spike-only and unsafe in production | [S6 findings](../research/2026-11-22-s6-embedded-python-transport.md) |
 | `reference/historical/mcp_bridge/` | Read-only historical reference: owner's original bridge audit + extracted source zip + provenance README. Never built, loaded or tested | [ADR-0008](../decisions/0008-upstream-reuse-policy.md) |
 | `reference/third_party/` | **Git-ignored**; future home of official third-party releases downloaded for hands-on testing | [ADR-0008](../decisions/0008-upstream-reuse-policy.md) |
 

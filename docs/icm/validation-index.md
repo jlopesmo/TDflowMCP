@@ -10,10 +10,11 @@ This file lists every check that exists, how to run it, and its last **executed 
 | Doc checker unit tests | `python -m unittest discover -s tests -t .` | `tools/check_docs.py` | See runs below |
 | CI workflow `docs.yml` | GitHub Actions on push to `dev`/`main` and on every pull request | Doc checker + all unit tests on Python 3.11, Ubuntu + Windows | **Not observed.** The repo is private, and no GitHub integration is available in this environment: no `gh` CLI, no GitHub connector (checked 2026-11-22), and a credential-based API read was denied. No run status, URL or log has been seen for any commit. Owner action [B3](roadmap.md#open-blockers-and-owner-actions) |
 | Independent documentation review | separate agent, read-only | All docs + tooling | Review 1 and review 2, see runs below |
-| Core unit tests (`tests/unit/`) | `python -m unittest discover -s tests -t .` (same command) | `net.bindverify`, `net.oslisteners`, `gate`, `compat`, troubleshooting data, `td`-free/no-subprocess boundaries | See runs below |
+| Core unit tests (`tests/unit/`) | `python -m unittest discover -s tests -t .` (same command) | `net.bindverify`, `net.oslisteners`, `net.pyhttp` (real loopback sockets, ephemeral ports), `gate`, `compat`, troubleshooting data, `td`-free/no-subprocess boundaries | See runs below |
 | TD bundled-Python parity | `"C:\Program Files\Derivative\TouchDesigner.2025.32440\bin\python.exe" -m unittest discover -s tests -t .` | The same suite on TD's interpreter (no TouchDesigner process) | See runs below |
 | Spike S5 (2025.32440) | `spikes/s5/` copied to `.tmp/s5/`, then `python -I s5_harness.py` (and `TDFLOW_S5_NO_WS=1`) | Runtime, libraries, parameters, clipboard, Web Server DAT, binding, gate | Executed; see [S5 findings](../research/2026-11-22-s5-compatibility-2025.32440.md) |
-| Protocol/policy/audit tests, in-TD tests, `.tox` build, S1–S4 | — | — | **Do not exist / not executed** (need TD 2025.33230+ or later phases) |
+| Spike S6 (2025.32440) | `spikes/s6/` copied to `.tmp/s6/`, `python -I build_toe.py`, then `python -I s6_harness.py main` and `… conflict` with `TDFLOW_SRC` set | Embedded transport in TD: binding, LAN, threads, lifecycle, timeouts, conflicts, load, frame impact, recovery, static Setup page + headless browser, gate/auth/kill switch | Executed; see [S6 findings](../research/2026-11-22-s6-embedded-python-transport.md) |
+| Protocol/policy/audit tests, in-TD component tests, `.tox` build, S1–S4 | — | — | **Do not exist / not executed** (later Phase 1A items and phases; S1 optional) |
 
 ## Runs
 
@@ -32,9 +33,19 @@ This file lists every check that exists, how to run it, and its last **executed 
 | 2026-11-22 | — | Independent review 3 (S5 + 1A prep) | 25 findings (2 High, 10 Medium, 13 Low); dispositions in [review 3](../research/2026-11-22-s5-review.md) |
 | 2026-11-22 | Windows 11, CPython 3.11.8 | unit tests (after review-3 fixes) | Pass: `Ran 76 tests in 0.280s OK (skipped=1)` |
 | 2026-11-22 | TD 2025.32440 bundled Python 3.11.10 | unit tests (parity, after review-3 fixes) | Pass: `Ran 76 tests in 0.315s OK (skipped=1)` |
+| 2026-11-22 | Windows 11, CPython 3.11.8 | unit tests (S6, before review 4; 3 consecutive runs) | Pass: `Ran 99 tests … OK (skipped=1)` ×3 |
+| 2026-11-22 | TD 2025.32440 bundled Python 3.11.10 | unit tests (S6 parity, before review 4) | Pass: `Ran 99 tests in 5.162s OK (skipped=1)` |
+| 2026-11-22 | TouchDesigner 2025.32440 (disposable `s6.toe`) | S6 main (before review 4) | Pass 65/65; exit code 0 |
+| 2026-11-22 | — | Independent review 4 (S6 security + threading) | 12 findings (1 High, 4 Medium, 7 Low); dispositions in [review 4](../research/2026-11-22-s6-review.md) |
+| 2026-11-22 | Windows 11, CPython 3.11.8 | unit tests (after review-4 fixes) | Pass: `Ran 111 tests in 5.770s OK (skipped=1)` |
+| 2026-11-22 | TD 2025.32440 bundled Python 3.11.10 | unit tests (parity, after review-4 fixes) | Pass: `Ran 111 tests in 5.733s OK (skipped=1)` |
+| 2026-11-22 | TouchDesigner 2025.32440 (disposable `s6.toe`) | S6 main (after review 4) | **Pass 66/66**; exit code 0; 924 dispatches on `MainThread`, 0 elsewhere; LAN connect not connected; no listener after exit |
+| 2026-11-22 | TouchDesigner 2025.32440 (disposable `s6.toe`) | S6 conflict (after review 4) | **Pass 4/4**; `PORT_IN_USE`, TD never listened; exit code 0 |
+| 2026-11-22 | Windows 11, CPython 3.11.8 | `check_docs.py` (S6, pre-commit) | Pass: `53 markdown files, 0 problem(s)` |
 
 ## Local environment facts (file inspection only, 2026-11-22)
 
-- **TouchDesigner 2025.32440** is installed, with `python311.dll`, `_sqlite3.pyd`, `jsonschema` 4.23 and `pip` 24.2. A legacy install bundles `python39.dll`. **2025.33230+ is not installed.** TouchDesigner was not launched.
+- **TouchDesigner 2025.32440** is installed, with `python311.dll`, `_sqlite3.pyd`, `jsonschema` 4.23 and `pip` 24.2. A legacy install bundles `python39.dll`. 2025.33230+ is not installed and is not required (D10). TouchDesigner was launched only with disposable spike files (S5, S6).
+- Chrome and Edge are installed. Edge headless made no request on this machine; Chrome headless (throwaway profile) worked.
 - Node.js v24.14.0 and Python 3.11.8 are on PATH. There is no `gh` CLI.
 - Original bridge hashes were verified with `sha256sum`: the `.tox` matches the audit's stated SHA-256, and the committed audit/zip copies are byte-identical to the supplied files.

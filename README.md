@@ -16,7 +16,7 @@ A source-first, AI-powered TouchDesigner development environment: an MCP server 
 
 ```
 MCP client ──Streamable HTTP + bearer token──▶ ┌ TDflowMCP.tox (inside TouchDesigner) ─────────────┐
-Browser dashboard ──same origin, admin session─▶│ Web Server DAT (127.0.0.1) → gate → identity      │
+Browser dashboard ──same origin, admin session─▶│ loopback transport (127.0.0.1) → gate → identity │
                                                 │ → MCP layer → tool registry → POLICY ENGINE       │
                                                 │ → execution (main thread, undo) → host network    │
                                                 │ audit (SQLite, hash-chained) · approvals queue    │

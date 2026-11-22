@@ -17,6 +17,7 @@ MUTATING = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 SENSITIVE = ("host", "origin", "content-length", "transfer-encoding", "sec-fetch-site", "content-type",
              "x-tdflow-request", "x-tdflow-csrf", "upgrade")
 _PATH_OK = re.compile(r"^/[A-Za-z0-9._~\-/]*$")
+_DIGITS = re.compile(r"[0-9]{1,10}")   # ASCII only; str.isdigit() accepts e.g. '²' (review 4, M)
 
 
 @dataclass(frozen=True)
@@ -116,7 +117,7 @@ def decide(method: str, raw_path: str, headers: Mapping[str, str], state: Listen
         return Decision(False, 400, "TRANSFER_ENCODING_UNSUPPORTED", route, path=path)
     length = _h(headers, "Content-Length")
     if length is not None:
-        if not length.isdigit():
+        if not _DIGITS.fullmatch(length):
             return Decision(False, 400, "BAD_CONTENT_LENGTH", route, path=path)
         if int(length) > cfg.max_body_bytes:
             return Decision(False, 413, "BODY_TOO_LARGE", route, path=path)

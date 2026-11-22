@@ -127,7 +127,7 @@ TD's main thread cannot pre-empt running Python. Limits are therefore:
 
 ## 8. Network posture
 
-- Bind `127.0.0.1` only, enforced by the bind-verification gate (§8.2). Remote/LAN access is out of scope for Phases 1–3 and needs an ADR (TLS via the Web Server DAT `secure` parameter, plus mTLS).
+- Bind `127.0.0.1` only, enforced by the bind-verification gate (§8.2), whichever transport is used ([ADR-0002](../decisions/0002-in-process-mcp-host.md)). Remote/LAN access is out of scope for Phases 1–3 and needs an ADR (TLS plus mTLS).
 
 ### 8.1 Per-route gate table
 
@@ -136,7 +136,7 @@ TD's main thread cannot pre-empt running Python. Limits are therefore:
 - Conflicting duplicates of security-relevant headers (Host, Origin, Content-Length, Transfer-Encoding, Sec-Fetch-Site, Content-Type, X-TDflow-*) → `400`.
 - `Content-Length` must be digits only and ≤ the cap.
 - A body sent with `Transfer-Encoding` is accepted only when the actual received length is checked against the cap (and against `Content-Length`, if present).
-- Implemented as pure logic in `src/tdflowmcp/gate.py` (unit-tested; not yet integrated).
+- Implemented as pure logic in `src/tdflowmcp/gate.py`. It is integrated with the embedded transport (`src/tdflowmcp/net/pyhttp.py`) and was exercised inside TouchDesigner 2025.32440 in spike S6; the component shell does not exist yet.
 
 | Route | Method | Requirements (all must hold) |
 |---|---|---|
@@ -151,17 +151,51 @@ Responses never include `Access-Control-Allow-*` headers.
 
 ### 8.2 Bind-verification gate
 
-0. **Pre-activation capability check.** If the build's Web Server DAT has no `localaddress` parameter, the listener is **never activated**: no socket is opened, the state becomes `Error: BIND_UNSUPPORTED`, and guidance goes only to parameters and an internal DAT. Spike S5 found that TouchDesigner 2025.32440 lacks `localaddress` and binds `0.0.0.0`, so on such builds even a short verification window would expose a port on every interface.
+0. **Pre-activation checks.** Failing any of them means the listener is **never activated** (no socket is opened):
+   - **Capability, per transport.**
+     - **Embedded Python transport (default):** the bind host must be the literal `127.0.0.1` (anything else → `BIND_REFUSED` / `net.capability` fail), and exclusive binding must be available on Windows (`SO_EXCLUSIVEADDRUSE`, never `SO_REUSEADDR`).
+     - **Web Server DAT (optional):** the DAT must have a `localaddress` parameter; otherwise → `Error: BIND_UNSUPPORTED`. Spike S5 found that TouchDesigner 2025.32440 lacks `localaddress` and binds `0.0.0.0`, so the DAT transport is never used there.
+   - **Port ownership:** if the OS table shows **any other process** listening on `<port>`, on any address, the state becomes `Error: PORT_IN_USE`. On Windows another process may hold `0.0.0.0:<port>` next to our `127.0.0.1:<port>`, and then loopback traffic meant for it would reach us (S6), so the port is never shared.
 1. **Activate the listener in `VERIFYING` state.** A listening socket cannot be verified before it exists. While `VERIFYING`, the request gate answers **every** request with `503 TDFLOW_VERIFYING` and runs no application route: no `/setup`, `/mcp`, `/api`, `/ui` or `/.well-known` content, and no TD access. The operating system may accept TCP connections during this window, but no application data is ever served.
 2. **Verify the effective binding** before any application request is served. Positive evidence of a loopback-only binding is required:
    - the OS listening-socket table, **filtered to this TouchDesigner process's PID**, shows only loopback addresses (`127.0.0.1` and/or `::1`) for `<port>`, with no `0.0.0.0`, `::`, IPv4-mapped or other non-loopback entry;
    - a connection attempt to each non-loopback local address on `<port>` does not connect. A probe can only **fail** the verdict: S5 showed a timeout happens even when nothing listens, so it proves nothing.
-   - The socket appears asynchronously, seconds after `active` is set (S5: 2.0–3.5 s). Only a bounded "no listener for this process yet" result is re-checked on later frames; any other ambiguity closes the listener.
+   - the embedded transport also reports its own `getsockname()`; a non-loopback value fails, but it never replaces the OS table.
+   - no other process listens on `<port>` (`port_shared` → `PORT_IN_USE`).
+   - Evidence collection is pure socket/OS-table work and runs off the main thread; only the verdict is applied on the main thread.
+   - With the Web Server DAT, the socket appears asynchronously, seconds after `active` is set (S5: 2.0–3.5 s). The embedded transport's socket exists as soon as `start()` returns (S6: verdict after ≈ 0.31–0.35 s). Only a bounded "no listener for this process yet" result is re-checked on later frames; any other ambiguity closes the listener.
 3. **Pass → `SERVING`.** The gate starts routing application requests.
-4. **Fail or ambiguous → close immediately, then confirm.** If the socket table is unavailable, any non-loopback entry appears, or a non-loopback connection succeeds, the Web Server DAT is deactivated **in the same callback that reached the verdict**. The OS releases the socket asynchronously (S5: `onServerStop` about 0.06 s later), so closure is confirmed on a later frame from the socket table. The state becomes `CLOSING` and then, once a later-frame table check shows no socket, `CLOSED` with `Error: BIND_UNVERIFIED`. If the socket does not disappear within a bounded number of checks, the state becomes `STUCK` (`CLOSE_UNCONFIRMED`) and the user is told to restart TouchDesigner. Guidance goes only to parameters and an internal DAT. There is no retry with weaker checks, no override, and **no automatic restart**: `CLOSED` is terminal until the user explicitly acts again (`Opensetup`), and `CLOSING`/`STUCK` never re-open.
-5. Re-verify after any change to `Port`, `localaddress` or `active`, and after the listener restarts.
+4. **Fail or ambiguous → close immediately, then confirm.** If the socket table is unavailable, any non-loopback entry appears, or a non-loopback connection succeeds, the listener is closed **in the same frame or callback that reached the verdict** (Web Server DAT: `active=False`; embedded transport: `begin_close()`, which never blocks the frame). The OS releases the socket asynchronously (S5: `onServerStop` about 0.06 s later; S6: closure confirmed in 33–66 ms), so closure is confirmed on a later frame from the socket table. The state becomes `CLOSING` and then, once a later-frame table check shows no socket, `CLOSED` with `Error: BIND_UNVERIFIED`. If the socket does not disappear within a bounded number of checks, the state becomes `STUCK` (`CLOSE_UNCONFIRMED`) and the user is told to restart TouchDesigner. Guidance goes only to parameters and an internal DAT. There is no retry with weaker checks, no override, and **no automatic restart**: `CLOSED` is terminal until the user explicitly acts again (`Opensetup`), and `CLOSING`/`STUCK` never re-open.
+5. Re-verify after any change to `Port`, the bind host, `localaddress` or `active`, and after the listener restarts. A user-requested stop (`CLOSING` → `CLOSED` with no error code) and a transport failure (server thread died → `TRANSPORT_FAILED`) both go through the same close confirmation.
 
-The exact evidence sources and their reliability on each TD build are established by spikes S5 (2025.32440) and S1 (2025.33230+) ([S5 findings](../research/2026-11-22-s5-compatibility-2025.32440.md)).
+The evidence sources were established on 2025.32440 by spikes S5 (Web Server DAT) and S6 (embedded transport) ([S5 findings](../research/2026-11-22-s5-compatibility-2025.32440.md), [S6 findings](../research/2026-11-22-s6-embedded-python-transport.md)). S1 covers the Web Server DAT on newer builds and is optional.
+
+### 8.3 Embedded transport: threading and limits
+
+Implemented in `src/tdflowmcp/net/pyhttp.py` (stdlib only: `http.server`, `socketserver`, `threading`, `queue`, `socket`). Measured in [S6](../research/2026-11-22-s6-embedded-python-transport.md).
+
+- **Thread split:**
+  - Handler threads parse HTTP, run the request gate (§8.1), authenticate, check the kill switch, and serve the static Setup snapshot.
+  - Everything else becomes a job on a **bounded queue**. Only `pump()` dispatches jobs, and it runs on TouchDesigner's main thread: it raises on any other thread and handles at most 8 jobs within ≈ 4 ms per frame.
+  - Handler threads never import `td` (boundary test) and never call the dispatcher. The static snapshot is bytes copied from DATs on the main thread.
+- **Bounded everything:**
+  - ≤ 16 concurrent connections: beyond that, an immediate `503 TDFLOW_BUSY` without a thread.
+  - Listen backlog 64, queue 32 jobs: when full, `503 TDFLOW_BUSY`.
+  - 5 s socket I/O timeout, and connections older than 30 s are cut.
+  - One response per connection (`Connection: close`). No chunked request bodies.
+- **Timeouts:**
+  - A job not dispatched within the job timeout is **cancelled and never runs** (`504 TDFLOW_TIMEOUT`).
+  - A job dispatched but not finished in time gets `504 TDFLOW_TIMEOUT_AFTER_DISPATCH`: its outcome is unknown to the client and must be read from audit by request id.
+- **Responses:**
+  - Every response carries `Cache-Control: no-store`, `nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, CORP `same-origin` and a CSP (`default-src 'self'; frame-ancestors 'none'`), so the Setup page must not use inline script.
+  - Dispatcher headers named `Access-Control-*`, `Content-Length`, `Transfer-Encoding`, `Connection` or `Server`, or containing CR/LF, are dropped.
+  - Errors never include exception text.
+- **Kill switch:** `suspended` rejects every `/mcp` request with `503 SUSPENDED` before dispatch, while `/setup/` stays available. The transport itself can be stopped with `begin_close()`, which fails queued jobs with `TDFLOW_CLOSING`.
+- **Audit:** the transport keeps a bounded in-memory record per request (id, method, validated path, route, status, code, duration, principal), with no headers, bodies or tokens. The main thread drains it into the audit store (Phase 1B).
+- **Residual limits:**
+  - Latency floor ≈ 1–2 frames inside TouchDesigner (S6: handler threads get the GIL about once per frame).
+  - A main-thread stall delays all dispatches.
+  - No WebSocket and no TLS.
 
 - `Host` must be `127.0.0.1:<port>` or `localhost:<port>` (defence in depth against DNS rebinding; not itself a spec requirement).
 - TDflowMCP core makes no **non-loopback** outbound network calls. The only outbound request is the loopback port-ownership probe (`GET http://127.0.0.1:<port>/.well-known/tdflowmcp`) during conflict detection. It has a timeout of at most 200 ms, runs off the main thread or in non-blocking steps, and its answer is **untrusted**: it is shown only as "responds like TDflowMCP vX" and never drives any automatic action.

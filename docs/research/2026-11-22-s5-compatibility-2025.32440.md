@@ -1,6 +1,7 @@
 # Spike S5: compatibility of TouchDesigner 2025.32440 (older build)
 
 **Date:** 2026-11-22 · **Status:** Executed. Evidence below; corrected after [independent review 3](2026-11-22-s5-review.md).
+**Superseding note:** the conclusion of §2 applies to the **Web Server DAT transport only**. After owner decision D10, spike [S6](2026-11-22-s6-embedded-python-transport.md) showed that an embedded Python transport meets the security requirements on this same build, so 2025.32440 is supported.
 **Build under test:** the installed **TouchDesigner 2025.32440**, which predates the provisional 2025.33230+ target.
 **Spike code:** [spikes/s5/](../../spikes/s5/README.md). It is disposable and is not TDflowMCP source. The committed copy was **corrected after run 1** (see §3); run 1 used the earlier version, and the full mode was not re-run afterwards.
 

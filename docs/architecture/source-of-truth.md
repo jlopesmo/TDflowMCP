@@ -24,7 +24,7 @@ src/
     protocol/  policy/  registry/  audit/  identity/  approvals/
     gate.py  compat.py  net/   # EXIST (Phase 1A prep): request gate, compatibility checks, bind verification
     continuity/  memory/  integrations/   # planned; pure logic, TD/file access injected
-  td_adapter/           # thin layer that touches `td` (op access, undo, Web Server DAT callbacks)
+  td_adapter/           # thin layer that touches `td` (op access, undo, the per-frame transport pump)
   tools/                # core tool definitions (Phase 1)
   extensions/           # optional tool modules (Phase 4+)
   setup/                # troubleshooting.json EXISTS; Setup Assistant static page planned (Phase 1A)
