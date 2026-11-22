@@ -31,7 +31,10 @@ See [roadmap — open blockers](roadmap.md#open-blockers-and-owner-actions). The
 
 ## Phase 0 commit record
 - `82b64f1`: Phase 0 foundation. `b70000a`: push evidence record. Both are on `origin/dev`.
-- The revision commit, its push, and the creation of `main` are reported in the hand-off for this revision. They are recorded here by the follow-up commit.
+- `066dbd0`: Phase 0 revision (owner features, resequencing, decisions, bridge reference, review 2 fixes). Pre-commit checks passed: `check_docs` 47 files / 0 problems; unittest 14 OK.
+- **`main` was created at `066dbd0`** and pushed on 2026-11-22. Observed with `git ls-remote origin`: `refs/heads/main` and `refs/heads/dev` both at `066dbd021fc9…`. Development continues on `dev`. This record was added by the follow-up commit on `dev` only.
+- GitHub's push response offered "create a pull request for main", consistent with `dev` still being the default branch (B4; switch in GitHub settings).
+- CI for these pushes: **not observed** (B3).
 
 ## Next action
 1. The owner reviews the revision and accepts or revises ADR-0010 (needed before 1A).
