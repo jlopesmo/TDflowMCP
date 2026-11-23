@@ -71,6 +71,7 @@
 - `82b64f1`, `b70000a`, `066dbd0`, `380d317`: Phase 0. `main` = `066dbd0`.
 - `377841c`, `ec259ed`: S5. `591b01e`, `3d0081e`: S6. `e680b47`, `9939af9`: Phase 1A. `e15ec55`, `a4660cd`: Phase 1B.
 - `2a7e72f`: Phase 1C + audit worker + project-local storage (review 7 fixes). Pushed to `origin/dev` and observed with `git ls-remote` (`refs/heads/dev` = `2a7e72f…`, `refs/heads/main` = `066dbd0…`, so `main` is unchanged). Package `dist/TDflowMCP-0.2.0.dev1-2a7e72f361` (tox `9a063083…`) built from a clean worktree of that commit; all four in-TD suites pass on it. This record was added by the follow-up commit. CI: **not observed**.
+- `99a10f4`: B6 decided (continuation rejected, preserved as a spike), dogfood round 1 with fixes, review 8, ADR-0014 proposed. Pushed to `origin/dev` and observed with `git ls-remote` (`refs/heads/dev` = `99a10f4…`, `refs/heads/main` = `066dbd0…`, so `main` is unchanged). Verified on candidate builds from the pre-commit tree (`2dac3a27…`); no package was built for this commit. This record was added by the follow-up commit. CI: **not observed**.
 
 ## Next (owner decisions first)
 1. **Phase 2A** (owner D15: after dogfooding): checkpoints, verified handoffs, the optional `tdflowProject` COMP, context-aware Tell Your Coding Agent; single-authority memory. A pure-Python draft of records/claims exists outside the repository (not committed).
