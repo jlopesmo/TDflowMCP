@@ -153,9 +153,18 @@ class TDflowMCPExt:
             if self._shut or _REGISTRY.instances.get(cid) is not self:
                 return False
             return self._m.oswindow.minimized(pid)
+        ev = self._m.evidence
+
+        def paused_verify(host):
+            # Owner D20: the same positive loopback-only evidence as the controller's re-verification, collected
+            # TD-free on a background thread while TouchDesigner runs no frames. Anything but PASS fails.
+            e = ev.collect(port, pid, host)
+            return None if e.verdict is self._m.bindverify.Verdict.PASS else ",".join(e.reasons)[:200] or "fail"
         t = self._m.Transport("127.0.0.1", port, state_fn=state_fn, authenticator=self._auth, mcp_enabled=False,
                               heartbeat_timeout=20.0, job_timeout=5.0, dispatch_grace=5.0,
-                              not_cooking_after=2.0, paused_fn=paused,
+                              not_cooking_after=2.0, paused_fn=paused, paused_verify=paused_verify,
+                              paused_reverify_s=self.ctl.reverify_seconds, idle_seconds=self.ctl.idle_seconds,
+                              paused_verify_timeout=self.ctl.evidence_timeout,
                               route_handlers={"mcp": self._route_mcp, "api": self._route_api})
         t.set_static(self._static_assets())
         t.suspended = self.suspended
@@ -517,6 +526,9 @@ class TDflowMCPExt:
     # ---- parameter callbacks (main thread) ------------------------------------------------------
     def OnPulse(self, par):
         n = par.name
+        t = self.ctl.transport
+        if t is not None:
+            t.touch_activity()                       # the user acted in TouchDesigner (idle stop, D20)
         if n == "Opensetup":
             self.ctl.apply_pending_port()
             other = self._local_port_user(self.ctl.port)
@@ -1222,8 +1234,11 @@ class TDflowMCPExt:
                 if p == "/api/sessions":
                     return ok({"sessions": st.sessions(limit=50)})
                 if p == "/api/agents":
-                    return ok({"agents": idn.public_list(), "project_root": self._root_text,
-                               "roles": ["observer", "builder", "operator"]})
+                    agents = idn.public_list()
+                    for a in agents:
+                        a["grants"] = st.grants_of(a["id"])
+                    return ok({"agents": agents, "project_root": self._root_text,
+                               "roles": {r: sorted(v) for r, v in self._m.policy.ROLES.items()}})
                 if p == "/api/approvals":
                     now = time.time()
                     names = {a.id: a.display_name for a in idn.agents.values()}
@@ -1284,6 +1299,34 @@ class TDflowMCPExt:
                     st.append("admin", tool="agent_enable" if enabled else "agent_disable", agent_id=aid)
                     idn.set_enabled(aid, enabled)
                 return ok({"agent_id": aid, "enabled": enabled})
+            if p in ("/api/grants/add", "/api/grants/remove"):
+                # Phase 2B permission editing. Durable first; the policy version changes, so pending approvals of
+                # this agent no longer match and must be asked again (security-model §4).
+                aid = str(body.get("agent_id", ""))[:32]
+                if aid not in idn.agents:
+                    return refuse("NOT_FOUND", "no such agent", 404)
+                with self._admin_lock:
+                    if p.endswith("add"):
+                        scope = str(body.get("scope", ""))[:256]
+                        root = self._root_text
+                        if not (scope == root + "/**" or scope == root or scope.startswith(root + "/")):
+                            return refuse("SCOPE_OUTSIDE_PROJECT_ROOT", "the scope must lie inside the project root", 400)
+                        acts = [str(a) for a in body.get("actions") or []][:5]
+                        effect = str(body.get("effect", "allow"))
+                        st.append("admin", tool="grant_add", agent_id=aid,
+                                  detail={"scope": scope, "actions": acts, "effect": effect})
+                        try:
+                            gid = idn.add_grant(aid, scope, acts, effect)
+                        except ValueError as e:
+                            st.append("admin", tool="grant_add", agent_id=aid, outcome="refused", error_code="INVALID_ARGS")
+                            return refuse("INVALID_" + "ARGS", str(e)[:200], 400)
+                        return ok({"ok": True, "grant_id": gid, "grants": st.grants_of(aid)})
+                    gid = body.get("grant_id")
+                    if not isinstance(gid, int) or isinstance(gid, bool):
+                        return refuse("INVALID_" + "ARGS", "grant_id is needed", 400)
+                    st.append("admin", tool="grant_remove", agent_id=aid, detail={"grant_id": gid})
+                    done = idn.remove_grant(aid, gid)
+                    return ok({"ok": done, "grants": st.grants_of(aid)}, 200 if done else 404)
             if p == "/api/settings":
                 return self._dash_settings_set(body, st, ok, refuse)
             return E(404, "NOT_FOUND")

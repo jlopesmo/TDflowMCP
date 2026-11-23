@@ -5,6 +5,7 @@ import json
 import os
 import socket
 import sys
+import threading
 import time
 import unittest
 
@@ -149,6 +150,87 @@ class PausedWatchdogTests(unittest.TestCase):
             h = Harness(heartbeat_timeout=0.3, paused_fn=fn)
             self.assertTrue(self.wait_closed(h, 5))                     # only a literal True keeps the listener
             self.assertEqual(h.t.close_reason, "heartbeat_lost")
+
+
+class PausedGuardTests(unittest.TestCase):                                # owner D20
+    def wait(self, cond, seconds):
+        end = time.monotonic() + seconds
+        while not cond() and time.monotonic() < end:
+            time.sleep(0.02)
+        return cond()
+
+    def test_binding_is_re_verified_in_the_background_while_paused(self):
+        calls, verdict = [], {"r": None}
+
+        def verify(host):
+            calls.append(host)
+            return verdict["r"]
+        h = Harness(heartbeat_timeout=30, paused_fn=lambda: True, paused_verify=verify, paused_reverify_s=0.1)
+        h.t.pause_sample_after, h.t.pause_sample_every = 0.05, 0.02
+        try:
+            self.assertTrue(self.wait(lambda: len(calls) >= 3, 3))     # repeated while paused
+            self.assertEqual(calls[0], "127.0.0.1")
+            self.assertFalse(h.t.is_closed())
+            self.assertGreaterEqual(h.t.stats().get("paused_reverifies", 0), 1)
+            verdict["r"] = "non_loopback:0.0.0.0"
+            self.assertTrue(self.wait(h.t.is_closed, 3))               # a failed verdict closes at once
+            self.assertEqual(h.t.close_reason, "paused_reverify_failed")
+        finally:
+            h.close()
+
+    def test_a_raising_or_hanging_verifier_never_passes_and_never_blocks(self):
+        h = Harness(heartbeat_timeout=30, paused_fn=lambda: True, paused_verify=lambda host: 1 / 0, paused_reverify_s=0.1)
+        h.t.pause_sample_after, h.t.pause_sample_every = 0.05, 0.02
+        self.assertTrue(self.wait(h.t.is_closed, 3))
+        self.assertEqual(h.t.close_reason, "paused_reverify_failed")
+        hang = threading.Event()
+        h2 = Harness(heartbeat_timeout=30, paused_fn=lambda: True, paused_verify=lambda host: hang.wait(30), paused_reverify_s=0.1)
+        h2.t.pause_sample_after, h2.t.pause_sample_every = 0.05, 0.02
+        h2.t.paused_verify_timeout = 0.6
+        try:
+            time.sleep(0.3)
+            self.assertEqual(h2.run(lambda: req(h2.port), pump=False)[0], 200)   # accept keeps working
+            self.assertTrue(self.wait(h2.t.is_closed, 3))                       # review 14: a hang is a failure
+            self.assertEqual((h2.t.close_reason, h2.t.close_reason_detail), ("paused_reverify_failed", "verify_timeout"))
+        finally:
+            hang.set()
+            h2.close()
+
+    def test_idle_stop_while_paused_counts_only_meaningful_activity(self):
+        h = Harness(heartbeat_timeout=30, paused_fn=lambda: True, idle_seconds=0.6)
+        h.t.pause_sample_after, h.t.pause_sample_every = 0.05, 0.02
+        end = time.monotonic() + 1.0
+        while time.monotonic() < end and not h.t.is_closed():
+            try:
+                req(h.port, "GET", "/setup/")                          # automatic polling keeps nothing alive
+            except OSError:
+                break                                                  # closed in between
+            time.sleep(0.1)
+        self.assertTrue(self.wait(h.t.is_closed, 2))
+        self.assertEqual(h.t.close_reason, "idle")
+
+    def test_not_paused_means_the_guard_does_nothing(self):
+        calls = []
+        h = Harness(heartbeat_timeout=30, paused_fn=lambda: False, paused_verify=lambda host: calls.append(1) or "fail",
+                    paused_reverify_s=0.05, idle_seconds=0.2)
+        h.t.pause_sample_after, h.t.pause_sample_every = 0.05, 0.02
+        try:
+            time.sleep(0.6)
+            self.assertEqual(calls, [])
+            self.assertFalse(h.t.is_closed())                          # the controller handles idle then
+        finally:
+            h.close()
+
+    def test_what_counts_as_activity(self):
+        from tdflowmcp.net.pyhttp import EmbeddedHTTPTransport as T
+        m = T.meaningful
+        self.assertTrue(m({"status": 200, "route": "mcp", "method": "POST"}))
+        self.assertTrue(m({"status": 200, "route": "api", "method": "POST", "path": "/api/approvals/decide"}))
+        self.assertFalse(m({"status": 200, "route": "pair", "method": "POST", "path": "/setup/api/pair"}))  # no session
+        for rec in ({"status": 200, "route": "static", "method": "GET"}, {"status": 200, "route": "api", "method": "GET"},
+                    {"status": 200, "route": "api", "method": "POST", "path": "/api/audit/search"},
+                    {"status": 401, "route": "mcp", "method": "POST"}):
+            self.assertFalse(m(rec), rec)
 
 
 class WindowQueryTests(unittest.TestCase):

@@ -356,6 +356,64 @@ def cp_resumed(data, pid):
     approval_flow()
 
 
+def approved(E, tool, args):
+    """Request, approve on the dashboard, then repeat the identical call. Returns (request, result)."""
+    r = E.call(tool, args)
+    if r.get("code") != "APPROVAL_REQUIRED":
+        return r, r
+    admin("POST", "/api/approvals/decide", {"id": r.get("approval_id"), "decision": "approved"})
+    return r, E.call(tool, args)
+
+
+def code_dat_flow(E):
+    """Owner D20: staged code. An Execute DAT is created switched off (approved), gets its code (approved), is
+    switched on (approved), and the code runs; switching it off is approval-gated too."""
+    B = MCP(TOKENS["B"])
+    m = B.call("tdflow_create_operator", {"parent": "/project1/fx", "type": "textDAT", "name": "marker"})
+    T("code.marker_created", ok(m), r=m)
+    T("code.builder_cannot_request_execute_dat", B.call("tdflow_create_operator", {
+        "parent": "/project1/fx", "type": "executeDAT", "name": "ex_b"}).get("rule_id") in ("G2", "R1"))
+    T("code.network_dat_never_approvable", E.call("tdflow_create_operator", {
+        "parent": "/project1/fx", "type": "webclientDAT", "name": "w"}).get("rule_id") == "G2")
+    req, c = approved(E, "tdflow_create_operator", {"parent": "/project1/fx", "type": "executeDAT", "name": "ex1"})
+    T("code.EXECUTE_DAT_NEEDS_APPROVAL", req.get("code") == "APPROVAL_REQUIRED" and "switched off" in json.dumps(req.get("reasons")),
+      r=req)
+    T("code.EXECUTE_DAT_CREATED_STAGED_INACTIVE", ok(c) and c.get("staged_inactive") is True, r=c)
+    code = ("def onFrameStart(frame):\n\top('/project1/fx/marker').text = 'ran ' + str(frame)\n\treturn\n")
+    req, w = approved(E, "tdflow_set_dat_text", {"path": "/project1/fx/ex1", "text": code})
+    T("code.CODE_TEXT_NEEDS_APPROVAL", req.get("code") == "APPROVAL_REQUIRED" and req.get("rule_id") == "A1", r=req)
+    T("code.code_text_written", ok(w), r=w)
+    t = E.call("tdflow_get_dat_text", {"path": "/project1/fx/ex1"})
+    T("code.text_is_exactly_the_approved_code", t.get("text", "").rstrip("\n") == code.rstrip("\n"), text=t.get("text"))
+    time.sleep(0.5)
+    T("code.not_running_while_inactive", "ran" not in E.call("tdflow_get_dat_text", {"path": "/project1/fx/marker"}).get("text", ""))
+    ex = {"path": "/project1/fx/ex1", "values": {"framestart": True, "active": True}}
+    req, a = approved(E, "tdflow_set_parameters", ex)
+    T("code.ACTIVATION_NEEDS_APPROVAL", req.get("code") == "APPROVAL_REQUIRED" and "switches active" in json.dumps(req.get("reasons")),
+      r=req)
+    T("code.activated", ok(a), r=a)
+    time.sleep(1.0)
+    mk = E.call("tdflow_get_dat_text", {"path": "/project1/fx/marker"}).get("text", "")
+    T("code.APPROVED_CODE_RUNS", mk.startswith("ran "), marker=mk)
+    T("code.builder_cannot_switch_it", B.call("tdflow_set_parameters", {"path": "/project1/fx/ex1", "values": {"active": False}})
+      .get("rule_id") == "R1")
+    # Review 14: callback toggles decide when code runs; they are execute changes too, not plain updates.
+    T("code.BUILDER_CANNOT_TOGGLE_CALLBACKS", B.call("tdflow_set_parameters", {
+        "path": "/project1/fx/ex1", "values": {"frameend": True}}).get("rule_id") == "R1")
+    tg = E.call("tdflow_set_parameters", {"path": "/project1/fx/ex1", "values": {"frameend": True}})
+    T("code.CALLBACK_TOGGLE_NEEDS_APPROVAL", tg.get("code") == "APPROVAL_REQUIRED" and "decides when its code runs"
+      in json.dumps(tg.get("reasons")), r=tg)
+    req, off = approved(E, "tdflow_set_parameters", {"path": "/project1/fx/ex1", "values": {"active": False}})
+    T("code.deactivation_is_approval_gated_and_works", req.get("code") == "APPROVAL_REQUIRED" and ok(off), r=off)
+    time.sleep(0.5)
+    a1 = E.call("tdflow_get_dat_text", {"path": "/project1/fx/marker"}).get("text", "")
+    time.sleep(0.6)
+    T("code.stopped_after_deactivation", E.call("tdflow_get_dat_text", {"path": "/project1/fx/marker"}).get("text", "") == a1)
+    d = B.call("tdflow_delete_operator", {"path": "/project1/fx/ex1"})
+    T("code.staged_operator_removable", ok(d), r=d)
+    B.call("tdflow_delete_operator", {"path": "/project1/fx/marker"})
+
+
 def approval_flow():
     """Phase 2B (ADR-0005 gate): an approval executes only on the identical re-call, with targets and policy
     re-checked. Driven through the real MCP endpoint and the paired dashboard API."""
@@ -390,6 +448,7 @@ def approval_flow():
     ev = base.jbody(admin("POST", "/api/audit/search", {"tool": "tdflow_set_parameters", "limit": 50})) or {}
     kinds = {(e["kind"], e.get("approval_id")) for e in ev.get("events", [])}
     T("approval.execution_audited_with_its_approval", ("intent", aid) in kinds and ("outcome", aid) in kinds, n=len(kinds))
+    code_dat_flow(E)
     # Dashboard: overview, live tail and a verified report.
     ov = base.jbody(admin("GET", "/api/overview")) or {}
     T("dashboard.overview", ov.get("mcp") is True and ov.get("cooking") is True and (ov.get("audit") or {}).get("ok") is True, ov=ov)

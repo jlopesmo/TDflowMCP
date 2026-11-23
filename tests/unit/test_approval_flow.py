@@ -22,7 +22,7 @@ class ExprAdapter(Adapter):
     """set_parameters with ``expressions`` is update + execute; a delete of ``big`` counts 80 operators."""
 
     def __init__(self):
-        self.executed, self.count, self.extra_target = [], 80, None
+        self.executed, self.count, self.extra_target, self.snapshot = [], 80, None, None
 
     def resolve(self, tool, args):
         if tool.resolver == "undo":
@@ -31,7 +31,12 @@ class ExprAdapter(Adapter):
         if tool.resolver == "delete":
             return Resolution([Target("delete", path, change="delete", count=self.count)])
         if tool.resolver == "dat_text":                                   # an untagged DAT: TouchDesigner may run it
-            return Resolution([Target("update", path, change="text"), Target("execute", path, change="text")])
+            return Resolution([Target("update", path, change="text"), Target("execute", path, change="text")],
+                              {"snapshot": self.snapshot} if self.snapshot else {})
+        if tool.resolver == "wire":
+            dst = args.get("dst", path)
+            return Resolution([Target("update", dst, change="wire"), Target("read", args.get("src", path)),
+                               Target("execute", dst, change="wire")])
         ts = []
         for name in args.get("values", {}):
             ts.append(Target("update", path, change="param", param=name))
@@ -242,9 +247,28 @@ class FlowTests(Base):
             self.assertEqual(out["code"], "APPROVAL_REFUSED", text)
         self.assertEqual(self.store.approvals_list(), [])
 
-    def test_only_tested_effects_can_be_approved(self):
-        r = self.eng.call(self.OP, "tdflow_set_dat_text", {"path": P, "text": "print(1)"})["structuredContent"]
-        self.assertEqual(r["code"], "APPROVAL_UNAVAILABLE")              # a code DAT: still denied
+    def test_code_dat_text_is_approvable_and_bound_to_the_text_it_replaces(self):    # D20
+        self.ad.snapshot = (P, 1, "old", "sha-old", "sha-new")
+        args = {"path": P, "text": "def onFrameStart(frame):\n\treturn"}
+        r = self.eng.call(self.OP, "tdflow_set_dat_text", args)["structuredContent"]
+        self.assertEqual((r["code"], r["rule_id"]), ("APPROVAL_REQUIRED", "A1"))
+        self.assertIn("writes text TouchDesigner may run as code", r["reasons"][0])
+        row = self.store.approval_get(r["approval_id"])
+        self.assertIn(["replaces_text_sha256", "sha-old"], json.loads(row["targets"]))
+        self.decide(r["approval_id"])
+        self.ad.snapshot = (P, 1, "someone edited it", "sha-other", "sha-new")   # changed since the approval
+        r2 = self.eng.call(self.OP, "tdflow_set_dat_text", args)["structuredContent"]
+        self.assertEqual(r2["code"], "APPROVAL_TARGETS_CHANGED")
+        self.assertEqual(self.ad.executed, [])
+        self.ad.snapshot = (P, 1, "old", "sha-old", "sha-new")
+        r = self.eng.call(self.OP, "tdflow_set_dat_text", args)["structuredContent"]
+        self.decide(r["approval_id"])
+        self.assertFalse(self.eng.call(self.OP, "tdflow_set_dat_text", args)["isError"])
+        self.assertEqual(self.ad.executed[-1][0], "tdflow_set_dat_text")
+
+    def test_wiring_into_a_dat_stays_unavailable(self):
+        r = self.eng.call(self.OP, "tdflow_connect", {"src": "/project1/fx/a", "dst": P})["structuredContent"]
+        self.assertIn(r["code"], ("APPROVAL_UNAVAILABLE", "DENIED"))
         self.assertEqual(self.store.approvals_list(), [])
 
     def test_undo_of_an_approved_change_needs_no_new_approval(self):

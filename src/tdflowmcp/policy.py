@@ -52,6 +52,13 @@ SAFE_CREATE_TYPES = frozenset({
     # DATs: data only (writing text additionally needs the user's 'tdflowdata' tag)
     "tableDAT", "textDAT", "nullDAT",
 })
+# Owner D20: executable types that may be created **with the user's approval** (operator role; rule A1). They are
+# created inactive ("staged"); turning them on is itself an approval-gated change. Network, file-system and
+# Script operators stay outside (not approvable).
+APPROVABLE_CREATE_TYPES = frozenset({"executeDAT", "chopexecuteDAT", "datexecuteDAT", "opexecuteDAT",
+                                     "parameterexecuteDAT", "panelexecuteDAT"})
+# Parameters that switch an executable operator on: changing them is classified as execute (D20).
+ACTIVATION_PARAMS = ("active",)
 # Parameters whose value TouchDesigner evaluates as Python, that load/execute code, that change identity or
 # cloning (which can replace children, also of ancestors), or that expose shortcuts (default denylist).
 PARAM_DENYLIST = ("extension*", "promoteextension*", "extname*", "reinitextensions", "callbacks", "callbacksdat",
@@ -207,7 +214,8 @@ class Policy:
         if not allows:
             return False, "G0", f"no grant allows {t.action} on this path"
         if t.action == "create":
-            if t.op_type not in SAFE_CREATE_TYPES:            # allowlist; executable types never qualify
+            approvable = t.op_type in APPROVABLE_CREATE_TYPES and "execute" in role_actions
+            if t.op_type not in SAFE_CREATE_TYPES and not approvable:   # allowlist; network/file/script never qualify
                 return False, "G2", f"operator type {t.op_type or '?'} is not on the Phase 1 allowlist"
             if not any(g.allowed_op_types is None or t.op_type in g.allowed_op_types for g in allows):
                 return False, "G2", f"operator type {t.op_type} is not allowed by your grants"
@@ -257,7 +265,11 @@ class Policy:
             if t.action == "execute":
                 what = {"expression": f"sets an expression on parameter {t.param}", "reference": f"sets parameter "
                         f"{t.param}, which names another operator or a file", "text": "writes text TouchDesigner may run "
-                        "as code", "wire": "wires data into an operator that may evaluate it"}.get(t.change, "runs code")
+                        "as code", "wire": "wires data into an operator that may evaluate it",
+                        "activation": f"switches {t.param} of an executable operator (its code starts or stops "
+                        "running)", "trigger": f"changes {t.param} of an Execute DAT, which decides when its code "
+                        "runs"}.get(t.change, f"creates a {t.op_type}, an operator that runs code (created "
+                        "switched off)" if t.op_type else "runs code")
                 out.append(f"A1: {t.path} {what}. Approved code runs with full access to TouchDesigner (including "
                            "TDflowMCP itself); scopes do not limit it")
             if t.action == "delete" and t.count > self.max_delete:

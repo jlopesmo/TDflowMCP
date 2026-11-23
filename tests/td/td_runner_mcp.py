@@ -122,6 +122,8 @@ def run(comp, ext, T, frames, until, checkpoint, R, restart=False):
       and not tr.is_closed(), status=comp.par.Status.eval(), detail=comp.par.Statusdetail.eval())
     T("minimized.listener_kept_not_orphan_closed", st.get("not_cooking", 0) >= 2 and st.get("paused_kept", 0) >= 1
       and not st.get("orphan_closed"), stats={k: st.get(k) for k in ("not_cooking", "paused_kept", "orphan_closed", "timeouts")})
+    T("minimized.BINDING_RE_VERIFIED_IN_THE_BACKGROUND", st.get("paused_reverifies", 0) >= 1
+      and not st.get("paused_reverify_failed"), stats={k: st.get(k) for k in ("paused_reverifies", "paused_reverify_failed")})
     evs = yield from store_op(ext, until, "events", "error_code='TDFLOW_NOT_COOKING'", (), 20)
     T("minimized.refusals_audited_as_denials", len(evs) >= 2 and all(e["kind"] == "deny" for e in evs),
       kinds=[(e["kind"], e["tool"]) for e in evs])

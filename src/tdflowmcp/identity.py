@@ -117,6 +117,29 @@ class Identity:
             self._snap = {k: v for k, v in self._snap.items() if k != token_id}
         return ok
 
+    def add_grant(self, agent_id: str, scope: str, actions: Sequence[str], effect: str = "allow") -> int:
+        """Phase 2B permission editing. Only actions the agent's role allows; a deny grant may name any action."""
+        a = self.agents.get(agent_id)
+        if a is None:
+            raise ValueError("no such agent")
+        acts = sorted(set(actions))
+        if effect not in ("allow", "deny") or not acts:
+            raise ValueError("effect must be allow or deny, with at least one action")
+        if effect == "allow" and not set(acts) <= set(ROLES[a.role]):
+            raise ValueError(f"role {a.role} cannot be granted {', '.join(sorted(set(acts) - set(ROLES[a.role])))}")
+        Grant(scope=scope, actions=frozenset(acts), effect=effect)         # validates the scope pattern
+        gid = self.store.grant_add(agent_id, scope, ",".join(acts), effect)
+        self.store.approvals_cancel_agent(agent_id)
+        self.reload()
+        return gid
+
+    def remove_grant(self, agent_id: str, grant_id: int) -> bool:
+        ok = self.store.grant_remove(agent_id, grant_id)
+        if ok:
+            self.store.approvals_cancel_agent(agent_id)
+        self.reload()
+        return ok
+
     def set_enabled(self, agent_id: str, enabled: bool) -> bool:
         ok = self.store.set_agent_enabled(agent_id, enabled)
         self.reload()

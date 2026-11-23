@@ -280,7 +280,7 @@ class Engine:
                     "snapshot": res.context.get("snapshot"),
                     "approval": {"rule": verdict.rule_id, "reason": verdict.reason,
                                  "reasons": self.policy.approval_reasons(res.targets),
-                                 "facts": APR.target_facts(res.targets)}}
+                                 "facts": APR.target_facts(res.targets) + _snapshot_fact(res)}}
         if not verdict.allow:
             return {"deny": {"code": verdict.code, "rule": verdict.rule_id, "reason": verdict.reason,
                              "target": verdict.target, "policy_version": verdict.policy_version, "targets": targets}}
@@ -363,7 +363,7 @@ class Engine:
         v = self.policy.evaluate(current, res.targets, approved=bool(plan.get("approved")))
         if not v.allow:
             raise ToolFailure(v.code, v.reason, rule_id=v.rule_id)
-        if plan.get("approved") and APR.target_facts(res.targets) != plan["approval"]["facts"]:
+        if plan.get("approved") and APR.target_facts(res.targets) + _snapshot_fact(res) != plan["approval"]["facts"]:
             raise ToolFailure("APPROVAL_TARGETS_CHANGED", "The project changed since the approval; nothing was "
                                                           "executed. Ask again.")
         if plan.get("approved") and v.policy_version != plan["policy_version"]:
@@ -933,7 +933,8 @@ class Engine:
 
 # Which tools may be approved, per approval rule (Phase 2B increment 1): A1 (runs code) only for parameter
 # expressions and reference parameters; A2 (large delete) for deletes.
-APPROVABLE = {"A1": ("tdflow_set_parameters",), "A2": ("tdflow_delete_operator",)}
+APPROVABLE = {"A1": ("tdflow_set_parameters", "tdflow_set_dat_text", "tdflow_create_operator"),
+              "A2": ("tdflow_delete_operator",)}
 MUTATION_LIMIT = 5000                       # audited mutations read per evidence window
 FP_CHUNK = 50                               # operators fingerprinted per main-thread step
 
@@ -945,6 +946,13 @@ NOT_COOKING = ("TouchDesigner is not running frames right now, so nothing was ex
 def _main_reason(code: str, default: str = "TouchDesigner did not process the request") -> str:
     """Spike S9: a minimized TouchDesigner runs no frames. Say so, instead of a bare timeout."""
     return NOT_COOKING if code == "TDFLOW_NOT_COOKING" else default
+
+
+def _snapshot_fact(res) -> list:
+    """For text writes, the approval also binds the hash of the text being replaced (D20): approved code is never
+    written over different code than the user saw replaced."""
+    snap = res.context.get("snapshot") if hasattr(res, "context") else None
+    return [["replaces_text_sha256", str(snap[3])], ["op_id", str(snap[1])]] if snap else []
 
 
 def _main_code(e) -> str:

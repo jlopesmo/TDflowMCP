@@ -258,6 +258,7 @@ class _Server(ThreadingMixIn, HTTPServer):
         self.owner._reap()
         self.owner._drain_rejected()
         self.owner._watchdog()
+        self.owner._paused_guard()
 
     def handle_error(self, request, client_address):
         self.owner._bump("handler_errors")          # no traceback to the TD console
@@ -427,7 +428,10 @@ class EmbeddedHTTPTransport:
                  route_handlers: Optional[Mapping[str, Callable[["RouteContext"], Optional[Response]]]] = None,
                  heartbeat_timeout: Optional[float] = None,
                  not_cooking_after: Optional[float] = None,
-                 paused_fn: Optional[Callable[[], Optional[bool]]] = None):
+                 paused_fn: Optional[Callable[[], Optional[bool]]] = None,
+                 paused_verify: Optional[Callable[[Optional[str]], Optional[str]]] = None,
+                 paused_reverify_s: float = 10.0, idle_seconds: Optional[float] = None,
+                 paused_verify_timeout: float = 5.0):
         if host not in BIND_HOSTS:
             raise TransportError("BIND_REFUSED", "only the literal 127.0.0.1 may be bound")
         if not (0 <= int(port) <= 65535):
@@ -480,6 +484,17 @@ class EmbeddedHTTPTransport:
         self._pause_checked = 0.0
         self.pause_sample_after = 1.0            # start asking once nobody pumped for this long
         self.pause_sample_every = 1.0
+        # Owner D20: while the owner is paused (no frames), the safety checks the main thread normally drives run
+        # here instead, TD-free. ``paused_verify(sockname_host)`` returns None for a positive loopback-only
+        # verdict, else the reason; it runs on its own short-lived thread so a slow probe never stalls accept.
+        # ``idle_seconds``: the same idle stop as the controller's, measured on meaningful activity only.
+        self.paused_verify = paused_verify
+        self.paused_reverify_s = paused_reverify_s
+        self.paused_verify_timeout = paused_verify_timeout   # a check still running after this is a failure
+        self.idle_seconds = idle_seconds
+        self._pv_thread: Optional[threading.Thread] = None
+        self._pv_last = 0.0
+        self._pv_result: Optional[str] = None     # "" = passed, a reason = failed (read on the serve thread)
 
     # ---- owner-thread API -------------------------------------------------------------------
     def _own(self, what: str):
@@ -611,8 +626,8 @@ class EmbeddedHTTPTransport:
         with self._lock:                         # pairs with _submit: no job can slip in after the drain
             if self._closing:
                 return
+            self.close_reason = reason           # before _closing: a reader that sees closing sees the reason
             self._closing = True
-            self.close_reason = reason
         while True:
             try:
                 job = self._q.get_nowait()
@@ -674,8 +689,25 @@ class EmbeddedHTTPTransport:
         with self._lock:
             self._stats[name] = self._stats.get(name, 0) + n
 
+    @staticmethod
+    def meaningful(rec: Mapping) -> bool:
+        """Owner D20: only real use counts toward the idle stop. Agent MCP requests and admin mutations (POST)
+        count; page loads and the Setup page's or dashboard's automatic polling (GET reads) do not."""
+        if rec.get("status", 500) >= 400:
+            return False
+        if rec.get("route") == "mcp":
+            return True
+        # Review 14: pairing requests need no session (any local process can send one), so they never count; the
+        # user's Approve Pairing pulse counts through touch_activity.
+        return rec.get("method") == "POST" and rec.get("route") == "api" and \
+            rec.get("path") not in ("/api/audit/search",)       # the dashboard's live tail is a POST read
+
+    def touch_activity(self) -> None:
+        """Any thread: the user acted in TouchDesigner (a parameter of the component)."""
+        self.last_activity = time.monotonic()
+
     def _audit(self, rec: dict) -> None:
-        if rec.get("status", 500) < 400:          # only served requests count as activity (idle stop)
+        if self.meaningful(rec):                  # idle stop: user and agent activity only (D20)
             self.last_activity = time.monotonic()
         if len(self._audit_ring) == self._audit_ring.maxlen:
             self._bump("audit_overflow")
@@ -748,6 +780,52 @@ class EmbeddedHTTPTransport:
             return                                   # just restored: give the owner time to pump
         self._bump("orphan_closed")
         self._close_any_thread("heartbeat_lost")   # starts the closer thread; never blocks here
+
+    def _paused_guard(self) -> None:
+        """Serve thread, owner D20: while the host is known to be paused, re-verify the binding every
+        ``paused_reverify_s`` and enforce the idle stop. A failed verdict or an idle period closes the listener
+        (fail closed); nothing here touches TouchDesigner. When frames resume, the controller takes over."""
+        if self._closing:
+            return
+        now = time.monotonic()
+        with self._lock:                             # review 14: hand-over is atomic against the verify thread
+            r, self._pv_result = self._pv_result, None
+        if r:                                        # a failure counts even if frames resumed meanwhile
+            self._bump("paused_reverify_failed")
+            self.close_reason_detail = r
+            self._close_any_thread("paused_reverify_failed")
+            return
+        if r == "":
+            self._bump("paused_reverifies")
+        if self._pv_thread is not None and self._pv_thread.is_alive() and \
+                now - self._pv_last > self.paused_verify_timeout:
+            # Review 14: a hung check is not a pass (the controller treats it as AMBIGUOUS the same way).
+            self._bump("paused_reverify_failed")
+            self.close_reason_detail = "verify_timeout"
+            self._close_any_thread("paused_reverify_failed")
+            return
+        if not self._pause_state:
+            return
+        if self.idle_seconds and now - self.last_activity > self.idle_seconds:
+            self._bump("paused_idle_stop")
+            self._close_any_thread("idle")
+            return
+        if self.paused_verify is None or (self._pv_thread is not None and self._pv_thread.is_alive()):
+            return
+        if now - self._pv_last < self.paused_reverify_s:
+            return
+        self._pv_last = now
+        host = (self.sockname() or (None,))[0]
+
+        def run():
+            try:
+                res = self.paused_verify(host)
+            except Exception as e:                   # an error is a failed verification, never a pass
+                res = "verify_error:" + type(e).__name__
+            with self._lock:
+                self._pv_result = "" if res is None else str(res)
+        self._pv_thread = threading.Thread(target=run, name="tdflowmcp-paused-verify", daemon=True)
+        self._pv_thread.start()
 
     def _paused(self, now: float, fresh: bool) -> bool:
         """Serve thread: is the host known to be paused? Only a literal True counts; an error is "no"."""

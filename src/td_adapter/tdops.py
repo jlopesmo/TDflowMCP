@@ -20,7 +20,7 @@ import td
 from tdflowmcp import layout as LAYOUT
 from tdflowmcp import memory as MEM
 from tdflowmcp.engine import Adapter, Resolution, ToolFailure
-from tdflowmcp.policy import EXECUTABLE_TYPES, Target
+from tdflowmcp.policy import ACTIVATION_PARAMS, APPROVABLE_CREATE_TYPES, EXECUTABLE_TYPES, Target
 
 DATA_TAG = "tdflowdata"
 # Parameter styles whose value names another operator or a file: setting them can read or wire things
@@ -201,6 +201,13 @@ class TDAdapter(Adapter):
             ext = name.startswith(("extension", "promoteextension")) or (name[:3] == "ext" and name[3:4].isdigit())
             change = "expression" if name in exprs else ("extension" if ext else "param")
             ts.append(self._facts(o, "update", change=change, param=name))
+            if o.OPType in EXECUTABLE_TYPES and name in ACTIVATION_PARAMS:
+                # D20: switching an executable operator on (or off) is a code-running change: approval-gated.
+                ts.append(self._facts(o, "execute", change="activation", param=name))
+            elif o.OPType in APPROVABLE_CREATE_TYPES:
+                # Review 14: on Execute DATs every parameter decides *when* (or whether) code runs - callback
+                # toggles, watched operators and parameters. No parameter there is treated as inert.
+                ts.append(self._facts(o, "execute", change="trigger", param=name))
             if name in exprs or par.style in REFERENCE_STYLES:
                 ts.append(self._facts(o, "execute", change="expression" if name in exprs else "reference",
                                       param=name))
@@ -432,8 +439,21 @@ class TDAdapter(Adapter):
                     pass
             auto = LAYOUT.default_position(boxes)
 
+        staged = args["type"] in APPROVABLE_CREATE_TYPES
+
         def do():
             n = parent.create(cls, args["name"])
+            if staged:
+                # D20 staging: an approved executable DAT is created switched off. Its text and its activation are
+                # separate, approval-gated changes.
+                # Review 14: fail inside the undo block, so a create that cannot be left switched off is rolled back.
+                for pn in ACTIVATION_PARAMS:
+                    p = getattr(n.par, pn, None)
+                    if p is None:
+                        raise ToolFailure("EXECUTION_FAILED", f"the operator has no {pn} parameter to stage it off")
+                    p.val = False
+                    if bool(p.eval()):
+                        raise ToolFailure("EXECUTION_FAILED", "the operator could not be created switched off")
             if auto is not None:
                 n.nodeX, n.nodeY = auto
             if "x" in args:
@@ -442,9 +462,12 @@ class TDAdapter(Adapter):
                 n.nodeY = int(args["y"])
             return n
         n, stack = self._mutate(label, do)
-        return {"path": n.path, "type": n.OPType, "family": n.family, "x": _pos(n, "nodeX"), "y": _pos(n, "nodeY"),
-                "_audit": {"kind": "create", "path": n.path, "type": n.OPType, "stack": stack,
-                           "reversible": "td_undo" if stack else "no"}}
+        out = {"path": n.path, "type": n.OPType, "family": n.family, "x": _pos(n, "nodeX"), "y": _pos(n, "nodeY"),
+               "_audit": {"kind": "create", "path": n.path, "type": n.OPType, "stack": stack,
+                          "reversible": "td_undo" if stack else "no"}}
+        if staged:
+            out["staged_inactive"] = True                                  # checked inside do(), rolled back if not
+        return out
 
     def _t_delete_operator(self, args, res, label, readable):
         o = res.context["op"]
@@ -496,6 +519,7 @@ class TDAdapter(Adapter):
                               _audit={"rolled_back": _sha(o.text) == _sha(before)})
         return {"path": o.path, "length": len(text), "previous_sha256": _sha(before), "sha256": _sha(o.text),
                 "_audit": {"kind": "dat_text", "path": o.path, "snapshot": snap, "after_sha": _sha(o.text),
+                           "op_id": int(o.id), "type": o.OPType,
                            "before_sha": planned[3]}}             # anchors the snapshot in the hash chain
 
     # ---- undo ----------------------------------------------------------------------------------
@@ -539,6 +563,11 @@ class TDAdapter(Adapter):
         expected = d.get("after_sha") or (snap or {}).get("after_sha")   # hash of the text actually written
         if snap is None or snap["restored_at"] or o is None or _sha(o.text) != expected:
             raise ToolFailure("UNDO_CONFLICT", "the DAT text changed since (or was already restored)")
+        # Review 14: restore only into the same operator. A DAT replaced at that path (say by an Execute DAT
+        # holding the same text) must not receive the old text without its own approval.
+        if snap.get("op_id") is None or int(o.id) != int(snap["op_id"]) or \
+                ("type" in d and o.OPType != d["type"]) or ("op_id" in d and int(o.id) != int(d["op_id"])):
+            raise ToolFailure("UNDO_CONFLICT", "the DAT at this path was replaced since; nothing was restored")
         # Review 7: the snapshot row lives in the project folder; only restore text whose hash matches both the
         # row and the value recorded in the (chain-covered) outcome event.
         anchored = d.get("before_sha")

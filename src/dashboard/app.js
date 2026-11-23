@@ -240,7 +240,32 @@
       tg.addEventListener("click", async () => { await api("POST", "/api/agents/state", { agent_id: a.id, enabled: !a.enabled }); refreshAgents(); });
       act.append(tg);
       const caps = (a.capabilities || []).includes("memory:repo:write") ? " + repository memory" : "";
-      tr.append(el("td", a.display_name), el("td", a.role + caps + (a.enabled ? "" : " (disabled)")), el("td", a.scopes.join(", ")), toks, act);
+      const perms = el("td");
+      for (const g of a.grants || []) {
+        const line = el("div", (g.effect === "deny" ? "DENY " : "") + g.actions.join(",") + " on " + g.scope);
+        const rm = el("button", "Remove", "secondary small"); rm.type = "button";
+        rm.addEventListener("click", async () => {
+          const x = await api("POST", "/api/grants/remove", { agent_id: a.id, grant_id: g.id });
+          $("token-status").textContent = x.ok ? "Permission removed." : "Not done: " + why(x) + ".";
+          refreshAgents();
+        });
+        line.append(rm);
+        perms.append(line);
+      }
+      const add = el("div", undefined, "row");
+      const scope = el("input"); scope.maxLength = 256; scope.placeholder = (r.data.project_root || "/project1") + "/fx/**";
+      const acts = el("input"); acts.maxLength = 60; acts.placeholder = "read,update";
+      const eff = el("select"); for (const v of ["allow", "deny"]) { const o = el("option", v); o.value = v; eff.append(o); }
+      const go = el("button", "Add permission", "secondary small"); go.type = "button";
+      go.addEventListener("click", async () => {
+        const x = await api("POST", "/api/grants/add", { agent_id: a.id, scope: scope.value.trim(), effect: eff.value,
+          actions: acts.value.split(",").map((v) => v.trim()).filter(Boolean) });
+        $("token-status").textContent = x.ok ? "Permission added. Pending approvals of this agent must be asked again." : "Not done: " + why(x) + ".";
+        refreshAgents();
+      });
+      add.append(scope, acts, eff, go);
+      perms.append(add);
+      tr.append(el("td", a.display_name), el("td", a.role + caps + (a.enabled ? "" : " (disabled)")), perms, toks, act);
       tb.append(tr);
     }
   }

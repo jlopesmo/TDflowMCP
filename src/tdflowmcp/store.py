@@ -431,6 +431,18 @@ class Store:
     def set_grant_actions(self, agent_id: str, actions_csv: str) -> None:
         self._cc().execute("UPDATE grants SET actions=? WHERE agent_id=?", (actions_csv, agent_id))
 
+    def grants_of(self, agent_id: str) -> List[Dict[str, Any]]:
+        rows = self._cc().execute("SELECT id, scope, actions, effect FROM grants WHERE agent_id=? ORDER BY id",
+                                  (agent_id,)).fetchall()
+        return [{"id": r[0], "scope": r[1], "actions": r[2].split(","), "effect": r[3]} for r in rows]
+
+    def grant_add(self, agent_id: str, scope: str, actions_csv: str, effect: str) -> int:
+        return int(self._cc().execute("INSERT INTO grants(agent_id, scope, actions, effect) VALUES (?,?,?,?)",
+                                      (agent_id, scope, actions_csv, effect)).lastrowid)
+
+    def grant_remove(self, agent_id: str, grant_id: int) -> bool:
+        return self._cc().execute("DELETE FROM grants WHERE agent_id=? AND id=?", (agent_id, int(grant_id))).rowcount == 1
+
     def token_rows(self) -> List[tuple]:
         """For tests and diagnostics: (token_id, salt, digest). Never contains a secret."""
         return [tuple(r) for r in self._cc().execute("SELECT token_id, salt, digest FROM tokens").fetchall()]
@@ -604,6 +616,12 @@ class Store:
         except BaseException:
             c.execute("ROLLBACK")
             raise
+
+    def approvals_cancel_agent(self, agent_id: str) -> int:
+        """Review 14: a permission change cancels the agent's open approvals (a grant added and removed again
+        restores the old policy version, so the version check alone would let them be redeemed)."""
+        return self._cc().execute("UPDATE approvals SET state='cancelled', args='' WHERE agent_id=? AND "
+                                  "state IN ('pending','approved')", (str(agent_id),)).rowcount
 
     def approval_cancel(self, approval_id: str) -> None:
         self._cc().execute("UPDATE approvals SET state='cancelled', args='' WHERE id=? AND state IN ('pending','approved')",

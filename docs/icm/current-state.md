@@ -84,6 +84,10 @@
   - **Approvals:** a call that runs code (`tdflow_set_parameters` expressions and reference parameters; **operator** role) or deletes more than 50 operators waits for the user and is executed only by the identical re-call, once, with targets and policy re-checked. Nothing waits on the main thread. Other code-running effects stay denied.
   - **Dashboard** at `/ui/` (paired admin session): overview, approval queue with complete arguments, live activity and audit search, sessions, agents and tokens, project memory, reports that state whether they verify against the keyed checkpoints, settings (mandatory audit shown as fixed; optional diagnostic log; data-location request). Its kill switch works while TouchDesigner runs no frames.
   - Skill **1.3**. Tool surface stays `1` (`tdflow_approval_status` is additive).
+- **Phase 2B increment 2 (owner D20)** ([record](../research/2026-11-23-phase-2b-increment-2.md)):
+  - **Minimized window:** while TouchDesigner runs no frames, the transport re-verifies the loopback binding every 10 s on a background thread (TD-free; anything but a positive verdict closes the listener) and enforces the idle stop. Idle now counts only meaningful activity (agent requests, admin actions), not page loads or automatic polling. Verified in TD (`minimized.BINDING_RE_VERIFIED_IN_THE_BACKGROUND`); the idle stop while paused is unit-tested.
+  - **Permission editing** on the dashboard: add or remove allow and deny grants per agent, within the agent's role and the project root; audited first; pending approvals of that agent stop matching.
+  - **Code-running changes with approval and staging:** code-DAT text, and the six Execute DAT types created switched off, with activation as its own approval. Verified in TD end to end (`code.*`: the approved code runs only after the approved activation and stops after the approved deactivation).
 
 ## Not implemented (nothing below exists)
 - **Withheld by design:**

@@ -235,6 +235,25 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(self.c.state, CompState.OFF)
         self.assertIn("idle", self.c.message)
 
+    def test_transport_closed_while_paused(self):
+        # Owner D20 / review 14: the transport's own idle stop and failed background re-verification.
+        serve(self.w, self.c)
+        t = self.w.transports[0]
+        t.alive, t.close_reason, t.closing = False, "idle", True
+        self.c.tick(lambda j: None)
+        self.c.tick(lambda j: None)
+        self.assertEqual((self.c.state, self.c.error_code), (CompState.OFF, ""))
+        self.assertIn("idle", self.c.message.lower())
+        serve(self.w, self.c)
+        t = self.w.transports[-1]
+        t.alive, t.close_reason, t.closing = False, "paused_reverify_failed", True
+        self.c.tick(lambda j: None)
+        self.assertEqual(self.c.state, CompState.STOPPING)
+        self.assertIn("Re-verification failed", self.c.message)
+        self.c.tick(lambda j: None)
+        self.assertEqual(self.c.state, CompState.ERROR)
+        self.assertTrue(self.c.error_code)
+
     def test_pump_only_while_starting_or_serving(self):
         self.c.tick(lambda j: None)
         serve(self.w, self.c)

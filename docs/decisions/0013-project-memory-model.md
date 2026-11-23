@@ -34,7 +34,7 @@ The condition is reopened if a later increment adds any agent-writable record ty
 - the engine requires it for every write in repository mode (rule `M8`) and reads it again right before the file is created;
 - reading keeps the role-and-scope model, and embedded mode is unchanged.
 
-No new agent-writable record type was added, so the condition is not reopened. **For the owner to confirm:** that this capability is the intended form of the "dedicated memory permission" for repository-backed task records.
+No new agent-writable record type was added, so the condition is not reopened. **Accepted by the owner (D20, 2026-11-23)** as the dedicated permission for repository-backed task checkpoints and handoffs. It does **not** authorize agent changes to authoritative project ICM, architectural decisions or other Git-backed documentation; those would need separate permissions and approvals.
 
 ## Alternatives
 - Two-way sync between the `.toe` and the repo: rejected, because it is exactly the conflicting-authority problem.

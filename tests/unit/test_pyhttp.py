@@ -596,7 +596,9 @@ class Phase1ATests(unittest.TestCase):
                 time.sleep(0.02)
             self.assertTrue(h.t.healthy())
             before = h.t.last_activity
-            req(h.port)
+            req(h.port)                                    # a page load is not activity (owner D20)
+            self.assertEqual(h.t.last_activity, before)
+            h.t.touch_activity()
             self.assertGreater(h.t.last_activity, before)
         finally:
             h.close()

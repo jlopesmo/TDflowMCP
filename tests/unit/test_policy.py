@@ -97,7 +97,13 @@ class ExecuteClassificationTests(unittest.TestCase):
 
     def test_create_is_allowlisted(self):
         a = agent("operator", ("/project1/**",))
-        for typ in sorted(EXECUTABLE_TYPES) + ["evaluateDAT", "fileinDAT", "examineDAT", "opfindDAT", "infoDAT",
+        from tdflowmcp.policy import APPROVABLE_CREATE_TYPES
+        for typ in APPROVABLE_CREATE_TYPES:                       # D20: approvable for the operator role, never a builder
+            v = P.evaluate(a, [Target("create", "/project1/x", op_type=typ), Target("execute", "/project1/x", op_type=typ)])
+            self.assertEqual(v.rule_id, "A1", typ)
+            vb = P.evaluate(agent("builder", ("/project1/**",)), [Target("create", "/project1/x", op_type=typ)])
+            self.assertEqual(vb.rule_id, "G2", typ)
+        for typ in sorted(EXECUTABLE_TYPES - APPROVABLE_CREATE_TYPES) + ["evaluateDAT", "fileinDAT", "examineDAT", "opfindDAT", "infoDAT",
                                                "parameterDAT", "touchoutTOP", "cplusplusCHOP", "webrenderTOP",
                                                "moviefileoutTOP", "timerCHOP", "selectTOP", "", "madeupTOP"]:
             v = P.evaluate(a, [Target("create", "/project1/x", op_type=typ)])

@@ -279,6 +279,21 @@ class Controller:
 
     def _tick_serving(self, now):
         t = self.transport
+        if not t.healthy() and t.close_reason == "idle":
+            # Owner D20: the transport enforced the idle stop itself while TouchDesigner ran no frames.
+            self.gate.user_close()
+            self._close_reason = "idle"
+            self.state = CompState.STOPPING
+            self.message = "Stopped after a long idle period."
+            return
+        if not t.healthy() and t.close_reason == "paused_reverify_failed":
+            # Owner D20: the background re-verification failed while TouchDesigner ran no frames (fail closed).
+            self.gate.on_reverify(bv.Evidence(bv.Verdict.FAIL, ("paused_reverify",)))
+            self._close_reason = "reverify_failed"
+            self.state = CompState.STOPPING
+            self.message = "Re-verification failed; the listener was closed."
+            self._log("reverify_failed", reasons=["while_paused"])
+            return
         if not t.healthy():
             self.gate.on_transport_failure()
             t.begin_close()
@@ -299,7 +314,7 @@ class Controller:
                 self.message = "Re-verification failed; the listener was closed."
                 self._log("reverify_failed", reasons=list(bv.redacted(ev).reasons))
                 return
-        if now - t.last_activity > self.idle_seconds:
+        if now - t.last_activity > self.idle_seconds:      # meaningful activity only (owner D20; transport)
             self.stop("idle")
             self.message = "Stopped after a long idle period."
 
