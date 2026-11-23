@@ -34,7 +34,7 @@
   - 231 unit tests on CPython 3.11.8 (2 skipped) and 248 on TD Python 3.11.10 (1 skipped).
   - Gate suite 49/49 + 98/98; onboarding 5/5 + 45/45.
   - Doc checker and secret scan pass.
-  - Packaged-build results are in the [validation index](validation-index.md).
+  - **Packaged component** (`2a7e72f`, tox `9a063083…`): 1A, 1B, gate and live onboarding suites all pass ([validation index](validation-index.md)).
 
 ## Not implemented (nothing below exists)
 - **Withheld by design:**
@@ -61,7 +61,7 @@
 ## Commit record
 - `82b64f1`, `b70000a`, `066dbd0`, `380d317`: Phase 0. `main` = `066dbd0`.
 - `377841c`, `ec259ed`: S5. `591b01e`, `3d0081e`: S6. `e680b47`, `9939af9`: Phase 1A. `e15ec55`, `a4660cd`: Phase 1B.
-- Phase 1C + audit worker: recorded by the follow-up commit (SHA, push observation and package evidence).
+- `2a7e72f`: Phase 1C + audit worker + project-local storage (review 7 fixes). Pushed to `origin/dev` and observed with `git ls-remote` (`refs/heads/dev` = `2a7e72f…`, `refs/heads/main` = `066dbd0…`, so `main` is unchanged). Package `dist/TDflowMCP-0.2.0.dev1-2a7e72f361` (tox `9a063083…`) built from a clean worktree of that commit; all four in-TD suites pass on it. This record was added by the follow-up commit. CI: **not observed**.
 
 ## Next (owner decisions first)
 1. **B6:** accept the MCP-latency tradeoff of the audit worker, or request the main-thread continuation first.

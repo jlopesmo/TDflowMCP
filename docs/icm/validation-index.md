@@ -81,7 +81,9 @@ This file lists every check that exists, how to run it, and its last **executed 
 | 2026-11-22 | TouchDesigner 2025.32440 (`1b6a44fd…`) | **Phase 1B suite (after review 7)** | **Pass: 43/43 + 110/110** (`kill.queued_request_rejected` now also accepts the audited `SUSPENDED` tool error) |
 | 2026-11-22 | TouchDesigner 2025.32440 (`1b6a44fd…`; baseline clean `e15ec55` build `b9da9a18…`) | **Gate suite (after review 7)** | **Pass: 49/49 + 98/98.** OnFrame p99 1.54 ms under load, 1.44 ms with a 50 ms disk. Frames max 46.5 ms (1B) → 23.6 ms (worker). MCP sequential p50 55 ms (1B) → 83–152 ms (worker). Crash: 33/33 reported successes durable, 0 unaccounted. Overflow: 9 fail closed, 3 OK durable |
 | 2026-11-22 | TouchDesigner 2025.32440 + **Claude Code 2.1.289** (`1b6a44fd…`) | **Onboarding (after review 7)** | **Pass: 5/5 + 45/45**; `RESULT skill_version=1.0 expected_skill_version=1.0 opacity=0.25 audit_seq=22` |
-| 2026-11-22 | Windows 11 | `scan_secrets.py`, `check_docs.py` (pre-commit) | Pass: 0 findings; 0 problems |
+| 2026-11-22 | Windows 11 | `scan_secrets.py`, `check_docs.py` (pre-commit) | Pass: 0 findings (167 files incl. new); 0 problems (66 files) |
+| 2026-11-22 | TouchDesigner 2025.32440 | **`package_release.py` at `2a7e72f`** | Pass: clean detached worktree, `source_dirty` false; `dist/TDflowMCP-0.2.0.dev1-2a7e72f361/`: tox SHA-256 `9a06308385d4a75504291fb3faa1a7e8258293a1c39df575457678985f531fa8`, zip SHA-256 `be597fb97ed81db7a3ce281784d1bef2065ce1251fb97fbb8b0e0e4e1289d757`; `sha256sum -c SHA256SUMS` OK |
+| 2026-11-22 | TouchDesigner 2025.32440 (packaged `9a063083…`) | **Packaged-component acceptance** | **All pass:** 1A 49/49 + 69/69; 1B 43/43 + 110/110; gate 49/49 + 98/98 (OnFrame p99 1.30 ms / max 1.81 ms with a 50 ms disk; crash: 51/51 reported successes durable, 2 in-flight intents unaccounted (≤ 8 allowed); MCP sequential p50 33.5 ms (1B) → 83.4 ms (worker) in the `perf` launches); onboarding with **Claude Code 2.1.289** 5/5 + 45/45, `RESULT skill_version=1.0 expected_skill_version=1.0 opacity=0.25 audit_seq=22` |
 
 ## Local environment facts (file inspection only, 2026-11-22)
 
