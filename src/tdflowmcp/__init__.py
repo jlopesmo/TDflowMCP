@@ -7,6 +7,6 @@ and the tool registry. Nothing here touches TouchDesigner; the component's TD ad
 """
 
 __version__ = "0.2.0.dev1"
-PHASE = "2B"
-SKILL_VERSION = "1.3"           # bundled Skills (src/skills), major = tool surface
-TOOL_SURFACE_VERSION = "1"   # 16 Phase 1B tools + 4 additive Phase 2A memory tools (tool-surface.md)
+PHASE = "3"
+SKILL_VERSION = "1.4"           # bundled Skills (src/skills), major = tool surface
+TOOL_SURFACE_VERSION = "1"   # 16 Phase 1B tools; additive since: 4 memory (2A), approval status (2B), script (3), network (4)

@@ -131,7 +131,7 @@ class ProtocolTests(unittest.TestCase):
 
 class RegistryTests(unittest.TestCase):
     def test_registered_tools_with_classification(self):
-        self.assertEqual(len(ALL), 21)               # 16 Phase 1B + 4 Phase 2A memory + tdflow_approval_status (2B)
+        self.assertEqual(len(ALL), 23)               # 16 Phase 1B + 4 memory (2A) + approval_status (2B) + execute_script (3) + describe_network (4)
         reg = core_registry()
         for t in reg.all():
             d = t.describe()

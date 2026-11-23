@@ -2,19 +2,19 @@
 name: tdflow-core
 description: Use when working in a TouchDesigner project through the TDflowMCP MCP server (tools named tdflow_*). Covers checking identity and scope first, reading before changing, small audited changes, verified undo, resuming and handing over tasks through project memory, the kill switch, denials and what never to do without the user.
 metadata:
-  tdflow-skill-version: "1.3"
+  tdflow-skill-version: "1.4"
 ---
 
 # Working in TouchDesigner with TDflowMCP
 
-TDflowMCP skill version: 1.3 (tool surface 1). This file is guidance. The TDflowMCP server enforces
+TDflowMCP skill version: 1.4 (tool surface 1). This file is guidance. The TDflowMCP server enforces
 every permission itself; nothing here grants access.
 
 ## 1. Start every session with `tdflow_whoami`
 - It returns your role, your scopes (which operator paths you may read or change, and which actions),
   the project root, `server_version`, `tool_surface_version` and `expected_skill_version`.
-- If `expected_skill_version` differs from this skill's version (1.3), tell the user: "The TDflowMCP
-  Skills on this computer are version 1.3 but the component expects <version>. Update them from the
+- If `expected_skill_version` differs from this skill's version (1.4), tell the user: "The TDflowMCP
+  Skills on this computer are version 1.4 but the component expects <version>. Update them from the
   component's Setup page." Then continue carefully, trusting the server's answers over this file.
 - Work only inside your scopes. Do not probe paths outside them: denials are recorded in the audit log.
 
@@ -40,6 +40,16 @@ every permission itself; nothing here grants access.
     ask again only if it still makes sense.
   - `APPROVAL_UNAVAILABLE`: this component version has no approval surface.
 - Text DATs are writable only when they are data: a Table DAT, or a Text DAT the user tagged `tdflowdata`.
+- `tdflow_describe_network` gives one network level in one call: operators, wiring, errors, cook times and
+  hints. Hints are heuristics: check them before acting on them.
+- `tdflow_execute_script` (operator role; only when the user turned Code Mode on, otherwise `CODE_MODE_OFF`)
+  runs a short Python script for many small, related steps under one
+  approval: `tdflow.get_operator(path=...)`, `tdflow.set_parameters(...)` and so on, plain data in and out, no
+  imports, no `try`. Give the `scope` (a COMP path) it works in; every call must stay inside it. Set `result` to return a
+  value. The user approves the exact text, so keep it short and readable, and repeat it unchanged once
+  approved. Calls that need approval on their own (expressions, code) are refused inside a script
+  (`APPROVAL_REQUIRED_IN_SCRIPT`): make them as separate calls. If the script stops, the calls before the
+  stop did run; check `log`.
 
 ## 3. Undo
 - `tdflow_undo` undoes your own newest change, and only while TouchDesigner's undo history is exactly as

@@ -20,6 +20,15 @@ Out-of-process sandbox (Deno/QuickJS/Pyodide) with RPC back to TD: better isolat
 ## Consequences
 Token-efficiency benefits must be measured by our own benchmark (a Phase 3 acceptance criterion) before being claimed.
 
+## Implementation notes (Phase 3, 2026-11-23)
+What exists ([record](../research/2026-11-23-phase-3-code-mode.md)), and where it differs from the decision above:
+- **Off by default:** a dashboard setting, stored in private per-user storage and audited when changed. While it is off, the tool is not listed and calls answer `CODE_MODE_OFF`.
+- **Approval always**, not only by default: running a script is `execute` on a declared `scope` (an existing COMP), and the user approves the exact text (its SHA-256 is bound).
+- **The engine enforces** the facade's tool allowlist (path-scoped operator tools only: no undo, memory, project or script tools), the scope, the call budget and the kill switch per call, and keeps the call log. A line tracer stops pure-Python loops on the time budget or the kill switch. Calls that need approval on their own are refused inside a script.
+- **Deviation: no single undo block.** Facade calls are ordinary audited calls, each reversible on its own with `tdflow_undo`, newest first. One TouchDesigner undo block around a script would have to span many main-thread steps that other agents and the user can interleave with; this is not attempted.
+- **Not built:** `tdflow_search_api` / `tdflow_describe_api`. The facade is the registered tools themselves (`tdflow.<tool>(**args)` with the same arguments), described in the tool's description and the Skill.
+- **No token benefit is claimed**; the benchmark gate below is still open.
+
 ## Validation gates
 - Phase 1B enforcement acceptance passes first.
 - Then the Phase 3 checks: facade calls are policy-checked, results contain no TD objects, approval is required by default, and the token benchmark is measured before any benefit is claimed.

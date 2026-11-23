@@ -483,6 +483,14 @@ class Store:
     def set_setting(self, key: str, value: str) -> None:
         self._c().execute("INSERT OR REPLACE INTO meta(k, v) VALUES(?, ?)", ("setting:" + str(key), str(value)))
 
+    def get_private_setting(self, key: str, default: str = "") -> str:
+        """Settings that must not be changed by editing the project folder (per-user credentials store)."""
+        r = self._cc().execute("SELECT v FROM meta WHERE k=?", ("setting:" + str(key),)).fetchone()
+        return str(r[0]) if r else default
+
+    def set_private_setting(self, key: str, value: str) -> None:
+        self._cc().execute("INSERT OR REPLACE INTO meta(k, v) VALUES(?, ?)", ("setting:" + str(key), str(value)))
+
     def diag_append(self, obj: Dict[str, Any]) -> None:
         """One line in ``diagnostic.jsonl`` next to the audit database. Optional, best effort, size-capped; it is
         not part of the audit log and a failure here never affects it."""

@@ -288,7 +288,8 @@ class TDflowMCPExt:
         if d.status != "OVERRIDE":
             self._m.storage.Registry(inp["private_root"]).put(d.project_id, "" if d.status == "UNSAVED" else inp["toe"],
                                                               d.data_dir)
-        return {"verify": v, "settings": {"diagnostic_log": st.get_setting("diagnostic_log", "0")}}
+        return {"verify": v, "settings": {"diagnostic_log": st.get_setting("diagnostic_log", "0"),
+                                         "code_mode": st.get_private_setting("code_mode", "0")}}
 
     def ensure_store(self, start=True, action=None, restart=False):
         """Main thread, never waits. True when the audit store is open and the engine is built; otherwise
@@ -325,6 +326,7 @@ class TDflowMCPExt:
         self.identity = self._m.identity.Identity(self.store, preload=w.identity_rows)
         self.store_error = ""
         self._diag_on = ((w.open_info or {}).get("settings") or {}).get("diagnostic_log") == "1"
+        self._code_mode = ((w.open_info or {}).get("settings") or {}).get("code_mode") == "1"
         d = self.storage
         p = self.ownerComp.par
         if d is not None and d.status != "OVERRIDE" and hasattr(p, "Projectid") and p.Projectid.eval() != d.project_id:
@@ -376,6 +378,7 @@ class TDflowMCPExt:
                                             self.active_tools, lambda: self.suspended,
                                             on_audit_failure=self._flag_audit_failure)
         self.engine.audit_failed = self._audit_latched      # a rebuild never clears an audit failure
+        self.engine.code_mode = bool(getattr(self, "_code_mode", False))   # ADR-0004: off by default
 
     def _flag_audit_failure(self):
         """Any thread (usually a handler thread): picked up by OnFrame (no TD access here)."""
@@ -1387,6 +1390,10 @@ class TDflowMCPExt:
                                           "when that is not possible. This cannot be turned off while MCP is on."},
                 "diagnostic_log": {"enabled": bool(self._diag_on), "file": "diagnostic.jsonl in the data location",
                                    "what": "Optional. Component state changes, notes and errors (no tokens, no arguments)."},
+                "code_mode": {"enabled": bool(getattr(self, "_code_mode", False)),
+                              "what": "Lets operator agents ask to run short scripts that call TDflowMCP tools "
+                                      "(Code Mode). Each script still needs your approval of its exact text, and "
+                                      "approved code has full access to TouchDesigner: it is not a sandbox."},
                 "data_location": {"choice": self._dash.get("data_location"), "in_use": self._data_display(),
                                   "status": d.status if d is not None else "not opened",
                                   "how": "Changing it turns MCP off. Confirm it in TouchDesigner with Confirm Move on the "
@@ -1403,6 +1410,15 @@ class TDflowMCPExt:
                 st.set_setting("diagnostic_log", "1" if on else "0")
             self._diag_on = on
             changed["diagnostic_log"] = on
+        if "code_mode" in body:
+            on = body.get("code_mode") is True
+            with self._admin_lock:                         # durable first, then in effect (audited)
+                st.append("admin", tool="setting", detail={"code_mode": on})
+                st.set_private_setting("code_mode", "1" if on else "0")
+            self._code_mode = on
+            if self.engine is not None:
+                self.engine.code_mode = on
+            changed["code_mode"] = on
         if "data_location" in body:
             loc = str(body.get("data_location"))
             if loc not in ("project", "private"):

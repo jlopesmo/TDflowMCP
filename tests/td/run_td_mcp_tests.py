@@ -32,7 +32,7 @@ from tdflowmcp.net import oslisteners  # noqa: E402
 
 O = "http://127.0.0.1:9480"
 TOKENS, STATE = {}, {"cookies": {}}
-EXPECTED_TOOLS = sorted(["tdflow_approval_status"] + ["tdflow_connect", "tdflow_create_operator", "tdflow_delete_operator", "tdflow_disconnect",
+EXPECTED_TOOLS = sorted(["tdflow_approval_status", "tdflow_describe_network"] + ["tdflow_connect", "tdflow_create_operator", "tdflow_delete_operator", "tdflow_disconnect",
                          "tdflow_get_dat_text", "tdflow_get_errors", "tdflow_get_operator", "tdflow_get_parameters",
                          "tdflow_list_operators", "tdflow_project_info", "tdflow_session_list", "tdflow_session_note",
                          "tdflow_set_dat_text", "tdflow_set_parameters", "tdflow_undo", "tdflow_whoami",
@@ -190,7 +190,7 @@ def cp_enabled(data, pid):
     T("proto.notification_202", st == 202 and not r.get("body"))
     st, j, _ = B.rpc("tools/list")
     names = sorted(t["name"] for t in (j or {}).get("result", {}).get("tools", []))
-    T("proto.tools_list_21", names == EXPECTED_TOOLS, names=names)
+    T("proto.tools_list_22", names == EXPECTED_TOOLS, names=names)   # + tdflow_execute_script once Code Mode is on
     # modern era
     st, j, _ = B.rpc("server/discover", modern=True)
     T("proto.modern_discover", st == 200 and "2026-07-28" in j["result"]["supportedVersions"])
@@ -414,6 +414,53 @@ def code_dat_flow(E):
     B.call("tdflow_delete_operator", {"path": "/project1/fx/marker"})
 
 
+def script_flow(E):
+    """Phase 3 Code Mode: one approved script makes several facade calls in TouchDesigner, each audited on its own,
+    inside its scope; out-of-scope and approval-needing calls are refused; a builder cannot run scripts."""
+    B = MCP(TOKENS["B"])
+    T("script.CODE_MODE_OFF_BY_DEFAULT", E.call("tdflow_execute_script", {"scope": "/project1/fx", "code": "result = 1"})
+      .get("code") == "CODE_MODE_OFF")
+    s = admin("POST", "/api/settings", {"code_mode": True})
+    st = base.jbody(admin("GET", "/api/settings")) or {}
+    T("script.user_turns_code_mode_on", s["status"] == 200 and (st.get("code_mode") or {}).get("enabled") is True, st=st)
+    _, lj, _ = E.rpc("tools/list")
+    T("script.listed_once_on", "tdflow_execute_script" in [t["name"] for t in ((lj or {}).get("result") or {}).get("tools", [])])
+    T("script.builder_denied", B.call("tdflow_execute_script", {"scope": "/project1/fx", "code": "result = 1"})
+      .get("rule_id") == "R1")
+    T("script.import_refused_before_request", E.call("tdflow_execute_script", {
+        "scope": "/project1/fx", "code": "import os"}).get("code") == "SCRIPT_REFUSED")
+    code = ("names = [o['path'] for o in tdflow.list_operators(path='/project1/fx')['operators']]\n"
+            "for i, v in enumerate((0.2, 0.4)):\n"
+            "    tdflow.set_parameters(path='/project1/fx/level1', values={'opacity': v})\n"
+            "print('ops', len(names))\n"
+            "result = tdflow.get_parameters(path='/project1/fx/level1', names=['opacity'])['parameters'][0]['value']")
+    args = {"scope": "/project1/fx", "code": code}
+    req, r = approved(E, "tdflow_execute_script", args)
+    T("script.NEEDS_APPROVAL_OF_THE_TEXT", req.get("code") == "APPROVAL_REQUIRED" and "Code Mode script"
+      in json.dumps(req.get("reasons")), r=req)
+    T("script.RUNS_FACADE_CALLS", ok(r) and r.get("result") == 0.4 and r.get("calls") == 4
+      and r.get("output", "").startswith("ops "), r=r)
+    T("script.each_change_audited", len([x for x in (r.get("log") or []) if x.get("audit_seq")]) == 2, log=r.get("log"))
+    T("script.single_use", E.call("tdflow_execute_script", args).get("code") == "APPROVAL_REQUIRED")
+    req, o = approved(E, "tdflow_execute_script", {"scope": "/project1/fx",
+                                                   "code": "tdflow.get_operator(path='/project1/other')"})
+    T("script.OUT_OF_SCOPE_REFUSED", o.get("code") == "SCOPE_OUTSIDE_SCRIPT", r=o)
+    req, x = approved(E, "tdflow_execute_script", {"scope": "/project1/fx", "code":
+                      "tdflow.set_parameters(path='/project1/fx/level1', expressions={'opacity': '0.1'})"})
+    T("script.NO_HIDDEN_APPROVALS", x.get("code") == "APPROVAL_REQUIRED_IN_SCRIPT", r=x)
+    u = E.call("tdflow_undo")
+    T("script.changes_undoable_one_by_one", ok(u) and u.get("verified"), r=u)
+
+
+def network_flow(B):
+    """Phase 4: a bounded, read-only network summary with heuristic hints; it reads facts only."""
+    d = B.call("tdflow_describe_network", {"path": "/project1/fx"})
+    T("network.DESCRIBES_ONE_LEVEL", ok(d) and d.get("shown", 0) >= 1 and isinstance(d.get("edges"), list)
+      and isinstance(d.get("hints"), list) and "by_family" in d, d={k: d.get(k) for k in ("shown", "total", "by_family", "code")})
+    T("network.only_readable_operators", all(o["path"].startswith("/project1/fx/") for o in d.get("operators", [])))
+    T("network.out_of_scope_denied", B.call("tdflow_describe_network", {"path": "/project1"}).get("code") == "DENIED")
+
+
 def approval_flow():
     """Phase 2B (ADR-0005 gate): an approval executes only on the identical re-call, with targets and policy
     re-checked. Driven through the real MCP endpoint and the paired dashboard API."""
@@ -449,6 +496,8 @@ def approval_flow():
     kinds = {(e["kind"], e.get("approval_id")) for e in ev.get("events", [])}
     T("approval.execution_audited_with_its_approval", ("intent", aid) in kinds and ("outcome", aid) in kinds, n=len(kinds))
     code_dat_flow(E)
+    script_flow(E)
+    network_flow(MCP(TOKENS["B"]))
     # Dashboard: overview, live tail and a verified report.
     ov = base.jbody(admin("GET", "/api/overview")) or {}
     T("dashboard.overview", ov.get("mcp") is True and ov.get("cooking") is True and (ov.get("audit") or {}).get("ok") is True, ov=ov)

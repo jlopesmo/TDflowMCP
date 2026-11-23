@@ -16,6 +16,7 @@ Resolver kinds (the adapter turns them into policy Targets):
   wire           update on args.dst, read on args.src
   dat_text       update on args.path (+ execute unless the DAT is data)
   undo           inverse actions of the agent's last audited mutation
+  script         Code Mode (Phase 3): execute on args.scope; always approval of the exact script text
   memory         project memory (Phase 2A): read on the task's scopes; records are written only by the
                  memory path in the engine, never as operator targets (tdflowProject stays H4-denied)
 """
@@ -28,7 +29,7 @@ from tdflowmcp import schema
 from tdflowmcp.policy import ACTIONS
 
 RESOLVERS = {"none", "project", "read_path", "read_children", "read_tree", "set_params", "create", "delete",
-             "wire", "dat_text", "undo", "memory"}
+             "wire", "dat_text", "undo", "memory", "script"}
 PATH = {"type": "string", "minLength": 1, "maxLength": 512, "pattern": r"^/[A-Za-z0-9_/]*$",
         "description": "Absolute operator path, e.g. /project1/geo1"}
 NAME = {"type": "string", "minLength": 1, "maxLength": 64, "pattern": r"^[A-Za-z_][A-Za-z0-9_]*$"}
@@ -169,6 +170,13 @@ def core_registry() -> Registry:
            "in Phase 1. Reversible with tdflow_undo (TDflowMCP snapshot; TD's own undo does not cover DAT text).",
            obj({"path": PATH, "text": {"type": "string", "maxLength": 200000}}, ["path", "text"]),
            ("update", "execute?"), "dat_text", "set_dat_text", idempotent=True, reversible="snapshot"))
+    # Phase 4 (dogfood finding 5): bounded network summary with heuristic hints; reads facts, never cooks.
+    T(Tool("tdflow_describe_network", "Describe network", "One network level (the children of a COMP) in one call: "
+           "each readable operator's type, family, inputs, flags, errors and TouchDesigner's own cook count and "
+           "last cook time, the wiring as edges, counts by family, and heuristic hints (slow cooks, frame budget, "
+           "large textures, errors, outputs nothing reads). Hints point at where to look; they are not findings.",
+           obj({"path": PATH}, ["path"]), ("read",), "read_children", "describe_network", read_only=True,
+           idempotent=True))
     T(Tool("tdflow_get_errors", "Get errors", "Errors and warnings of an operator and its children (filtered).",
            obj({"path": PATH, "limit": {"type": "integer", "minimum": 1, "maximum": 500}}, ["path"]),
            ("read",), "read_tree", "get_errors", read_only=True, idempotent=True))
@@ -186,6 +194,15 @@ def core_registry() -> Registry:
            "denied, expired, redeemed). It never executes anything: repeat the identical call to run an approved one.",
            obj({"approval_id": {"type": "string", "minLength": 20, "maxLength": 20, "pattern": r"^apr_[A-Za-z0-9]{16}$"}},
                ["approval_id"]), (), "none", "approval_status", read_only=True, idempotent=True))
+    # Phase 3: Code Mode (ADR-0004). Approval of the exact script text, always; facade calls are normal calls.
+    T(Tool("tdflow_execute_script", "Run script", "Run a short Python script that calls tdflow tools as "
+           "tdflow.<tool>(**args) (for example tdflow.get_operator(path=...)), for many small steps in one approval. "
+           "No imports and no TouchDesigner objects: facade calls return plain data. Every call is checked and "
+           "audited like a separate call and must stay inside scope; calls that need approval are refused inside a "
+           "script. Set `result` to return a value; print() output is returned. Always needs the user's approval of "
+           "the exact text; repeat the identical call once approved. Not a sandbox.",
+           obj({"scope": PATH, "code": {"type": "string", "minLength": 1, "maxLength": 20000}}, ["scope", "code"]),
+           ("execute",), "script", "execute_script"))
     # Phase 2A: task checkpoints, verified handoffs (ADR-0012) on single-authority project memory (ADR-0013).
     T(Tool("tdflow_task_list", "Task list", "Tasks in this project's memory (the user's tdflowProject component) "
            "that you can read, with their latest revision and status, and whether memory is writable.",

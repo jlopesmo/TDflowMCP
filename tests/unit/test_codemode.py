@@ -32,15 +32,19 @@ class CodeModeTests(unittest.TestCase):
 
     def test_no_imports_no_dunder_no_hidden_tools(self):
         for code in ("import os", "x = ().__class__", "eval('1')", "open('f')", "getattr(tdflow, 'x')",
-                     "__import__('os')", "exec('1')", "globals()"):
+                     "__import__('os')", "exec('1')", "globals()", "x = open", "tdflow._call('t', {})",
+                     "tdflow.calls = 0", "try:\n    x = 1\nexcept:\n    pass", "with x:\n    pass",
+                     "class A:\n    pass", "f = lambda: 1", "def g():\n    yield 1", "x = type(1)"):
             with self.assertRaises(C.ScriptError, msg=code):
                 C.check_script(code)
+        self.assertIsNone(C.check_script("d = {'a__b': 1}\nresult = [x * 2 for x in range(3)]"))   # plain code is fine
         rep = C.run("tdflow.execute_script(code='1')", fake_call([]), TOOLS)            # no recursion
         self.assertEqual(rep["error"]["code"], "SCRIPT_ERROR")
         rep = C.run("tdflow.delete_operator(path='/p')", fake_call([]), TOOLS)          # only granted tools exist
         self.assertIn("AttributeError", rep["error"]["message"])
-        rep = C.run("x = open", fake_call([]), ["tdflow_get_operator"])
-        self.assertEqual(rep["error"]["code"], "SCRIPT_ERROR")                         # not in the builtins
+        fac = C.Facade(fake_call([]), TOOLS)
+        with self.assertRaises(AttributeError):
+            fac.calls = 0                                                              # read-only facade
 
     def test_budgets(self):
         rep = C.run("for i in range(1000):\n    tdflow.get_operator(path='/p')", fake_call([]), TOOLS)

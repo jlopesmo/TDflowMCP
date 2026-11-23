@@ -268,7 +268,7 @@ class Policy:
                         "as code", "wire": "wires data into an operator that may evaluate it",
                         "activation": f"switches {t.param} of an executable operator (its code starts or stops "
                         "running)", "trigger": f"changes {t.param} of an Execute DAT, which decides when its code "
-                        "runs"}.get(t.change, f"creates a {t.op_type}, an operator that runs code (created "
+                        "runs", "script": "runs a Code Mode script (its complete text is shown). Each tdflow call in it is checked like a separate call and must stay inside this scope; calls that need approval are refused inside a script"}.get(t.change, f"creates a {t.op_type}, an operator that runs code (created "
                         "switched off)" if t.op_type else "runs code")
                 out.append(f"A1: {t.path} {what}. Approved code runs with full access to TouchDesigner (including "
                            "TDflowMCP itself); scopes do not limit it")

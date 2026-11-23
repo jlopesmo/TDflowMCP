@@ -319,6 +319,7 @@
     setText("s-audit", "Always on. " + d.security_audit.why);
     setText("s-diag-what", d.diagnostic_log.what + " File: " + d.diagnostic_log.file + ".");
     $("s-diag").checked = !!d.diagnostic_log.enabled;
+    if (d.code_mode) { setText("s-cm-what", d.code_mode.what); $("s-cm").checked = !!d.code_mode.enabled; }
     setText("s-loc-inuse", d.data_location.in_use);
     setText("s-loc-status", d.data_location.status);
     setText("s-loc-how", d.data_location.how);
@@ -367,6 +368,7 @@
       catch (e) { $("report-status").textContent += " Copying is not available here; select the text instead."; }
     });
     $("s-diag").addEventListener("change", () => setSetting({ diagnostic_log: $("s-diag").checked }));
+    $("s-cm").addEventListener("change", () => setSetting({ code_mode: $("s-cm").checked }));
     $("s-loc-apply").addEventListener("click", () => setSetting({ data_location: $("s-loc").value }));
     tick();
   });

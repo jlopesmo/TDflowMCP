@@ -28,6 +28,7 @@ from typing import Callable, Dict, List, Optional, Sequence
 
 from tdflowmcp import SKILL_VERSION, TOOL_SURFACE_VERSION, __version__, schema
 from tdflowmcp import approvals as APR
+from tdflowmcp import codemode as CM
 from tdflowmcp import memory as MEM
 from tdflowmcp import memrepo as REPO
 from tdflowmcp.identity import Identity, Sessions
@@ -135,6 +136,7 @@ class Engine:
         self.on_audit_failure = on_audit_failure or (lambda: None)
         self.main = main or (lambda fn: fn())
         self.audit_failed = False                  # sticky: an outcome could not be recorded
+        self.code_mode = False                     # ADR-0004: off until the user turns it on (dashboard)
 
     def suspended(self) -> bool:
         return self.audit_failed or bool(self._suspended())
@@ -152,12 +154,13 @@ class Engine:
         if agent is None or self.suspended():
             return []
         return [t.describe() for t in self.registry.all() if t.name in self.active
-                and (t.resolver in ("none",) or agent.grants)]
+                and (t.resolver in ("none",) or agent.grants) and (t.resolver != "script" or self.code_mode)]
 
     def call(self, token_id: str, name: str, args: dict, client_info: Optional[dict] = None,
              request_id: str = "", main: Optional[Callable[[Callable], object]] = None,
-             meta: Optional[dict] = None) -> Optional[dict]:
-        """Handler thread. ``main`` runs a step on TD's main thread for this request (default: engine-wide)."""
+             meta: Optional[dict] = None, in_script: bool = False) -> Optional[dict]:
+        """Handler thread. ``main`` runs a step on TD's main thread for this request (default: engine-wide).
+        ``in_script``: a facade call from an approved Code Mode script (never another script, never a new request)."""
         m = main or self.main
         tool = self.registry.get(name)
         if tool is None or tool.name not in self.active:
@@ -184,6 +187,10 @@ class Engine:
             return self._undo(tool, agent, base, t0, m)
         if tool.resolver == "memory":
             return self._memory(tool, agent, args, base, t0, m)
+        if tool.resolver == "script":
+            if in_script:
+                return self._deny(base, "DENIED", "S1", "a script cannot run another script", None)
+            return self._script(tool, agent, args, base, t0, m, client_info, request_id, meta)
         # 1. Plan on the main thread: resolve + policy (pure facts come back, never TD objects).
         try:
             plan = m(lambda: self._plan(tool, args, agent))
@@ -197,6 +204,10 @@ class Engine:
                 base.update(targets=d["targets"])
             return self._deny(base, d["code"], d["rule"], d["reason"], d["target"])
         base.update(targets=plan["targets"][:50], policy_version=plan["policy_version"])
+        if plan.get("approval") and in_script:
+            # Phase 3: the user approved the script text, not hidden requests made from it.
+            return self._deny(base, "APPROVAL_REQUIRED_IN_SCRIPT", plan["approval"]["rule"], "inside a script, calls "
+                              "that need approval are refused; make this call on its own", None)
         if plan.get("approval"):
             # Phase 2B (security-model §4): nothing runs without the user's approval of exactly this call.
             given = ((meta or {}).get("tdflow") or {}).get("approval_id") if isinstance((meta or {}).get("tdflow"), dict) else None
@@ -373,6 +384,123 @@ class Engine:
             res.context["snapshot_id"] = snap_id
             res.context["planned_snapshot"] = plan.get("snapshot")
         return self.adapter.execute(tool, args, res, label, lambda ts: self.policy.filter_readable(current, ts)[0])
+
+    # ---- Code Mode (Phase 3, ADR-0004) -----------------------------------------------------------
+    def _script(self, tool: Tool, agent: Agent, args: dict, base: dict, t0: float, m, client_info, request_id,
+                meta=None) -> dict:
+        """Handler thread. Running a script is ``execute`` on the declared scope (an existing COMP) and always needs
+        the user's approval of the exact script text; Code Mode itself is off until the user turns it on (ADR-0004).
+        The script runs here (never on TD's main thread). The engine, not the script, enforces per facade call: the
+        tool allowlist, the scope, the call budget and the kill switch, and keeps the authoritative call log."""
+        code, scope = args["code"], args["scope"]
+        if not self.code_mode:
+            return self._deny(base, "CODE_MODE_OFF", "S4", "Code Mode is off. The user can turn it on in the "
+                              "TDflowMCP dashboard (Settings); until then make the calls one by one", None)
+        try:
+            CM.check_script(code)
+            sha = APR.digest(tool.name, {"code": code})[1]
+        except CM.ScriptError as e:
+            return self._deny(base, e.code, "S0", e.message, None)
+        except APR.ApprovalError as e:                       # review 15: invisible characters, token-like text
+            return self._deny(base, e.code, "S0", e.message, None)
+        facts = getattr(self.adapter, "path_facts", None)
+        try:
+            prot, anc = m(lambda: facts(scope)) if facts else ("", "")
+        except (MainNotRun, MainUnknown) as e:
+            return self._deny(base, _main_code(e), "M0", _main_reason(_main_code(e)), None)
+        target = Target("execute", scope, protected=prot, ancestor_of=anc, change="script")
+        verdict = self.policy.evaluate(agent, [target])
+        base.update(targets=[["execute", scope]], policy_version=verdict.policy_version)
+        if not verdict.allow and verdict.code != "APPROVAL_REQUIRED":
+            return self._deny(base, verdict.code, verdict.rule_id, verdict.reason, verdict.target)
+        if verdict.allow:                          # cannot happen: A1 always applies to execute (defence in depth)
+            return self._deny(base, "DENIED", "S2", "a script always needs the user's approval", None)
+        lister = self.registry.get("tdflow_list_operators")
+        try:                                       # the scope must be an existing COMP (after the policy check)
+            if lister is not None:
+                m(lambda: self.adapter.resolve(lister, {"path": scope}))
+        except ToolFailure as f:
+            return self._deny(base, "INVALID_ARGS", "S0", "scope must be an existing component: " + f.message, None)
+        except (MainNotRun, MainUnknown) as e:
+            return self._deny(base, _main_code(e), "M0", _main_reason(_main_code(e)), None)
+        except Exception:                          # never leak internals; nothing ran
+            return self._deny(base, "INTERNAL_ERROR", "S6", "the scope could not be checked", None)
+        plan = {"targets": [["execute", scope]], "policy_version": verdict.policy_version,
+                "approval": {"rule": "A1", "reason": verdict.reason,
+                             "reasons": self.policy.approval_reasons([target]),
+                             "facts": APR.target_facts([target]) + [["script_sha256", sha]]}}
+        tdm = (meta or {}).get("tdflow")
+        given = tdm.get("approval_id") if isinstance(tdm, dict) else None
+        stop = self._approval_gate(tool, args, agent, base, plan, given if isinstance(given, str) else None)
+        if stop is not None:
+            return stop
+        token_id = base["token_id"]
+        current = self.identity.agent_for_token(token_id)
+        v = self.policy.evaluate(current, [target], approved=True) if current is not None and current.id == agent.id \
+            else None
+        if self.suspended() or not self.code_mode or v is None or not v.allow or \
+                v.policy_version != plan["policy_version"]:
+            return self._deny(base, "SUSPENDED" if self.suspended() else "DENIED", "S3", "the agent, its permissions, "
+                              "Code Mode or the kill switch changed since the approval; nothing ran", None)
+        try:
+            seq = self.store.append("intent", decision="ALLOW", rule_id="GA", detail={"script_sha256": sha}, **base)
+        except AuditUnavailable:
+            return tool_error("AUDIT_UNAVAILABLE", "The audit store is unavailable, so nothing was executed.")
+        tools = [t for t in CM.SCRIPT_TOOLS if t in self.active and self.registry.get(t) is not None]
+        elog: List[dict] = []                      # authoritative: built here, never from script-visible state
+        sub = {k: v for k, v in base.items() if k not in ("targets", "policy_version", "approval_id")}
+
+        def refused(name, code_, rule, why, path=None):
+            r = self._deny(dict(sub, tool=name, targets=[["read", path]] if path else None), code_, rule, why, path)
+            elog.append({"tool": name, "ok": False, "code": code_, "audit_seq": r["structuredContent"].get("audit_seq")})
+            return r
+
+        def facade_call(name, a):
+            if len(elog) >= CM.MAX_CALLS:
+                raise CM.Budget(f"more than {CM.MAX_CALLS} tdflow calls")
+            if self.suspended():
+                raise CM.Budget("stopped: all agents were suspended")
+            if name not in tools:
+                return refused(name, "DENIED", "S5", "this tool is not available inside a script")
+            for k in CM.PATH_KEYS:
+                p = a.get(k)
+                if isinstance(p, str) and not CM.inside(scope, p):
+                    return refused(name, "SCOPE_OUTSIDE_SCRIPT", "S5", f"{k} is outside the script's scope {scope}", p)
+            try:
+                r = self.call(token_id, name, a, client_info, f"{request_id}:s{len(elog) + 1}", main=m, in_script=True)
+            except Exception:                      # review 15: never hand internals to the script; audit it
+                return refused(name, "INTERNAL_ERROR", "S6", "the call failed inside TDflowMCP")
+            if r is None:
+                return refused(name, "DENIED", "S5", "this tool is not available")
+            sc = r.get("structuredContent") or {}
+            elog.append({"tool": name, "ok": not r.get("isError"), "code": sc.get("code"), "audit_seq": sc.get("audit_seq")})
+            return r
+        try:
+            rep = CM.run(code, facade_call, tools, stop=self.suspended)
+        except CM.ScriptError as e:                # refused before it ran (re-checked)
+            rep = {"ok": False, "error": {"code": e.code, "message": e.message}}
+        failed = [x for x in elog if not x["ok"]]
+        outcome = "ok" if rep.get("ok") and not failed else "error"
+        code_ = None if outcome == "ok" else (rep.get("error") or {}).get("code") or failed[0]["code"]
+        dur = int((self.clock() - t0) * 1000)
+        try:
+            oseq = self.store.append("outcome", decision="ALLOW", outcome=outcome, error_code=code_, duration_ms=dur,
+                                     detail={"intent_seq": seq, "script_sha256": sha, "calls": len(elog),
+                                             "call_seqs": [x.get("audit_seq") for x in elog][:CM.MAX_CALLS],
+                                             "reversible": "no"}, **base)
+        except AuditUnavailable:
+            oseq = None
+        if oseq is None:
+            self._audit_failure()
+            return tool_error("OUTCOME_UNRECORDED", "The script ran, but its outcome could not be recorded durably, so "
+                              "all agents were suspended.", intent_seq=seq)
+        out = {"result": rep.get("result"), "output": rep.get("output", ""), "calls": len(elog), "log": elog,
+               "audit_seq": oseq, "script_sha256": sha}
+        if outcome != "ok":
+            msg = (rep.get("error") or {}).get("message") or "a call inside it failed"
+            return tool_error(code_, "The script stopped: " + msg + ". Calls it made before stopping did run (see "
+                              "log); undo them one by one with tdflow_undo if needed.", **out)
+        return tool_result(out)
 
     # ---- helpers -------------------------------------------------------------------------------
     def _deny(self, base: dict, code: str, rule: str, reason: str, target: Optional[str]) -> dict:
@@ -933,7 +1061,8 @@ class Engine:
 
 # Which tools may be approved, per approval rule (Phase 2B increment 1): A1 (runs code) only for parameter
 # expressions and reference parameters; A2 (large delete) for deletes.
-APPROVABLE = {"A1": ("tdflow_set_parameters", "tdflow_set_dat_text", "tdflow_create_operator"),
+APPROVABLE = {"A1": ("tdflow_set_parameters", "tdflow_set_dat_text", "tdflow_create_operator",
+                     "tdflow_execute_script"),
               "A2": ("tdflow_delete_operator",)}
 MUTATION_LIMIT = 5000                       # audited mutations read per evidence window
 FP_CHUNK = 50                               # operators fingerprinted per main-thread step

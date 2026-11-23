@@ -17,6 +17,7 @@ import os
 
 import td
 
+from tdflowmcp import insights as INS
 from tdflowmcp import layout as LAYOUT
 from tdflowmcp import memory as MEM
 from tdflowmcp.engine import Adapter, Resolution, ToolFailure
@@ -384,6 +385,48 @@ class TDAdapter(Adapter):
                          "have not cooked yet, so their errors are unknown, not absent. This tool does not cook "
                          "anything to find out.")
         return r
+
+    def _t_describe_network(self, args, res, label, readable):
+        """Phase 4: one network level (the children of a COMP) as facts TouchDesigner already measured, plus
+        heuristic hints. Reads attributes only; never cooks or evaluates anything."""
+        o = res.context["op"]
+        if not o.isCOMP:
+            raise ToolFailure("INVALID_ARGS", f"{o.path} is not a component.")
+        kids = sorted(o.children, key=lambda c: c.name)
+        vis = {t.path for t in readable([self._facts(c, "read") for c in kids])}
+        rows = []
+        for c in kids:
+            if c.path not in vis:
+                continue
+            if len(rows) >= INS.MAX_ROWS:
+                break
+            r = {"path": c.path, "type": c.OPType, "family": c.family,
+                 "inputs": self._conn_paths(list(c.inputs), readable), "cook_count": _cooks(c)}
+            for k in ("bypass", "display", "render"):
+                v = getattr(c, k, None)
+                if isinstance(v, bool):
+                    r[k] = v
+            try:
+                r["cook_ms"] = round(float(c.cpuCookTime), 4)
+            except Exception:
+                pass
+            try:
+                r["errors"], r["warnings"] = (c.errors() or "")[:500], (c.warnings() or "")[:500]
+            except Exception:
+                pass
+            if c.family == "TOP":
+                try:
+                    r["resolution"] = [int(c.width), int(c.height)]
+                except Exception:
+                    pass
+            rows.append(r)
+        out = INS.summarize(rows, total=len(vis), filtered=len(kids) - len(vis))
+        out["path"] = o.path
+        out["hints"] = INS.hints(rows)
+        out["note"] = ("Cook times are TouchDesigner's own measurements of each operator's last cook; operators that "
+                       "did not cook recently show stale or zero times. Hints are heuristics that point at where to "
+                       "look, not findings.")
+        return out
 
     # -- mutations --
     def _t_set_parameters(self, args, res, label, readable):

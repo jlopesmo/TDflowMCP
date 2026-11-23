@@ -72,14 +72,14 @@
   - **Repository mode:** task records as files in a folder inside the project's own folder tree (`tdflow/memory/`, with `tdflow-project.json`). The component then holds only the link and a derived index. File I/O never runs on TouchDesigner's main thread.
   - **Both remaining ADR-0013 gates passed in TD:** a mismatched `Projectid` blocks linking, reading, writing, claiming and migrating; a migration in both directions preserves every record and hash.
   - **Migration and re-link** on the paired Setup page: preview with a digest, then exactly that preview; audited before and after; refused while the ledger is not clean.
-  - **Dedicated permission (owner condition D18):** writing in repository mode needs the capability `memory:repo:write`, issued only by the user at token creation. **Awaiting the owner's confirmation** that this is the intended form ([ADR-0013](../decisions/0013-project-memory-model.md#conditional-decision-on-memory-permissions-owner-d18-2026-11-22)).
+  - **Dedicated permission (owner condition D18):** writing in repository mode needs the capability `memory:repo:write`, issued only by the user at token creation. **Accepted by the owner (D20)**, with no authority over project ICM, decisions or Git-backed docs ([ADR-0013](../decisions/0013-project-memory-model.md#conditional-decision-on-memory-permissions-owner-d18-2026-11-22)).
   - **Untrusted folder contents:** files the audit log does not know are never used without the user's claim, cannot crash the tools, and cannot put text into server-labelled parts of an answer.
   - **Friction fixes:** default placement of created operators; an optional `status` on handoffs; the changed parameters named on resume. Skill **1.2**.
   - **Not verified:** a parent-folder link (`..`) in TD (unit-tested); a link on a cloud-synced or network folder.
 - **The earlier "unexplained hang" is explained and handled** ([S9](../research/2026-11-23-s9-minimized-window.md)):
   - TouchDesigner 2025.32440 runs **no frames while its window is minimized** (measured: 0 frames in 4 s, also with independent time).
   - Before: timeouts, then the listener closed after 20 s and MCP turned off. Now: calls that need TouchDesigner are refused at once with `TDFLOW_NOT_COOKING` and the reason, nothing executes, the listener and MCP stay, and work continues when the window is restored. Verified in TD (1B `minimized.*` checks).
-  - Windows only; elsewhere the earlier behaviour applies. While minimized, frame-driven checks (bind re-verification, idle stop, the `Suspendagents` parameter) are paused; nothing that touches the project can run. **For the owner:** accept this limit or ask for a background re-verification ([review 12](../research/2026-11-23-s9-minimized-window.md#independent-review-12)).
+  - Windows only; elsewhere the earlier behaviour applies. While minimized, nothing that touches the project can run, and the `Suspendagents` parameter waits for frames (the dashboard's kill switch does not). The owner asked for background checks (D20): bind re-verification and the idle stop now run without frames (Phase 2B increment 2, below).
 - **Phase 2B increment 1: approvals and the governance dashboard** ([record](../research/2026-11-23-phase-2b-increment-1.md), [security model §4](../architecture/security-model.md#4-approvals), owner D19):
   - **Approvals:** a call that runs code (`tdflow_set_parameters` expressions and reference parameters; **operator** role) or deletes more than 50 operators waits for the user and is executed only by the identical re-call, once, with targets and policy re-checked. Nothing waits on the main thread. Other code-running effects stay denied.
   - **Dashboard** at `/ui/` (paired admin session): overview, approval queue with complete arguments, live activity and audit search, sessions, agents and tokens, project memory, reports that state whether they verify against the keyed checkpoints, settings (mandatory audit shown as fixed; optional diagnostic log; data-location request). Its kill switch works while TouchDesigner runs no frames.
@@ -87,15 +87,22 @@
 - **Phase 2B increment 2 (owner D20)** ([record](../research/2026-11-23-phase-2b-increment-2.md)):
   - **Minimized window:** while TouchDesigner runs no frames, the transport re-verifies the loopback binding every 10 s on a background thread (TD-free; anything but a positive verdict closes the listener) and enforces the idle stop. Idle now counts only meaningful activity (agent requests, admin actions), not page loads or automatic polling. Verified in TD (`minimized.BINDING_RE_VERIFIED_IN_THE_BACKGROUND`); the idle stop while paused is unit-tested.
   - **Permission editing** on the dashboard: add or remove allow and deny grants per agent, within the agent's role and the project root; audited first; pending approvals of that agent stop matching.
-  - **Code-running changes with approval and staging:** code-DAT text, and the six Execute DAT types created switched off, with activation as its own approval. Verified in TD end to end (`code.*`: the approved code runs only after the approved activation and stops after the approved deactivation).
+  - **Code-running changes with approval and staging:** code-DAT text, and the six Execute DAT types created switched off, with activation and every other Execute DAT parameter as approval-gated changes. Verified in TD end to end (`code.*`: the approved code runs only after the approved activation and stops after the approved deactivation; builders cannot toggle callbacks).
+  - [Review 14](../research/2026-11-23-phase-2b-increment-2.md#independent-review-review-14): 0 High, 2 Medium, all addressed. Committed as `a656c75`.
+- **Phase 3 increment 1: Code Mode** ([record](../research/2026-11-23-phase-3-code-mode.md), [ADR-0004 notes](../decisions/0004-code-mode-strategy.md#implementation-notes-phase-3-2026-11-23), owner D20):
+  - `tdflow_execute_script`: **off until the user turns it on** (dashboard setting, private storage, audited); then the operator role, a grant on the declared scope and the user's approval of the exact text, every time. The script runs on a handler thread; its facade calls are normal audited calls, and the engine enforces the tool allowlist, the scope, the budgets and the kill switch per call. Not a sandbox, and every request says so.
+  - Verified in TD on candidate `8c829556…` (`script.*`); [review 15](../research/2026-11-23-phase-3-code-mode.md#independent-review-15): 2 Medium, all addressed.
+- **Phase 4: `tdflow_describe_network`** (dogfood finding 5): one network level with wiring, errors, TouchDesigner's own cook times and heuristic hints; never cooks anything. Verified in TD (`network.*`). Skill **1.4**.
+- **Tests** on candidate `8c829556…` (uncommitted tree): 403 unit tests; 1B 48/48 + 178/178; 1A 49/49 + 71/71; gate 46/46 + 48/48; memory 51/51 + 182/182; onboarding live 5/5 + 48/48.
 
 ## Not implemented (nothing below exists)
 - **Withheld by design:**
-  - approval of code-running effects other than parameter expressions and reference parameters (2B, later increment);
-  - arbitrary, raw or Code Mode Python execution (3, approval-gated);
+  - raw Python execution with full `td` access (`tdflow_execute_python`): not built, and disabled by default if it ever is;
+  - wiring data into DATs, creating Script, network or file-system operators: not approvable;
   - project save.
+- **Decided against:** a WebSocket or SSE event stream on the dashboard; it polls (D20 rationale in the [increment 2 record](../research/2026-11-23-phase-2b-increment-2.md#event-delivery-d20-item-4)).
 - **Later phases:**
-  - per-grant policy editing and a WebSocket event stream on the dashboard (2B, later increment);
+  - per-grant `allowed_op_types` and `param_denylist` editing (grants themselves are editable);
   - task, decision and ICM record types (`tdflow_memory_get/put`), archiving (adding an agent-writable record type reopens owner condition D18);
 - **Not yet:**
   - a 1.0 release (packages are `.dev` development builds);
@@ -121,12 +128,13 @@
 
 - `3a53e72`: post-restart recovery record and D19. Pushed to `origin/dev` and observed with `git ls-remote` (`refs/heads/dev` = `3a53e72…`, `refs/heads/main` = `066dbd0…`, so `main` is unchanged). CI: **not observed**.
 - `1233815`: **Phase 2A increment 3** (repository-mode memory, link check, migration, the repository-memory capability, friction fixes) and the minimized-window handling (S9), reviews 11 and 12. Pushed to `origin/dev` and observed with `git ls-remote` (`refs/heads/dev` = `1233815…`, `refs/heads/main` = `066dbd0…`, so `main` is unchanged). Verified on candidate `273b185e…` built from the pre-commit tree; a clean build of the commit (tox `a2250474…`, `source_dirty` false) has the same source digest `ffb75892…`. No package was built. This record was added by the follow-up commit. CI: **not observed**.
+- `a656c75`: **Phase 2B increment 2** (owner D20: background checks while minimized, permission editing, staged code-running changes), review 14. Pushed to `origin/dev` and observed with `git ls-remote` (`refs/heads/dev` = `a656c75…`, `refs/heads/main` = `066dbd0…`, so `main` is unchanged). Verified on candidate `2397613a…` built from the pre-commit tree. No package was built. This record was added by a later commit. CI: **not observed**.
 - `0dd5bfd`: **Phase 2B increment 1** (approvals with identical re-call, the operator role, the `/ui/` governance dashboard), review 13. Pushed to `origin/dev` and observed with `git ls-remote` (`refs/heads/dev` = `0dd5bfd…`, `refs/heads/main` = `066dbd0…`, so `main` is unchanged). Verified on candidate `84f76d69…` built from the pre-commit tree; a clean build of the commit (tox `788925fa…`, `source_dirty` false) has the same source digest `14dac47f…`. No package was built. This record was added by the follow-up commit. CI: **not observed**.
 
-## Next (owner direction D19: continue in dependency order)
-1. **Phase 2B, next increment:** per-grant policy editing (scopes, `allowed_op_types`, `param_denylist`), approval of further code-running effects (each with its own execution path and review), WebSocket events, the 2B tool candidates (`tdflow_describe_network` first).
-2. **Owner confirmations:** the repository-memory capability (D18); whether to add agent-writable task, decision or ICM records.
-3. **ADR-0014 stage 1** (approved, D17): isolated candidate build/test bound to the `.tox` hash, plus a manual promotion recorded by the new A. Not started.
-4. **B3:** an observed CI run.
-5. **Remaining review-6 follow-ups:** bind/export propagation; pairing DoS mitigation. Checkpoints are now anchored in private storage outside the project.
-6. **Then, in order (D19):** the Phase 2B governance dashboard; Phase 3 (experiments, snapshots, Code Mode); Phase 4 extensions; further dogfooding; the 1.0 release candidate. None of these exists yet.
+## Next (owner direction D20: finish TDflowMCP)
+1. **Phase 3, remaining:** experiments (copy, promote, discard), inert snapshots and restore, approval-only project save. Code Mode exists (see above).
+2. **Phase 4, remaining:** capture TOP, scope leases. The network summary exists (see above).
+3. **ADR-0014 stage 1** (approved, D17), if it does not delay completion: isolated candidate build/test bound to the `.tox` hash, plus a manual promotion. Not started.
+4. **Realistic coding-agent dogfooding** of the new capabilities, then the **1.0 release candidate** for the owner's acceptance (not a release).
+5. **Owner question:** whether to add agent-writable task, decision or ICM records (reopens D18).
+6. **B3:** an observed CI run. **Remaining review-6 follow-ups:** bind/export propagation; pairing DoS mitigation.

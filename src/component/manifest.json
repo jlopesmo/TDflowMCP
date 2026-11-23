@@ -17,6 +17,9 @@
     "tdflowmcp.auditworker": {
       "path": "src/tdflowmcp/auditworker.py"
     },
+    "tdflowmcp.codemode": {
+      "path": "src/tdflowmcp/codemode.py"
+    },
     "tdflowmcp.compat": {
       "path": "src/tdflowmcp/compat.py"
     },
@@ -31,6 +34,9 @@
     },
     "tdflowmcp.identity": {
       "path": "src/tdflowmcp/identity.py"
+    },
+    "tdflowmcp.insights": {
+      "path": "src/tdflowmcp/insights.py"
     },
     "tdflowmcp.layout": {
       "path": "src/tdflowmcp/layout.py"
@@ -423,7 +429,9 @@
     "tdflow_connect",
     "tdflow_create_operator",
     "tdflow_delete_operator",
+    "tdflow_describe_network",
     "tdflow_disconnect",
+    "tdflow_execute_script",
     "tdflow_get_dat_text",
     "tdflow_get_errors",
     "tdflow_get_operator",

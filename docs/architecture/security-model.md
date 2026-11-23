@@ -88,7 +88,7 @@ A grant is `{subject: agent|role, scope, actions, effect: allow|deny, constraint
 | Delete | `delete` on `path/**` |
 | Undo an audited action | the inverse actions on the action's targets (create ↔ delete, update ↔ update) |
 | Save the `.toe` | `execute` on `/**` and always approval. **Not offered in Phase 1** |
-| Raw `execute_python`, Code Mode script | `execute` on `/**` (raw) or per facade call (Code Mode) |
+| Raw `execute_python`, Code Mode script | `execute` on `/**` (raw, not built); Code Mode: `execute` on the script's declared `scope`, always approval of the exact text, and every facade call classified like the same call made directly |
 
 The tool registry refuses a tool whose resolver doesn't declare its classification, and each row above gets allow and deny tests in Phase 1.
 
@@ -120,7 +120,7 @@ The tool registry refuses a tool whose resolver doesn't declare its classificati
 
 In-process Python cannot be sandboxed, and RestrictedPython's own docs disclaim being a sandbox.
 - `tdflow_execute_python` (raw) is **disabled by default**. When enabled it needs `execute` on `/**`, always requires approval, and is labelled **"bypasses scopes"**.
-- Code Mode ([ADR-0004](../decisions/0004-code-mode-strategy.md)) passes scripts only a `tdflow` facade whose calls are policy-checked. The facade returns **plain data** (dicts, strings, numbers), never TD objects, because Python introspection (`__class__`, `__globals__`, frames) can escape any wrapper. Even so, the restricted namespace is a **mistake-reducer, not a security boundary**, and Code Mode requires approval by default.
+- Code Mode ([ADR-0004](../decisions/0004-code-mode-strategy.md)) passes scripts only a `tdflow` facade whose calls are policy-checked. The facade returns **plain data** (dicts, strings, numbers), never TD objects, because Python introspection (`__class__`, `__globals__`, frames) can escape any wrapper. Even so, the restricted namespace is a **mistake-reducer, not a security boundary**, and Code Mode always requires approval of the exact script text. It is off until the user turns it on (dashboard setting). The engine enforces the scope, the tool allowlist, the budgets and the kill switch per facade call; static refusals (no `import`, `try`, `with`, classes, `_` attributes, attribute assignment) are guard rails ([review 15](../research/2026-11-23-phase-3-code-mode.md#independent-review-15)).
 
 ## 6. Audit
 
@@ -142,7 +142,7 @@ TD's main thread cannot pre-empt running Python. Limits are therefore:
 - **Hard pre-checks:** body size (413), response size cap, pagination, and `max_ops_per_call` checked before execution.
 - **Cooperative checks:** op counters and elapsed-time checks inside facade/tool loops abort between steps.
 - **Post-hoc reporting:** durations above the budget are flagged in audit and the dashboard.
-- **Residual risk:** a tight loop in raw exec or a Code Mode script freezes TD until it ends. This is why `execute` is approval-gated.
+- **Residual risk:** a tight loop in raw exec freezes TD until it ends. A Code Mode script runs on a handler thread, and a line tracer stops pure-Python loops; a single long builtin call (a huge allocation or `sum(range(...))`) holds the interpreter until it returns. This is why `execute` is approval-gated.
 
 ## 8. Network posture
 
