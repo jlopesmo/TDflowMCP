@@ -138,6 +138,7 @@
 
 - `3a53e72`: post-restart recovery record and D19. Pushed to `origin/dev` and observed with `git ls-remote` (`refs/heads/dev` = `3a53e72…`, `refs/heads/main` = `066dbd0…`, so `main` is unchanged). CI: **not observed**.
 - `1233815`: **Phase 2A increment 3** (repository-mode memory, link check, migration, the repository-memory capability, friction fixes) and the minimized-window handling (S9), reviews 11 and 12. Pushed to `origin/dev` and observed with `git ls-remote` (`refs/heads/dev` = `1233815…`, `refs/heads/main` = `066dbd0…`, so `main` is unchanged). Verified on candidate `273b185e…` built from the pre-commit tree; a clean build of the commit (tox `a2250474…`, `source_dirty` false) has the same source digest `ffb75892…`. No package was built. This record was added by the follow-up commit. CI: **not observed**.
+- `47e47dc`: **Phase 4** (capture, leases, inert snapshots, benchmark), review 17. Pushed to `origin/dev` and observed with `git ls-remote` (`refs/heads/dev` = `47e47dc…`, `refs/heads/main` = `066dbd0…`). Verified on candidate `1b8657a0…`. CI: **not observed**.
 - `df0ea46`: **Phase 3 increment 2** (experiments, approval-only save), review 16. Pushed to `origin/dev` and observed with `git ls-remote` (`refs/heads/dev` = `df0ea46…`, `refs/heads/main` = `066dbd0…`). Verified on candidate `8476555f…` built from the pre-commit tree. CI: **not observed**.
 - `4c55ca0`: **Phase 3 increment 1** (Code Mode) and the Phase 4 network summary, review 15. Pushed to `origin/dev` and observed with `git ls-remote` (`refs/heads/dev` = `4c55ca0…`, `refs/heads/main` = `066dbd0…`, so `main` is unchanged). Verified on candidate `8c829556…` built from the pre-commit tree. No package was built. CI: **not observed**.
 - `a656c75`: **Phase 2B increment 2** (owner D20: background checks while minimized, permission editing, staged code-running changes), review 14. Pushed to `origin/dev` and observed with `git ls-remote` (`refs/heads/dev` = `a656c75…`, `refs/heads/main` = `066dbd0…`, so `main` is unchanged). Verified on candidate `2397613a…` built from the pre-commit tree. No package was built. This record was added by a later commit. CI: **not observed**.
@@ -145,7 +146,7 @@
 
 ## Next (owner direction D20: finish TDflowMCP)
 1. **Phase 3 and 4:** done on `dev` (see above), except host-project source-first and file snapshots outside the project.
-2. **Realistic agent dogfooding** of the new tools.
+2. **1.0 release candidate** `1.0.0rc1`: [checklist](../operations/release-candidate-1.0.md), awaiting the owner's acceptance. Dogfood round 3 (Phase 3/4 tools) passed.
 3. **ADR-0014 stage 1** (approved, D17), if it does not delay completion: isolated candidate build/test bound to the `.tox` hash, plus a manual promotion. Not started.
 4. **Realistic coding-agent dogfooding** of the new capabilities, then the **1.0 release candidate** for the owner's acceptance (not a release).
 5. **Owner question:** whether to add agent-writable task, decision or ICM records (reopens D18).

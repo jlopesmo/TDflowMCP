@@ -216,7 +216,10 @@ class Policy:
         if t.action == "create":
             approvable = t.op_type in APPROVABLE_CREATE_TYPES and "execute" in role_actions
             if t.op_type not in SAFE_CREATE_TYPES and not approvable:   # allowlist; network/file/script never qualify
-                return False, "G2", f"operator type {t.op_type or '?'} is not on the Phase 1 allowlist"
+                if t.op_type in APPROVABLE_CREATE_TYPES:                  # dogfood 2026-11-23: say what would work
+                    return False, "G2", (f"operator type {t.op_type} runs code: only an agent with the operator role "
+                                         "can create it, with the user's approval, and it is created switched off")
+                return False, "G2", f"operator type {t.op_type or '?'} is not on the creation allowlist"
             if not any(g.allowed_op_types is None or t.op_type in g.allowed_op_types for g in allows):
                 return False, "G2", f"operator type {t.op_type} is not allowed by your grants"
         if t.action == "update" and t.param:

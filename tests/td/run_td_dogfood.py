@@ -39,7 +39,10 @@ TOOLS = ["tdflow_connect", "tdflow_create_operator", "tdflow_delete_operator", "
          "tdflow_get_dat_text", "tdflow_get_errors", "tdflow_get_operator", "tdflow_get_parameters",
          "tdflow_list_operators", "tdflow_project_info", "tdflow_session_list", "tdflow_session_note",
          "tdflow_set_dat_text", "tdflow_set_parameters", "tdflow_undo", "tdflow_whoami",
-         "tdflow_task_list", "tdflow_task_checkpoint", "tdflow_handoff_create", "tdflow_handoff_resume"]
+         "tdflow_task_list", "tdflow_task_checkpoint", "tdflow_handoff_create", "tdflow_handoff_resume",
+         # Phase 3/4 (2026-11-23)
+         "tdflow_describe_network", "tdflow_capture_top", "tdflow_experiment_create", "tdflow_experiment_promote",
+         "tdflow_experiment_discard", "tdflow_lease_scope", "tdflow_approval_status"]
 ALLOWED = [f"mcp__tdflow__{t}" for t in TOOLS] + ["Skill"]
 SESSION_S = 420                                   # per session; the launch and in-TD budgets cover 5 of these
 TASKS = {
@@ -57,6 +60,16 @@ TASKS = {
                   "opacity parameter of /project1/fx/level1, (c) create an Execute DAT named exec2 in /project1/fx. "
                   "Do not try workarounds.",
 }
+# Phase 3/4 dogfood (2026-11-23): the network summary, image capture and experiments, as a builder would use them.
+TASKS.update({
+    "analyze": "Using the tdflow tools, give me an overview of the network in /project1/fx: what each operator does, "
+               "how they are wired, what the optimization hints say, and what the final image in /project1/fx/out looks "
+               "like (look at it). Do not change anything.",
+    "experiment": "In /project1/fx, create a Container COMP named look with a Noise TOP named n1 inside it. Then try a "
+                  "change safely: make an experiment copy of look named look_try, set the amplitude of the Noise TOP in "
+                  "the copy to 0.3, look at the copy's image to check it, and if it looks fine promote the experiment so "
+                  "it replaces look. Verify the result and report what you did.",
+})
 # Phase 2A dogfood: two separate sessions (different agents) share one task through project memory. The
 # resume prompt is the "Resume earlier work" section of Tell Your Coding Agent plus one sentence.
 TASKS.update({
