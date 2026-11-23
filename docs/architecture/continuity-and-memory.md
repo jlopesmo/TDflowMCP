@@ -60,6 +60,13 @@ A session (see [security model §2.3](security-model.md#23-sessions)) is a group
 - Each memory call compares the COMP's records with this ledger. *changed outside* = a known record with different text; *missing* = a written record that is gone (an older save was opened, the project was not saved, or the DAT was deleted); *foreign* = a record this project's audit never wrote (a copied component, or a project copy claimed as new); *invalid* = not a record.
 - Any of these makes memory **read-only for agents** (`MEMORY_READ_ONLY`, rule M5) until the user claims. Reads keep working and report the state.
 - Because a copied project gets a new audit log (storage `COPIED` → Claim As New Project), its embedded memory is *foreign* there until the user claims it, so two copies never silently share one authority.
+- **Project identity verification (increment 2, D18):**
+  - The audit log binds the project to one memory `Projectid`: the latest `memory_create` or `memory_claim` event.
+  - A `tdflowProject` with another `Projectid` makes memory read-only (`identity_mismatch`) until the user claims it. It may have been replaced, pasted from another project or had its id edited.
+  - Claiming another memory forgets the previous one's records, so swapping the old component back needs a claim too.
+- **Restart persistence and restoration (increment 2, D18, verified in TD):**
+  - Records are ordinary DATs saved with the `.toe`. After a real TouchDesigner restart from the saved file, the records, `Projectid`, ledger state and fingerprints are intact. Resume reports no out-of-band change (`reliable: true`).
+  - A record written after the last save is reported `missing` (memory read-only, with the reason). After Claim Project Memory, writing continues from the restored revision.
 
 **Checkpoints** (`tdflow_task_checkpoint`): the server attaches the audit range since the task's previous record (or since the caller's first audited event in this session; with none yet, the window starts now), the successful audited changes in the task's scopes that the caller can read, the TD build, the server version, and a **fingerprint**. The fingerprint is one 16-hex digest per operator: type; constant values and expression/bind text of non-read-only parameters; inputs; bypass/display/render; and the text of input-less Text and Table DATs. Nothing is evaluated or cooked, and positions are excluded. The main-thread walk visits at most 2000 operators, and the cap is 300 fingerprinted operators (`truncated` beyond). At most 5000 audited mutations are read per window; a larger window sets `window_complete: false`, and audit-based claims are then `unverified`.
 
@@ -74,22 +81,27 @@ A session (see [security model §2.3](security-model.md#23-sessions)) is a group
 - `changed_outside_tdflowmcp` is true when an operator's digest changed (or it was added or removed) and no audited change at that path or an ancestor explains it. `reliable` is false when either fingerprint was capped or the audit window was not read whole.
 - Known false positive: an operator whose input source was deleted, or changed by a path outside the explanation rule.
 
-**Access (deviation from the proposed security model §11, recorded for owner review):** memory access derives from operator scopes instead of separate `memory:*` grants.
+**Access (conditionally accepted by the owner, D18; see [ADR-0013](../decisions/0013-project-memory-model.md#conditional-decision-on-memory-permissions-owner-d18-2026-11-22)):** memory access derives from operator scopes instead of separate `memory:*` grants. Agent-authored status is distinct from owner-approved decisions. Dedicated memory permissions are required before agents can write authoritative ICM, decisions or Git-backed docs.
 - Any agent with grants can list and resume tasks whose scopes it can fully read. Other tasks are hidden: they are counted in `hidden_tasks`, and resuming one answers like a missing task (M6). Writing to one is refused (M4). Read-only reasons list record names only for visible tasks, with counts for the rest.
 - Writing needs a role with `update` (builder; observers get M1) and read access to the task's scopes.
+- Task status and every presented record are labelled `agent_reported` (`status_source`, `authority`). Agents cannot write decision records (D18).
 - Separate memory grants are deferred to token management in the 2B dashboard.
 - There is no delete tool.
 
 **Tell Your Coding Agent** gains a **Resume earlier work** section: fixed text plus two numbers (tasks, tasks not marked done), and the instruction to call `tdflow_task_list` and then `tdflow_handoff_resume` before changing anything. Task ids are chosen by agents, so they are not shown there (review 9): the agent gets them, scope-filtered and ledger-checked, from the tools.
 
-**Main-thread work per call:** one snapshot step (records, bounded walk, fingerprint) and, for writes, one write step. The write step compares the record set by name and text hash without parsing JSON. Parsed records are cached by text hash.
+**Main-thread work per call:**
+- one snapshot step (records, plus a walk bounded at 1000 operators);
+- then the fingerprint **in chunks of 50 operators, one main-thread step each**. Each chunk re-checks the kill switch and the token. The fingerprint therefore spans several frames: it is not atomic, and audited changes after `audit_to` explain anything that lands in between;
+- for writes, one write step. The write step compares the record set by name and text hash without parsing JSON. Parsed records are cached by text hash.
 
-**Measured** on 2025.32440: memory calls ≈ 100–210 ms. A 300-operator fingerprint costs one main-thread step of ≈ 28 ms (one frame hitch per checkpoint or resume of a large scope); small scopes cost ≈ 0.1 ms per operator.
+**Measured** on 2025.32440 (candidate `68e1f1f9…`, [increment 2](../research/2026-11-23-phase-2a-increment-2.md)):
+- memory calls: p50 ≈ 113 ms, max ≈ 230 ms;
+- a checkpoint or resume over a 2000-operator scope (1000 walked, 300 fingerprinted): ≈ 185 ms, with a frame max of **7.1 ms**. Before chunking, a 300-operator fingerprint was one step of ≈ 19–28 ms.
 
 **Not yet:**
 - repo mode, `tdflow-project.json` and the `Projectid` link check;
 - migration between modes;
 - tasks, decisions and ICM record types (`tdflow_memory_get/put`);
 - record archiving;
-- splitting large fingerprints across frames;
-- TouchDesigner restart persistence of records. Records are ordinary DATs saved with the `.toe`, but this is not yet tested.
+- (TouchDesigner restart persistence: **verified in increment 2**.)

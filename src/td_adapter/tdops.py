@@ -26,7 +26,7 @@ DATA_TAG = "tdflowdata"
 REFERENCE_STYLES = {"OP", "COMP", "OBJ", "Object", "PanelCOMP", "TOP", "CHOP", "SOP", "DAT", "MAT", "POP", "File",
                     "Folder", "FileSave", "Python"}
 MAX_TEXT = 200000
-MAX_WALK = 2000                    # operators visited per memory fingerprint (main-thread bound)
+MAX_WALK = 1000                    # operators visited per memory fingerprint (main-thread bound; review 10)
 MAX_LIST = 200
 
 
@@ -584,7 +584,7 @@ class TDAdapter(Adapter):
     def memory_snapshot(self, task_id, scopes, claims, fingerprint, readable):
         self._fresh()
         out = {"status": "", "reason": "", "comp": None, "memory_id": None, "dats": [], "scopes": None,
-               "scope_targets": [], "fingerprint": None, "fp_total": 0, "live": {},
+               "scope_targets": [], "fingerprint": None, "fp_paths": [], "fp_total": 0, "live": {},
                "protected": dict(self.protected), "td_build": str(td.app.build)}
         status, reason, c = self.memory_component()
         out.update(status=status, reason=reason)
@@ -616,7 +616,7 @@ class TDAdapter(Adapter):
         vis = {t.path for t in readable([self._facts(x, "read") for x in ops])}
         shown = sorted((x for x in ops if x.path in vis), key=lambda x: x.path)
         out["fp_total"] = len(shown)
-        out["fingerprint"] = {x.path: self._op_digest(x) for x in shown[:MEM.MAX_FP_OPS]}
+        out["fp_paths"] = [x.path for x in shown[:MEM.MAX_FP_OPS]]     # digested in chunks by the engine (D18)
         claims = list(claims)[:50]
         for cl in claims:
             p = cl.get("path")
@@ -643,6 +643,14 @@ class TDAdapter(Adapter):
                         except Exception:
                             pass
             out["live"][p] = f
+        return out
+
+    def memory_digests(self, paths):
+        out = {}
+        for p in list(paths)[:MEM.MAX_FP_OPS]:
+            o = td.op(p)
+            if o is not None and o.path == p:
+                out[p] = self._op_digest(o)
         return out
 
     def memory_write(self, comp, memory_id, name, text, expect_digest):

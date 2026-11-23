@@ -70,6 +70,10 @@ def run(mode, comp, ext, T, frames, until, checkpoint, R):
         yield from onboard(comp, ext, T, frames, until, checkpoint, R)
     elif mode == "memory":
         yield from memory(comp, ext, T, frames, until, checkpoint, R)
+    elif mode == "memory_persist":
+        yield from memory_persist(comp, ext, T, frames, until, checkpoint, R)
+    elif mode == "memory_restart":
+        yield from memory_restart(comp, ext, T, frames, until, checkpoint, R)
     elif mode == "dogfood":
         yield from dogfood(comp, ext, T, frames, until, checkpoint, R)
     elif mode == "gate_bench":
@@ -543,11 +547,12 @@ def _memory_comps():
 
 def _claim(comp, ext, until):
     """User action: Claim Project Memory, then wait until the claim event is durable."""
-    n0 = len([e for e in (yield from store_op(ext, until, "memory_events")) if e["tool"] == "memory_claim"])
+    def last_claim(evs):                         # the store returns events from the latest claim on
+        return max([e["seq"] for e in evs if e["tool"] == "memory_claim"] or [0])
+    s0 = last_claim((yield from store_op(ext, until, "memory_events")))
     comp.par.Claimprojectmemory.pulse()
     for _ in range(100):
-        evs = yield from store_op(ext, until, "memory_events")
-        if len([e for e in evs if e["tool"] == "memory_claim"]) > n0:
+        if last_claim((yield from store_op(ext, until, "memory_events"))) > s0:
             return True
     return False
 
@@ -618,7 +623,7 @@ def memory(comp, ext, T, frames, until, checkpoint, R):
     extra.destroy()
     # Main-thread cost of a fingerprint over a larger scope (300 operators).
     big = td.op("/project1").create(td.baseCOMP, "load")
-    for i in range(300):
+    for i in range(1999):                          # review 10, F5: the walk at its 2000-operator bound
         big.create(td.noiseTOP, f"n{i}")
     yield frames(10)
     ext.FrameStats(reset=True)
@@ -636,6 +641,94 @@ def memory(comp, ext, T, frames, until, checkpoint, R):
     mem_out = [e for e in evs if e["kind"] == "outcome" and e["tool"] in ("tdflow_task_checkpoint", "tdflow_handoff_create")]
     R["memory_audit"] = {"events": len(evs), "memory_write_outcomes": len(mem_out),
                          "ok": sum(1 for e in mem_out if e["outcome"] == "ok")}
+    R["frame_stats_onframe"] = ext.FrameStats()
+    comp.par.Enablemcp = False
+    yield frames(5)
+
+
+# ---- Phase 2A (D18): TouchDesigner restart persistence, identity verification, restoration ----------------
+def _record_names(mc):
+    return sorted(d.name for d in mc.children if d.name.startswith(("checkpoint_", "handoff_")))
+
+
+def memory_persist(comp, ext, T, frames, until, checkpoint, R):
+    """Launch 1: create memory, two records, SAVE the .toe, then one more record that is never saved."""
+    M.fixtures()
+    td.op("/project1/mem").destroy()
+    yield frames(5)
+    yield from open_and_pair(comp, ext, T, frames, until, checkpoint)
+    yield from enable(comp, until, "persist_enable")
+    comp.par.Createprojectmemory.pulse()
+    yield until(lambda: len(_memory_comps()) == 1, 10, "persist_created")
+    mc = _memory_comps()[0]
+    pid = str(mc.par.Projectid.eval())
+    yield frames(10)
+    yield checkpoint("persist_write", {"memory_id": pid})          # harness: checkpoint r1 + handoff r2
+    saved_names = _record_names(mc)
+    toe = os.path.join(str(td.project.folder), str(td.project.name))
+    before = os.path.getmtime(toe) if os.path.exists(toe) else 0
+    drv = td.op("/project1/test_driver/drive")
+    drv.par.active = False                    # the reopened project must not double-drive the runner
+    td.project.save()                         # the user saves (same file)
+    drv.par.active = True
+    T("persist.saved", os.path.exists(toe) and os.path.getmtime(toe) > before and saved_names ==
+      ["checkpoint_persist_r1", "handoff_persist_r2"], names=saved_names)
+    yield frames(5)
+    yield checkpoint("persist_unsaved", {})                          # harness: checkpoint r3, never saved
+    R["persist"] = {"memory_id": pid, "saved": saved_names, "after_unsaved_write": _record_names(mc), "toe": toe}
+    v = yield from store_op(ext, until, "verify")
+    T("persist.audit_verifies", v["ok"], verify=v)
+    comp.par.Enablemcp = False
+    yield frames(5)
+
+
+def memory_restart(comp, ext, T, frames, until, checkpoint, R):
+    """Launch 2: the saved .toe reopened in a new TouchDesigner process."""
+    T("restart.one_component_from_saved_toe", comp is not None and
+      len(td.op("/").findChildren(tags=["TDflowMCP"])) == 1 and not comp.par.Enablemcp.eval(),
+      enable=comp.par.Enablemcp.eval())
+    mcs = _memory_comps()
+    mc = mcs[0] if len(mcs) == 1 else None
+    names = _record_names(mc) if mc else []
+    pid = str(mc.par.Projectid.eval()) if mc else None
+    T("restart.memory_component_restored", mc is not None and mc.par.Projectid.readOnly
+      and "tdflowProject" in mc.tags, pid=pid)
+    T("restart.saved_records_restored", names == ["checkpoint_persist_r1", "handoff_persist_r2"], names=names)
+    comp.par.Opensetup.pulse()
+    yield until(lambda: ext.worker is not None and ext.worker.ready.is_set(), 20, "restart_open")
+    v = (ext.worker.open_info or {}).get("verify") or {}
+    T("restart.same_project_identity", ext.storage is not None and ext.storage.status == "OK" and v.get("ok") is True,
+      status=ext.storage and ext.storage.status, verify=v)
+    yield from enable(comp, until, "restart_enable")
+    yield frames(10)
+    tell = comp.op("tellagent").text
+    T("restart.tell_resume_section", "## Resume earlier work" in tell and "1 task(s)" in tell, tell=tell[-500:])
+    yield checkpoint("restart_ready", {"memory_id": pid, "records": names})
+    T("restart.claim_durable", (yield from _claim(comp, ext, until)))
+    yield checkpoint("restart_claimed", {})
+    # Identity: the tdflowProject is replaced by one with another Projectid (pasted from elsewhere / edited).
+    p = mc.par.Projectid
+    p.readOnly = False
+    p.val = "tfp_" + "a" * 16
+    p.readOnly = True
+    yield frames(3)
+    yield checkpoint("restart_identity", {})
+    T("restart.claim_identity_durable", (yield from _claim(comp, ext, until)))
+    yield checkpoint("restart_identity_claimed", {})
+    # Review 10, F6: identity alone (no records at all): only the Projectid differs from the claimed one.
+    for d in [x for x in mc.children if x.name.startswith(("checkpoint_", "handoff_"))]:
+        d.destroy()
+    T("restart.claim_empty_durable", (yield from _claim(comp, ext, until)))
+    p.readOnly = False
+    p.val = "tfp_" + "b" * 16
+    p.readOnly = True
+    yield frames(3)
+    yield checkpoint("restart_identity_only", {})
+    evs = yield from store_op(ext, until, "events", limit=5000)
+    v = yield from store_op(ext, until, "verify")
+    T("restart.audit_verifies", v["ok"], verify=v)
+    T("restart.no_unaccounted_executions", len(unmatched_intents(evs)) == 0)
+    R["restart"] = {"records": _record_names(mc), "events": len(evs)}
     R["frame_stats_onframe"] = ext.FrameStats()
     comp.par.Enablemcp = False
     yield frames(5)

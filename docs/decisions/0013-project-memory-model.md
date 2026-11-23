@@ -15,6 +15,19 @@ Adopt [continuity-and-memory.md §1–3](../architecture/continuity-and-memory.m
 6. Runtime security state (tokens, audit, approvals) is never project memory.
 7. This repository's own ICM is the tool's development memory. It is not a host project's memory.
 
+## Conditional decision on memory permissions (owner D18, 2026-11-22)
+Accepted for Phase 2A, conditionally:
+1. **Memory access derives from the agent's role and operator scopes.** No separate `memory:*` token grants are introduced yet.
+   - A task is visible only to agents that can read all of its scopes.
+   - Writing checkpoints and handoffs needs a role with `update` plus read access to the scopes.
+2. **Strict scope filtering stays mandatory.** Paths in records, claims, evidence and read-only reasons are filtered to what the caller can read. Hidden tasks answer like missing ones, and the fingerprint map is never returned.
+3. **Agent-authored task status is distinct from owner-approved decisions.**
+   - A checkpoint's `status` (`in_progress`/`blocked`/`done`), summaries and claims are agent statements, labelled with the agent author and `agent_text_untrusted`.
+   - No memory record written by an agent is, or can be presented as, an owner-approved decision. Agents cannot write decision records in Phase 2A.
+4. **Dedicated memory permissions come first.** Before agents may write authoritative project ICM, decisions, or repository-backed (Git) documentation, a dedicated memory permission (separate grants, owner-issued) must exist and be enforced server-side. The existing approval gates stay in force.
+
+The condition is reopened if a later increment adds any agent-writable record type beyond checkpoints and handoffs.
+
 ## Alternatives
 - Two-way sync between the `.toe` and the repo: rejected, because it is exactly the conflicting-authority problem.
 - Repo-only memory: excludes users without Git.
@@ -28,4 +41,6 @@ Phase 2A:
 - A mismatched `Projectid` blocks linking. **Not yet:** repo mode is a later 2A increment.
 - A migration in both directions preserves records and hashes. **Not yet:** migration is a later 2A increment.
 - Raw operator tools are denied on `tdflowProject` (verified in Phase 1B; re-verified on record DATs in 2A).
+- **Project identity (D18; passed 2026-11-22 in TD):** a `tdflowProject` whose `Projectid` differs from the one this project's audit log created or claimed is detected and read-only until the user claims it. Repo mode's `tdflow-project.json` check is still open.
+- **Restart persistence (D18; passed 2026-11-22 in TD):** saved records, ledger and fingerprints survive a TouchDesigner restart. A record written after the last save is reported missing, and memory is restored by Claim Project Memory.
 - Additional checks in increment 1 (passed): a single authority (two `tdflowProject` components are refused), and edited, missing or foreign records make memory read-only until the user's Claim Project Memory. Fork and rewind detection uses the audit log as ledger instead of a `Datadir` registry ([continuity §7](../architecture/continuity-and-memory.md#7-phase-2a-increment-1-what-is-implemented-2026-11-22)).

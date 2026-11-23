@@ -210,10 +210,15 @@ def ledger(events: Iterable[Mapping], memory_id: str) -> dict:
     expected: Dict[str, str] = {}
     allowed: Dict[str, set] = {}
     claim_seq = 0
+    bound = None                    # project identity: the memory id this audit log last created or claimed
     for ev in sorted(events, key=lambda e: int(e.get("seq") or 0)):
         d = _detail(ev)
+        if ev.get("kind") == "admin" and ev.get("tool") in ("memory_create", "memory_claim") \
+                and isinstance(d.get("memory_id"), str):
+            bound = d["memory_id"]
         if ev.get("kind") == "admin" and ev.get("tool") == "memory_claim":
             if d.get("memory_id") != memory_id:
+                expected, allowed = {}, {}  # the user claimed another memory: nothing of this one is known
                 continue
             recs = d.get("records") if isinstance(d.get("records"), dict) else {}
             expected = {str(k): str(v) for k, v in recs.items()}
@@ -229,7 +234,8 @@ def ledger(events: Iterable[Mapping], memory_id: str) -> dict:
         elif ev.get("kind") == "outcome" and ev.get("outcome") == "ok":
             expected[rid] = sha
             allowed.setdefault(rid, set()).add(sha)
-    return {"expected": expected, "allowed": allowed, "claim_seq": claim_seq}
+    return {"expected": expected, "allowed": allowed, "claim_seq": claim_seq, "memory_id": memory_id,
+            "bound_id": bound, "incomplete": any(ev.get("truncated") for ev in events)}
 
 
 def assess(entries: Sequence[Mapping], led: Mapping) -> dict:
@@ -245,13 +251,17 @@ def assess(entries: Sequence[Mapping], led: Mapping) -> dict:
         else:
             foreign.append(e["name"])
     missing = sorted(n for n in led["expected"] if n not in present)
-    ok = not (foreign or changed or invalid or missing)
+    # Project identity verification: a tdflowProject whose Projectid is not the one this project's audit log
+    # created or claimed (replaced, pasted from another project, or its id edited) is never trusted silently.
+    mismatch = led.get("bound_id") is not None and led.get("bound_id") != led.get("memory_id")
+    incomplete = bool(led.get("incomplete"))     # fail closed if the ledger could not be read whole
+    ok = not (foreign or changed or invalid or missing or mismatch or incomplete)
     status = {e["name"]: "accepted" for e in entries}
     status.update({n: "foreign" for n in foreign})
     status.update({n: "changed_outside" for n in changed})
     status.update({i["record"]: "invalid" for i in invalid})
     return {"state": "ok" if ok else "needs_claim", "ledger": status, "foreign": foreign[:20], "changed_outside": changed[:20],
-            "invalid": invalid[:20], "missing": missing[:20],
+            "invalid": invalid[:20], "missing": missing[:20], "identity_mismatch": mismatch, "ledger_incomplete": incomplete,
             "counts": {"records": len(entries), "foreign": len(foreign), "changed_outside": len(changed),
                        "invalid": len(invalid), "missing": len(missing)}}
 
@@ -259,6 +269,11 @@ def assess(entries: Sequence[Mapping], led: Mapping) -> dict:
 def read_only_reason(a: Mapping) -> str:
     c = a["counts"]
     parts = []
+    if a.get("ledger_incomplete"):
+        parts.append("the audit ledger since the last claim is larger than TDflowMCP reads")
+    if a.get("identity_mismatch"):
+        parts.append("the tdflowProject component is not the one this project's TDflowMCP created or last claimed "
+                     "(its Projectid differs: it was replaced, copied from another project, or edited)")
     if c["missing"]:
         parts.append(f"{c['missing']} record(s) written through TDflowMCP are not in this project (an older save "
                      "was opened, the project was not saved after they were written, or they were deleted)")
@@ -333,6 +348,8 @@ def tasks(entries: Sequence[Mapping]) -> List[dict]:
         out.append({"task_id": tid, "rev": last["rev"], "latest_type": last["type"], "author": last["author"],
                     "updated_at": last["created_at"],
                     "status": (cp or {}).get("body", {}).get("status") if cp else None,
+                    # D18: a task status is an agent's statement, never an owner-approved decision.
+                    "status_source": "agent_reported",
                     "scopes": list(last["body"].get("scopes") or [])})
     return sorted(out, key=lambda t: t["updated_at"], reverse=True)
 
@@ -516,7 +533,7 @@ def present(rec: Mapping, readable: Callable[[str], bool], ledger_status: str = 
     return {"record_id": rec["record_id"], "type": rec["type"], "rev": rec["rev"], "author": rec["author"],
             "created_at": rec["created_at"], "ledger": ledger_status,
             "edited_outside_tdflowmcp": ledger_status == "changed_outside",
-            "agent_text_untrusted": True, "body": b}
+            "agent_text_untrusted": True, "authority": "agent_reported", "body": b}
 
 
 def tell_section(task_rows: Sequence[Mapping]) -> List[str]:

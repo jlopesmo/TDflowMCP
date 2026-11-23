@@ -214,11 +214,12 @@ GATE = {"setup_ready": mt.cp_setup_ready, "pair_approved": mt.cp_pair_approved, 
 PERF = {"setup_ready": mt.cp_setup_ready, "pair_approved": mt.cp_pair_approved, "load": cp_load}
 
 
-def launch(mode, tox, run_dir, proj_dir, env, handlers, expect_kill=False, deadline_s=900):
+def launch(mode, tox, run_dir, proj_dir, env, handlers, expect_kill=False, deadline_s=900, toe=None):
+    """``toe``: reopen an existing (saved) project instead of generating a fresh one (restart tests)."""
     for f in ("td_runner.py", "td_runner_mcp.py", "td_runner_gate.py"):
         shutil.copyfile(os.path.join(HERE, f), os.path.join(run_dir, f))
     H["run_dir"] = run_dir
-    toe = make_toe(proj_dir, "td_tests", boot_script("td_runner", start_frame=20))
+    toe = toe or make_toe(proj_dir, "td_tests", boot_script("td_runner", start_frame=20))
     td = TDProcess(toe, run_dir, env=dict({"TDFLOW_TOX": tox, "TDFLOW_SRC_ROOT": ROOT, "TDFLOW_TEST_MODE": mode}, **env))
     done, deadline = set(), time.time() + deadline_s
     try:
@@ -253,6 +254,9 @@ def launch(mode, tox, run_dir, proj_dir, env, handlers, expect_kill=False, deadl
         T(f"{mode}.exit_code_0", rc == 0 and not td.killed, rc=rc, killed=td.killed)
     T(f"{mode}.no_listener_after_exit", all(not oslisteners.other_listeners(p, 0) for p in base.PORTS))
     T(f"{mode}.other_td_untouched", td.others_untouched())
+    hang = os.path.join(run_dir, "hang_traceback.txt")
+    dump = open(hang, encoding="utf-8", errors="replace").read() if os.path.exists(hang) else ""
+    T(f"{mode}.no_main_thread_stall", not dump.strip(), dump=dump[-4000:])   # watchdog evidence (D18)
     err = os.path.join(run_dir, "boot_error.txt")
     T(f"{mode}.no_boot_errors", not os.path.exists(err), error=open(err).read()[-1500:] if os.path.exists(err) else "")
     res_p = os.path.join(run_dir, "td_results.json")

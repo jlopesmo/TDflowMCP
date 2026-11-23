@@ -68,6 +68,24 @@ class PureTests(unittest.TestCase):
         self.assertEqual(MEM.assess([edited], MEM.ledger(evs + [claim], MID))["state"], "ok")
         self.assertIn("Claim Project Memory", MEM.read_only_reason(MEM.assess([], led)))
 
+    def test_project_identity_is_verified(self):                    # D18: identity verification
+        create = {"seq": 1, "kind": "admin", "tool": "memory_create", "detail": {"memory_id": MID}}
+        self.assertEqual(MEM.assess([], MEM.ledger([create], MID))["state"], "ok")
+        other = "tfp_ffffffffffffffff"
+        a = MEM.assess([], MEM.ledger([create], other))         # a different tdflowProject was put in its place
+        self.assertTrue(a["identity_mismatch"])
+        self.assertEqual(a["state"], "needs_claim")
+        self.assertIn("Projectid differs", MEM.read_only_reason(a))
+        claim = {"seq": 2, "kind": "admin", "tool": "memory_claim", "detail": {"memory_id": other, "records": {}}}
+        self.assertEqual(MEM.assess([], MEM.ledger([create, claim], other))["state"], "ok")
+        back = MEM.assess([], MEM.ledger([create, claim], MID))   # swapping the old one back needs a claim again
+        self.assertTrue(back["identity_mismatch"])
+
+    def test_truncated_ledger_fails_closed(self):                     # review 10, F3
+        create = {"seq": 1, "kind": "admin", "tool": "memory_create", "detail": {"memory_id": MID}, "truncated": True}
+        a = MEM.assess([], MEM.ledger([create], MID))
+        self.assertEqual((a["state"], a["ledger_incomplete"]), ("needs_claim", True))
+
     def test_intent_alone_accounts_for_a_record_being_written(self):
         r1 = MEM.new_record("checkpoint", "t", [], {}, "a", 0)
         e1 = entry(r1)
@@ -126,6 +144,8 @@ class PureTests(unittest.TestCase):
         c = out["body"]["claims"][0]
         self.assertEqual(([e["path"] for e in c["evidence"]], c["evidence_withheld"]), (["/p/ok"], 1))
         self.assertEqual(out["ledger"], "foreign")
+        self.assertEqual(out["authority"], "agent_reported")             # D18: never an owner decision
+        self.assertEqual(MEM.tasks([entry(rec)])[0]["status_source"], "agent_reported")
 
     def test_fingerprint_diff_and_explanations(self):
         old = {"/p/fx/a": "1", "/p/fx/b": "2", "/p/fx/c": "3", "/p/fx/k": "4", "/p/fx/k/x": "5"}
@@ -405,6 +425,50 @@ class EngineMemoryTests(unittest.TestCase):
         err, out = self.cp()
         self.assertEqual(out["code"], "DENIED")
         self.assertEqual(self.ad.writes, 0)
+
+    def test_fingerprint_is_computed_in_chunks(self):                # D18: large-scope frame hitch
+        self.ad.fp = {f"/project1/fx/n{i:03d}": f"d{i}" for i in range(120)}
+        orig = self.ad.memory_snapshot
+
+        def snapshot(*a, **kw):
+            out = orig(*a, **kw)
+            if out.get("fingerprint"):
+                out["fp_paths"], out["fingerprint"] = sorted(out["fingerprint"]), None
+            return out
+        self.ad.memory_snapshot = snapshot
+        self.ad.memory_digests = lambda paths: {p: self.ad.fp[p] for p in paths}
+        steps = []
+        self.eng.main = lambda fn: (steps.append(1), fn())[1]
+        err, out = self.cp()
+        self.assertFalse(err, out)
+        self.assertEqual(out["verified_facts"]["fingerprint"]["count"], 120)
+        self.assertEqual(len(steps), 1 + 3 + 1)                     # plan, 3 chunks of <= 50, write
+        rec = json.loads(self.ad.dats["checkpoint_blur_r1"])
+        self.assertEqual(rec["body"]["facts"]["fingerprint"]["ops"], self.ad.fp)
+
+    def test_replaced_memory_component_is_read_only(self):
+        self.store.append("admin", tool="memory_create", outcome="ok", detail={"memory_id": "tfp_ffffffffffffffff"})
+        err, out = self.cp()                                         # the fake's MID is not the created one
+        self.assertEqual(out["code"], "MEMORY_READ_ONLY")
+        _, lst = self.call(self.A, "tdflow_task_list", {})
+        self.assertTrue(lst["memory"]["identity_mismatch"])
+
+    def test_ledger_window_starts_at_latest_claim_and_keeps_identity(self):   # review 10, F3
+        self.store.append("admin", tool="memory_create", outcome="ok", detail={"memory_id": MID})
+        for _ in range(3):
+            self.cp(rev=len([n for n in self.ad.dats]))
+        evs = self.store.memory_events()
+        self.assertEqual(evs[0]["tool"], "memory_create")              # binding kept with no claim yet
+        self.store.append("admin", tool="memory_claim", outcome="accepted", detail={"memory_id": MID, "records": {}})
+        evs = self.store.memory_events()
+        self.assertEqual([e["tool"] for e in evs], ["memory_claim"])   # older events no longer matter
+        few = self.store.memory_events(limit=1)
+        self.assertTrue(few[-1].get("truncated") is None)
+        self.cp(rev=3)                                                 # rejected: records unknown after empty claim
+        self.store.append("admin", tool="memory_claim", outcome="accepted", detail={
+            "memory_id": MID, "records": {n: MEM.text_sha(t) for n, t in self.ad.dats.items()}})
+        self.assertFalse(self.cp(rev=3)[0])
+        self.assertTrue(self.store.memory_events(limit=1)[-1].get("truncated"))
 
     def test_scopes_required_for_new_task(self):
         err, out = self.call(self.A, "tdflow_handoff_create", {"task_id": "n", "summary": "s", "based_on_rev": 0})

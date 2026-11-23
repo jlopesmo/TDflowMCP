@@ -57,8 +57,16 @@
   - **Verified in TD** on candidate `d2a9e077…`:
     - memory suite 14/14 + 55/55 (ADR-0012 gates and the ADR-0013 stale-write gate);
     - a real two-agent Claude Code handoff with an out-of-band edit detected (7/7 + 32/32).
-  - **Access deviation for owner review:** memory access derives from operator scopes and role, not from separate `memory:*` grants (security model §11).
-  - **Not verified:** records surviving a TouchDesigner restart; repo mode.
+  - **Memory access** derives from operator scopes and role, **conditionally accepted (owner D18)**. Dedicated memory permissions are required before agents can write authoritative ICM, decisions or Git-backed docs.
+  - **Not verified:** repo mode.
+- **Phase 2A increment 2** ([record](../research/2026-11-23-phase-2a-increment-2.md), owner D18):
+  - **Restart persistence verified in TD:** after a real restart from the saved `.toe`, records, `Projectid`, storage identity, audit chain and fingerprints are intact, and MCP stays off.
+  - **Restoration:** a record written after the last save is reported missing (memory read-only) and is recovered through Claim Project Memory.
+  - **Project identity verification:** a `tdflowProject` with another `Projectid` is read-only until claimed; this also holds with zero records. A truncated ledger fails closed.
+  - **Frame hitch:** chunked fingerprints and a 1000-operator walk bound; frame max 7.1 ms on a 2000-operator scope.
+  - Status is labelled `agent_reported`.
+  - **Hang:** a test-only stall watchdog runs in every in-TD suite. Two more two-agent dogfood runs and all suites showed no stall. The original hang is unexplained and unreproduced.
+  - Verified on candidate `68e1f1f9…`: memory + restart 26/26 + 99/99; 1A 49/49 + 69/69; 1B 43/43 + 115/115; gate 46/46 + 47/47. [Review 10](../research/2026-11-23-phase-2a-increment-2.md#independent-review-10): no High findings, all fixed.
 
 ## Not implemented (nothing below exists)
 - **Withheld by design:**
@@ -90,11 +98,10 @@
 - `fe46568`: owner D17 (ADR-0014 Conditionally Accepted, stage 1; audit performance closed) and **Phase 2A increment 1** (project memory, checkpoints, verified handoffs), review 9. Pushed to `origin/dev` and observed with `git ls-remote` (`refs/heads/dev` = `fe46568…`, `refs/heads/main` = `066dbd0…`, so `main` is unchanged). Verified on candidate `d2a9e077…` built from the pre-commit tree; the commit changes only tests and docs relative to that build. No package was built. This record was added by the follow-up commit. CI: **not observed**.
 
 ## Next (owner decisions first)
-1. **Owner review:** the memory-access deviation (operator scopes + role instead of `memory:*` grants).
-2. **Phase 2A increment 2:**
-   - repo mode with `tdflow-project.json`, the `Projectid` link check and migration (the remaining ADR-0013 gates);
-   - a TD restart persistence test;
+1. **Phase 2A increment 3:**
+   - repo mode with `tdflow-project.json`, the repository `Projectid` link check and migration (the remaining ADR-0013 gates);
    - the dogfood friction: default operator placement, handoff status, per-parameter drift.
+2. **Hang:** keep the stall watchdog running in every suite; analyse any dump.
 3. **ADR-0014 stage 1** (approved, D17): isolated candidate build/test bound to the `.tox` hash, plus a manual promotion recorded by the new A. Not started.
 4. **B3:** an observed CI run.
 5. **Remaining review-6 follow-ups:** bind/export propagation; pairing DoS mitigation. Checkpoints are now anchored in private storage outside the project.

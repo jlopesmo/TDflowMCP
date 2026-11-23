@@ -90,6 +90,11 @@ class Adapter:
         "td_build"}. ``scopes=None`` takes the task's latest recorded scopes."""  # pragma: no cover
         raise NotImplementedError
 
+    def memory_digests(self, paths: Sequence[str]) -> Dict[str, str]:
+        """Phase 2A: per-operator fingerprint digests for exactly these paths (existing operators only). Called in
+        small chunks, one main-thread step each, so a large scope never stalls one frame."""  # pragma: no cover
+        raise NotImplementedError
+
     def memory_write(self, comp: str, memory_id: str, name: str, text: str, expect_digest: str) -> dict:
         """Phase 2A: add one record DAT, only if the record set is still exactly ``expect_digest``
         (else ToolFailure MEMORY_CONFLICT)."""  # pragma: no cover - interface
@@ -428,6 +433,25 @@ class Engine:
             return self._deny(base, d["code"], d["rule"], d["reason"], d.get("target"))
         snap = p["snap"]
         base.update(targets=snap["targets"][:50] or None, policy_version=snap["policy_version"])
+        if snap.get("fingerprint") is None and snap.get("fp_paths"):
+            # Large-scope frame hitch (D18): digests in chunks, one main-thread step each.
+            fp, paths = {}, list(snap["fp_paths"])
+            for i in range(0, len(paths), FP_CHUNK):
+                chunk = paths[i:i + FP_CHUNK]
+                def step(c=chunk):
+                    if self.suspended():                       # review 10, F4: every chunk re-checks
+                        raise ToolFailure("SUSPENDED", "All agents are suspended.")
+                    cur = self.identity.agent_for_token(base["token_id"])
+                    if cur is None or cur.id != agent.id:
+                        raise ToolFailure("DENIED", "The token was revoked.")
+                    return self.adapter.memory_digests(c)
+                try:
+                    fp.update(m(step))
+                except ToolFailure as f:
+                    return self._deny(base, f.code, "K1" if f.code == "SUSPENDED" else "A0", f.message, None)
+                except (MainNotRun, MainUnknown) as e:
+                    return self._deny(base, _main_code(e), "M0", "TouchDesigner did not process the request", None)
+            snap["fingerprint"] = fp
         entries = MEM.read_records(snap["dats"])
         state = MEM.assess(entries, MEM.ledger(events, snap["memory_id"]))
         prot = snap.get("protected") or {}
@@ -456,6 +480,7 @@ class Engine:
         memory_info = {"state": state["state"], "component": snap["comp"], "records": state["counts"]["records"]}
         if state["state"] != "ok":
             memory_info.update(counts=state["counts"], read_only_reason=MEM.read_only_reason(state),
+                               identity_mismatch=state["identity_mismatch"],
                                foreign=[n for n in state["foreign"] if shown_name(n)],
                                changed_outside=[n for n in state["changed_outside"] if shown_name(n)],
                                missing=[n for n in state["missing"] if shown_name(n)],
@@ -619,6 +644,7 @@ class Engine:
 
 
 MUTATION_LIMIT = 5000                       # audited mutations read per evidence window
+FP_CHUNK = 50                               # operators fingerprinted per main-thread step
 
 
 def _main_code(e) -> str:

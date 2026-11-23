@@ -230,7 +230,7 @@ TD steps of all calls are serialized on TD's main thread (audit writes on the au
 ## 11. Project memory and continuity safety
 
 - Exactly one authoritative memory home ([ADR-0013](../decisions/0013-project-memory-model.md)). Writes carry `based_on_rev`, and stale writes return `MEMORY_CONFLICT`. A `Projectid` mismatch blocks linking.
-- **Access, as implemented in 2A increment 1** (a deviation from the earlier proposal of separate `memory:<record-type>` pseudo-scopes, recorded for owner review): memory access derives from operator scopes and role.
+- **Access, as implemented in 2A** (**conditionally accepted by the owner, D18**, [ADR-0013](../decisions/0013-project-memory-model.md#conditional-decision-on-memory-permissions-owner-d18-2026-11-22); the earlier proposal of separate `memory:<record-type>` pseudo-scopes is deferred): memory access derives from operator scopes and role. **Before agents may write authoritative project ICM, decisions or Git-backed docs, dedicated, owner-issued memory permissions must exist and be enforced.** Agent-authored task status is never an owner-approved decision.
   - A task is visible only to agents that can read all of its scopes. Resuming a hidden task answers like a missing one (M6), and writing to it is refused (M4). Paths inside records (changes, claim paths and claim evidence) are filtered again to what the caller can read, and the fingerprint map is never returned.
   - The token and the scope grants are re-checked on the main thread right before a record is written.
   - Writing needs a role with `update` (M1) and read access to the scopes.
@@ -241,6 +241,7 @@ TD steps of all calls are serialized on TD's main thread (audit writes on the au
   - The user's **Claim Project Memory** is an audited event listing the accepted hashes.
   - Records that are edited outside TDflowMCP, missing (an older save, or never saved), foreign (copied from another project or component) or invalid make memory read-only for agents (`MEMORY_READ_ONLY`, M5) until the user claims. More than one `tdflowProject` under the root is refused.
   - This replaces the proposed `Datadir` authority registry ([continuity §7](continuity-and-memory.md#7-phase-2a-increment-1-what-is-implemented-2026-11-22)).
+  - **Project identity:** the audit log binds the project to one memory `Projectid` (latest create or claim). Another `Projectid` means read-only until the user claims it.
 - **Live-state claims** (`exists`, `absent`, `value`) are checked only on operators the caller can read; others are `unverified` with no detail. Only constant, non-read-only parameter values are compared (nothing is evaluated).
 - Memory and handoffs never contain tokens, raw audit arguments or user-profile paths. They reference audit by sequence number and hash. **Implemented:** token-shaped strings in agent text are replaced with `<redacted>` before a record is stored.
 - Agent-authored content is returned labelled `author: agent:<id>` and is never presented as an instruction from the user or the server. Only server-derived facts are labelled `verified`.

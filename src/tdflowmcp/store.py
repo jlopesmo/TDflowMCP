@@ -350,12 +350,27 @@ class Store:
         return int(row[0] or 0)
 
     def memory_events(self, limit: int = 20000) -> List[Dict[str, Any]]:
-        """Memory writes (intents, outcomes) and the user's memory claims, oldest first."""
+        """Memory writes (intents, outcomes), creations and the user's memory claims, oldest first, from the
+        latest claim on (review 10, F3). A claim resets the ledger, so nothing older matters. The latest create or
+        claim (the project's memory identity) is therefore always included, however many events follow it. With
+        at most MAX_RECORDS records, ``limit`` is not reached in normal use; if it is, ``truncated`` is set on the
+        last row and the caller treats memory as needing a claim."""
         cols = ["seq", *EVENT_FIELDS]
-        q = (f"SELECT {', '.join(cols)} FROM events WHERE (kind IN ('intent','outcome') AND tool IN "
-             "('tdflow_task_checkpoint','tdflow_handoff_create')) OR (kind='admin' AND tool='memory_claim') "
-             "ORDER BY seq DESC LIMIT ?")
-        return [dict(zip(cols, r)) for r in reversed(self._c().execute(q, (int(limit),)).fetchall())]
+        c = self._c()
+        since = c.execute("SELECT COALESCE(MAX(seq), 0) FROM events WHERE kind='admin' AND tool='memory_claim'").fetchone()[0]
+        q = (f"SELECT {', '.join(cols)} FROM events WHERE seq >= ? AND ((kind IN ('intent','outcome') AND tool IN "
+             "('tdflow_task_checkpoint','tdflow_handoff_create')) OR (kind='admin' AND tool IN "
+             "('memory_claim','memory_create'))) ORDER BY seq ASC LIMIT ?")
+        rows = [dict(zip(cols, r)) for r in c.execute(q, (int(since), int(limit) + 1)).fetchall()]
+        if len(rows) > limit:
+            rows = rows[:limit]
+            rows[-1] = dict(rows[-1], truncated=True)
+        if since == 0:                         # no claim yet: the identity is the latest create, wherever it is
+            b = c.execute(f"SELECT {', '.join(cols)} FROM events WHERE kind='admin' AND tool='memory_create' "
+                          "ORDER BY seq DESC LIMIT 1").fetchone()
+            if b is not None and not any(r["seq"] == b[0] for r in rows):
+                rows.insert(0, dict(zip(cols, b)))
+        return rows
 
     def mutations_between(self, start_seq: int, end_seq: int, limit: int = 5000) -> List[Dict[str, Any]]:
         """Successful outcomes with start_seq < seq <= end_seq (the newest ``limit``), oldest first."""

@@ -73,6 +73,8 @@ def sha_text(text):
 
 
 def load():
+    if MODE == "memory_restart":                 # the reopened saved .toe already contains the component
+        return td.op("/project1/TDflowMCP")
     comp = td.op("/project1").loadTox(TOX)
     return comp
 
@@ -392,6 +394,10 @@ def on_frame(me, frame):
     if S.get("driver"):
         return
     S["driver"] = True
+    old = td.op("/project1/test_driver/drive")
+    if old is not None:                          # a saved test project reopened: reuse its driver
+        old.par.active = True
+        return
     d = td.op("/project1").create(td.baseCOMP, "test_driver")
     tm = d.create(td.baseCOMP, "local").create(td.timeCOMP, "time")
     tm.par.independent = True
@@ -402,9 +408,29 @@ def on_frame(me, frame):
     e.par.active = True
 
 
+HANG = {"fh": None, "n": 0}
+
+
+def _watchdog():
+    """Test-only stall diagnostics (D18, unexplained hang): faulthandler's C-level watchdog needs no GIL, so if
+    TouchDesigner's main thread stops ticking for 10 s, every Python thread's stack lands in hang_traceback.txt."""
+    now = time.monotonic()
+    if now - HANG.get("armed", 0.0) < 1.0:       # review 10, F7: re-arm on wall time, not frame count
+        return
+    HANG["armed"] = now
+    try:
+        import faulthandler
+        if HANG["fh"] is None:
+            HANG["fh"] = open(os.path.join(D, "hang_traceback.txt"), "w")
+        faulthandler.dump_traceback_later(10, repeat=False, file=HANG["fh"], exit=False)
+    except Exception:
+        pass
+
+
 def drive():
     if S["done"]:
         return
+    _watchdog()
     bj = S.get("bench_jobs")                  # gate_bench: run queued main-thread handoffs once per frame
     while bj is not None and not bj.empty():
         bj.get_nowait()()
@@ -477,4 +503,8 @@ def finish():
     R["total"] = len(R["tests"])
     R["td_build"] = td.app.build
     write("td_results.json", R)
+    try:
+        __import__("faulthandler").cancel_dump_traceback_later()
+    except Exception:
+        pass
     td.run("project.quit(force=True)", delayFrames=10)

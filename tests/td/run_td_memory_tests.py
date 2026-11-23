@@ -170,10 +170,87 @@ def cp_load(data, pid):
     ms = (time.perf_counter() - t0) * 1000
     fp = (r.get("verified_facts") or {}).get("fingerprint") or {}
     T("memory.large_scope_checkpoint", mt.ok(r) and fp.get("count") == 300 and fp.get("truncated") is True, fp=fp)
+    STATE["load_ops"] = 2000
     t1 = time.perf_counter()
     rr = call("D", "tdflow_handoff_resume", {"task_id": "load"})
-    STATE["load_ms"] = {"checkpoint_300_ops": round(ms, 1), "resume_300_ops": round((time.perf_counter() - t1) * 1000, 1)}
+    STATE["load_ms"] = {"scope_ops": 2000, "fingerprinted": 300, "checkpoint": round(ms, 1),
+                        "resume": round((time.perf_counter() - t1) * 1000, 1)}
     T("memory.large_scope_resume", mt.ok(rr) and rr["fingerprint"]["changed_outside_tdflowmcp"] is False, fp=rr.get("fingerprint"))
+
+
+# ---- D18: restart persistence, identity verification, restoration (two launches on one saved .toe) -----------
+def _cp(task, rev, status="in_progress"):
+    return call("B", "tdflow_task_checkpoint", {"task_id": "persist", "title": "Persist", "status": status,
+                                                "scopes": [FX], "based_on_rev": rev})
+
+
+def cp_persist_write(data, pid):
+    STATE["persist_memory_id"] = data["memory_id"]
+    r1 = _cp("persist", 0)
+    s = call("B", "tdflow_set_parameters", {"path": FX + "/level1", "values": {"opacity": 0.4}})
+    r2 = call("B", "tdflow_handoff_create", {"task_id": "persist", "summary": "Before restart.", "based_on_rev": 1,
+                                             "claims": [{"kind": "changed", "path": FX + "/level1"},
+                                                        {"kind": "value", "path": FX + "/level1", "param": "opacity",
+                                                         "value": 0.4}]})
+    T("persist.records_written", mt.ok(r1) and mt.ok(s) and mt.ok(r2) and r2.get("rev") == 2
+      and r2["claim_summary"]["verified"] == 2, r1=r1, r2=r2)
+
+
+def cp_persist_unsaved(data, pid):
+    r = _cp("persist", 2)
+    T("persist.unsaved_record_written", mt.ok(r) and r.get("rev") == 3, r=r)
+
+
+def cp_restart_ready(data, pid):
+    T("restart.same_memory_id", data.get("memory_id") == STATE.get("persist_memory_id"), got=data.get("memory_id"))
+    lst = call("B", "tdflow_task_list")
+    mem = lst.get("memory") or {}
+    T("restart.unsaved_record_reported_missing", mt.ok(lst) and mem.get("state") == "needs_claim"
+      and mem.get("missing") == ["checkpoint_persist_r3"] and not mem.get("identity_mismatch"), memory=mem)
+    r = call("A", "tdflow_handoff_resume", {"task_id": "persist"})
+    fp = r.get("fingerprint") or {}
+    T("restart.resume_after_restart", mt.ok(r) and r.get("latest_rev") == 2 and (r.get("handoff") or {}).get("ledger") ==
+      "accepted" and r["handoff"]["body"]["claim_summary"]["verified"] == 2, r=r)
+    T("restart.FINGERPRINT_STABLE_ACROSS_RESTART", fp.get("reliable") is True and fp.get("changed_outside_tdflowmcp")
+      is False and fp.get("then") == fp.get("now"), fp=fp)
+    w = _cp("persist", 2)
+    T("restart.read_only_until_claim", mt.denied(w, ("MEMORY_READ_ONLY",)) and "not in this project" in w.get("message", ""),
+      r=w)
+
+
+def cp_restart_claimed(data, pid):
+    w = _cp("persist", 2)
+    lst = call("B", "tdflow_task_list")
+    T("restart.RESTORED_AND_WRITABLE_AFTER_CLAIM", mt.ok(w) and w.get("rev") == 3 and (lst.get("memory") or {}).get("state")
+      == "ok", r=w, memory=lst.get("memory"))
+
+
+def cp_restart_identity(data, pid):
+    lst = call("B", "tdflow_task_list")
+    mem = lst.get("memory") or {}
+    T("restart.IDENTITY_MISMATCH_DETECTED", mt.ok(lst) and mem.get("identity_mismatch") is True and "Projectid differs"
+      in mem.get("read_only_reason", ""), memory=mem)
+    T("restart.identity_mismatch_read_only", mt.denied(_cp("persist", 3), ("MEMORY_READ_ONLY",)))
+
+
+def cp_restart_identity_claimed(data, pid):
+    w = _cp("persist", 3, "done")
+    T("restart.writable_after_identity_claim", mt.ok(w) and w.get("rev") == 4, r=w)
+
+
+def cp_restart_identity_only(data, pid):
+    lst = call("B", "tdflow_task_list")
+    mem = lst.get("memory") or {}
+    c = mem.get("counts") or {}
+    T("restart.IDENTITY_ALONE_DETECTED", mt.ok(lst) and mem.get("identity_mismatch") is True and c.get("records") == 0
+      and not any(c.get(k) for k in ("foreign", "missing", "changed_outside", "invalid")), memory=mem)
+
+
+PERSIST = {"setup_ready": mt.cp_setup_ready, "pair_approved": mt.cp_pair_approved, "persist_write": cp_persist_write,
+           "persist_unsaved": cp_persist_unsaved}
+RESTART = {"restart_ready": cp_restart_ready, "restart_claimed": cp_restart_claimed,
+           "restart_identity": cp_restart_identity, "restart_identity_claimed": cp_restart_identity_claimed,
+           "restart_identity_only": cp_restart_identity_only}
 
 
 HANDLERS = {"setup_ready": mt.cp_setup_ready, "pair_approved": mt.cp_pair_approved,
@@ -197,11 +274,28 @@ def main():
     res = g.launch("memory", os.path.abspath(a.tox), run_dir, proj,
                    {"TDFLOW_PRIVATE_ROOT": os.path.join(top, "private")}, HANDLERS, deadline_s=600)
     shutil.rmtree(proj, ignore_errors=True)
+    # D18: two launches on one project folder: save, restart from the saved .toe, restore.
+    pproj = tempfile.mkdtemp(prefix="tdflow-persist-project-")
+    penv = {"TDFLOW_PRIVATE_ROOT": os.path.join(top, "private-persist")}
+    mt.STATE["cookies"], mt.STATE["csrf"] = {}, None
+    for name in ("persist", "restart"):
+        os.makedirs(os.path.join(top, name))
+    r1 = g.launch("memory_persist", os.path.abspath(a.tox), os.path.join(top, "persist"), pproj, penv, PERSIST,
+                  deadline_s=400)
+    toe = (r1.get("persist") or {}).get("toe")
+    T("persist.saved_toe_exists", bool(toe) and os.path.exists(toe), toe=bool(toe))
+    r2 = g.launch("memory_restart", os.path.abspath(a.tox), os.path.join(top, "restart"), pproj, penv, RESTART,
+                  deadline_s=400, toe=toe) if toe and os.path.exists(toe) else {}
+    shutil.rmtree(pproj, ignore_errors=True)
+    res = dict(res, tests=(res.get("tests") or []) + (r1.get("tests") or []) + (r2.get("tests") or []),
+               errors=(res.get("errors") or []) + (r1.get("errors") or []) + (r2.get("errors") or []),
+               persist=r1.get("persist"), restart=r2.get("restart"))
     secrets = [t.split(".", 1)[1] for t in TOKENS.values() if t]
     T("memory.no_token_in_answers", not any(s in raw for s in secrets for raw in STATE.get("raw", [])))
     in_td = res.get("tests") or []
     lat = sorted(x["ms"] for x in STATE["answers"] if x["tool"].startswith(("tdflow_task", "tdflow_handoff")))
     out = {"td_build": res.get("td_build"), "memory_audit": res.get("memory_audit"),
+           "persist": res.get("persist"), "restart": res.get("restart"),
            "onframe": res.get("frame_stats_onframe"), "onframe_during_load": res.get("memory_load_onframe"),
            "load_ms": STATE.get("load_ms"),
            "memory_call_ms": {"n": len(lat), "p50": lat[len(lat) // 2] if lat else None, "max": lat[-1] if lat else None},
