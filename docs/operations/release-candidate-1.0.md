@@ -55,7 +55,7 @@ No other compatibility is claimed.
 - [x] Unit tests, doc checker and secret scan pass on the candidate commit.
 - [x] `.tox` built reproducibly from source (two builds, equal source digest).
 - [x] All in-TD suites (1A, 1B, gate, memory, onboarding) pass on 2025.32440.
-- [ ] The package is built from a clean worktree of the candidate commit, and the suites pass on the **packaged** `.tox` (see the validation index entry for the candidate).
+- [x] The package is built from a clean worktree of the candidate commit (`348360a`, `dist/TDflowMCP-1.0.0rc1-348360a56b`, tox SHA-256 `394e10439ed3f3cf…`), and all five suites pass on the **packaged** `.tox` (validation index).
 - [x] Independent reviews for every security-sensitive increment (reviews 14–17 in this phase), findings addressed.
 - [x] Real coding-agent dogfooding of the new tools (round 3 in the validation index; its one friction point fixed).
 - [ ] **CI evidence:** no GitHub Actions run has been observed (B3). Release procedure step 1 requires observed CI.

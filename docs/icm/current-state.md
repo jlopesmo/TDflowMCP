@@ -146,8 +146,8 @@
 
 ## Next (owner direction D20: finish TDflowMCP)
 1. **Phase 3 and 4:** done on `dev` (see above), except host-project source-first and file snapshots outside the project.
-2. **1.0 release candidate** `1.0.0rc1`: [checklist](../operations/release-candidate-1.0.md), awaiting the owner's acceptance. Dogfood round 3 (Phase 3/4 tools) passed.
+2. **1.0 release candidate** `1.0.0rc1` (commit `348360a`, package `TDflowMCP-1.0.0rc1-348360a56b`, all suites pass on the packaged `.tox`): [checklist](../operations/release-candidate-1.0.md), awaiting the owner's acceptance. Dogfood round 3 (Phase 3/4 tools) passed.
 3. **ADR-0014 stage 1** (approved, D17), if it does not delay completion: isolated candidate build/test bound to the `.tox` hash, plus a manual promotion. Not started.
-4. **Realistic coding-agent dogfooding** of the new capabilities, then the **1.0 release candidate** for the owner's acceptance (not a release).
+4. **Owner:** accept or reject the 1.0 release candidate; the release steps after that (PR `dev → main`, tag, clean build from the tag, publication) are the owner's.
 5. **Owner question:** whether to add agent-writable task, decision or ICM records (reopens D18).
 6. **B3:** an observed CI run. **Remaining review-6 follow-ups:** bind/export propagation; pairing DoS mitigation.
