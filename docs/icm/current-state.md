@@ -1,6 +1,6 @@
 # TDflowMCP — Current state
 
-**Observed 2026-11-22, branch `dev`. Phase 1C (agent onboarding) is complete in the development build, together with the ADR-0006 audit worker and project-local storage** (owner D13). **Phase 2A increment 1 (project memory, checkpoints, verified handoffs) is implemented and verified in TD** (owner D17). A live Claude Code session connected using only the generated instructions, and the packaged component passes its in-TouchDesigner acceptance suites on **2025.32440**. Phases 1A and 1B are re-verified on the same build. This file records evidence only. Plans live in the [roadmap](roadmap.md).
+**Observed 2026-11-23 (re-verified after a PC restart), branch `dev`. Phase 1C (agent onboarding) is complete in the development build, together with the ADR-0006 audit worker and project-local storage** (owner D13). **Phase 2A increment 1 (project memory, checkpoints, verified handoffs) is implemented and verified in TD** (owner D17). A live Claude Code session connected using only the generated instructions, and the packaged component passes its in-TouchDesigner acceptance suites on **2025.32440**. Phases 1A and 1B are re-verified on the same build. This file records evidence only. Plans live in the [roadmap](roadmap.md).
 
 ## Verified
 - **Repository:** private `jlopesmo/TDflowMCP`. `main` = `066dbd0` (Phase 0 foundation), **unchanged**. Development continues on `dev`.
@@ -40,10 +40,11 @@
   - Added: a `names` filter for `get_parameters`, and `inputs` and `x`/`y` per `list_operators` row.
   - Friction and missing capabilities are recorded (network summary tool, grouped undo, denial wording).
   - Verified on candidate builds from the uncommitted tree (see the [validation index](validation-index.md)). On `a414f3c9…`: 1A, 1B (113 checks), gate, onboarding and the full five-task dogfood pass 2, where every boundary held. On `1625ec54…` (never-cooked change): 1B 115/115 and dogfood `inspect` pass 3. **On the review-8 candidate `2dac3a27…`:** every suite passes, including dogfood pass 4 under full agent isolation ([review 8](../research/2026-11-22-dogfood-review.md)).
-- **Tests and checks:**
-  - 231 unit tests on CPython 3.11.8 (2 skipped) and 248 on TD Python 3.11.10 (1 skipped).
-  - Gate suite 49/49 + 98/98; onboarding 5/5 + 45/45.
+- **Tests and checks** (latest observed run: 2026-11-23, clean build `e79ed3fe…` of `c888d00`, after the PC restart; [recovery record](../research/2026-11-23-post-restart-recovery.md)):
+  - 280 tests (`discover -s tests -t .`) on CPython 3.11.8 (2 skipped) and on TD Python 3.11.10 (1 skipped).
+  - 1A 49/49 + 69/69; 1B 43/43 + 115/115; gate (gate, crash, restart) 46/46 + 47/47; memory + restart 26/26 + 99/99; onboarding live 5/5 + 47/47.
   - Doc checker and secret scan pass.
+  - The clean rebuild has the same source digest as the candidate tested before the restart, so the committed source is what was tested.
   - **Packaged component** (`2a7e72f`, tox `9a063083…`): 1A, 1B, gate and live onboarding suites all pass ([validation index](validation-index.md)).
 
 - **Phase 2A increment 1: project memory** ([record](../research/2026-11-22-phase-2a-memory.md), [continuity §7](../architecture/continuity-and-memory.md#7-phase-2a-increment-1-what-is-implemented-2026-11-22), [review 9](../research/2026-11-22-phase-2a-review.md)):
@@ -98,7 +99,9 @@
 - `fe46568`: owner D17 (ADR-0014 Conditionally Accepted, stage 1; audit performance closed) and **Phase 2A increment 1** (project memory, checkpoints, verified handoffs), review 9. Pushed to `origin/dev` and observed with `git ls-remote` (`refs/heads/dev` = `fe46568…`, `refs/heads/main` = `066dbd0…`, so `main` is unchanged). Verified on candidate `d2a9e077…` built from the pre-commit tree; the commit changes only tests and docs relative to that build. No package was built. This record was added by the follow-up commit. CI: **not observed**.
 - `930154b`: owner D18 (memory permissions, conditional, ADR-0013) and **Phase 2A increment 2** (restart persistence, project identity, restoration, chunked fingerprints, stall watchdog), review 10. Pushed to `origin/dev` and observed with `git ls-remote` (`refs/heads/dev` = `930154b…`, `refs/heads/main` = `066dbd0…`, so `main` is unchanged). Verified on candidate `68e1f1f9…` built from the pre-commit tree; the commit adds only docs and test-record changes relative to it. No package was built. This record was added by the follow-up commit. CI: **not observed**.
 
-## Next (owner decisions first)
+- `c888d00`: push evidence for `930154b`. **Post-restart recovery (2026-11-23, owner D19):** nothing was lost; the tree was clean and level with `origin/dev`; a clean build of this commit (tox `e79ed3fe…`) passes every baseline suite ([record](../research/2026-11-23-post-restart-recovery.md)).
+
+## Next (owner direction D19: continue in dependency order)
 1. **Phase 2A increment 3:**
    - repo mode with `tdflow-project.json`, the repository `Projectid` link check and migration (the remaining ADR-0013 gates);
    - the dogfood friction: default operator placement, handoff status, per-parameter drift.
@@ -106,3 +109,4 @@
 3. **ADR-0014 stage 1** (approved, D17): isolated candidate build/test bound to the `.tox` hash, plus a manual promotion recorded by the new A. Not started.
 4. **B3:** an observed CI run.
 5. **Remaining review-6 follow-ups:** bind/export propagation; pairing DoS mitigation. Checkpoints are now anchored in private storage outside the project.
+6. **Then, in order (D19):** the Phase 2B governance dashboard; Phase 3 (experiments, snapshots, Code Mode); Phase 4 extensions; further dogfooding; the 1.0 release candidate. None of these exists yet.

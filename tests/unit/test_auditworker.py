@@ -126,6 +126,9 @@ class WorkerTests(Base):
         self.assertTrue(v["ok"])
         self.assertEqual(v["events"], 4)
         w3.close().result(5)
+        # The abandoned worker still holds the database open; release it so the temp folder can be removed
+        # (on Windows an open SQLite file made rmtree fail silently and leaked one folder per run).
+        w2.close().result(5)
         self.w = w3
 
 
