@@ -27,7 +27,7 @@ What exists ([record](../research/2026-11-23-phase-3-code-mode.md)), and where i
 - **The engine enforces** the facade's tool allowlist (path-scoped operator tools only: no undo, memory, project or script tools), the scope, the call budget and the kill switch per call, and keeps the call log. A line tracer stops pure-Python loops on the time budget or the kill switch. Calls that need approval on their own are refused inside a script.
 - **Deviation: no single undo block.** Facade calls are ordinary audited calls, each reversible on its own with `tdflow_undo`, newest first. One TouchDesigner undo block around a script would have to span many main-thread steps that other agents and the user can interleave with; this is not attempted.
 - **Not built:** `tdflow_search_api` / `tdflow_describe_api`. The facade is the registered tools themselves (`tdflow.<tool>(**args)` with the same arguments), described in the tool's description and the Skill.
-- **No token benefit is claimed**; the benchmark gate below is still open.
+- **Benchmark measured** (gate below): the same 20 parameter changes took 20 calls, 1750 ms and 5613 bytes as separate calls, against 1 call, 1534 ms and 1978 bytes as one script, plus one approval ([record](../research/2026-11-23-phase-4-extensions.md)). Bytes are not model tokens; no further benefit is claimed.
 
 ## Validation gates
 - Phase 1B enforcement acceptance passes first.

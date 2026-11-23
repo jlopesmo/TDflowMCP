@@ -97,6 +97,12 @@
   - `tdflow_save_project`: approval only, with a grant on the project root.
   - Verified in TD on candidate `8476555f…` (`experiment.*`, `save.*`); [review 16](../research/2026-11-23-phase-3-experiments.md#independent-review-16): 3 Medium, all addressed.
 - **Phase 4: `tdflow_describe_network`** (dogfood finding 5): one network level with wiring, errors, TouchDesigner's own cook times and heuristic hints; never cooks anything. Verified in TD (`network.*`). Skill **1.4**.
+- **Phase 4 extensions and Phase 3 snapshots** ([record](../research/2026-11-23-phase-4-extensions.md)):
+  - `tdflow_capture_top`: a TOP's image as MCP image content (bounded size, one per second), never in the audit log.
+  - `tdflow_lease_scope`: an agent reserves a scope; other agents' changes and undos there get `LEASED`. The user can end leases on the dashboard; a lease stops counting when its holder loses its token or permission. Not the project root; renewal for at most an hour.
+  - Inert snapshots (`inert: true` on experiments), restored by promote.
+  - Code Mode benchmark measured (ADR-0004 gate): one script 1534 ms / 1978 bytes against 20 calls 1750 ms / 5613 bytes, plus one approval.
+  - Skill **1.5**. Verified in TD on candidate `1b8657a0…`; [review 17](../research/2026-11-23-phase-4-extensions.md#independent-review-17): 5 Medium, all addressed. Not built: host-project source-first (TDXN interop evaluation).
 - **Tests** on candidate `8c829556…` (uncommitted tree): 403 unit tests; 1B 48/48 + 178/178; 1A 49/49 + 71/71; gate 46/46 + 48/48; memory 51/51 + 182/182; onboarding live 5/5 + 48/48.
 
 ## Not implemented (nothing below exists)
@@ -132,13 +138,14 @@
 
 - `3a53e72`: post-restart recovery record and D19. Pushed to `origin/dev` and observed with `git ls-remote` (`refs/heads/dev` = `3a53e72…`, `refs/heads/main` = `066dbd0…`, so `main` is unchanged). CI: **not observed**.
 - `1233815`: **Phase 2A increment 3** (repository-mode memory, link check, migration, the repository-memory capability, friction fixes) and the minimized-window handling (S9), reviews 11 and 12. Pushed to `origin/dev` and observed with `git ls-remote` (`refs/heads/dev` = `1233815…`, `refs/heads/main` = `066dbd0…`, so `main` is unchanged). Verified on candidate `273b185e…` built from the pre-commit tree; a clean build of the commit (tox `a2250474…`, `source_dirty` false) has the same source digest `ffb75892…`. No package was built. This record was added by the follow-up commit. CI: **not observed**.
+- `df0ea46`: **Phase 3 increment 2** (experiments, approval-only save), review 16. Pushed to `origin/dev` and observed with `git ls-remote` (`refs/heads/dev` = `df0ea46…`, `refs/heads/main` = `066dbd0…`). Verified on candidate `8476555f…` built from the pre-commit tree. CI: **not observed**.
 - `4c55ca0`: **Phase 3 increment 1** (Code Mode) and the Phase 4 network summary, review 15. Pushed to `origin/dev` and observed with `git ls-remote` (`refs/heads/dev` = `4c55ca0…`, `refs/heads/main` = `066dbd0…`, so `main` is unchanged). Verified on candidate `8c829556…` built from the pre-commit tree. No package was built. CI: **not observed**.
 - `a656c75`: **Phase 2B increment 2** (owner D20: background checks while minimized, permission editing, staged code-running changes), review 14. Pushed to `origin/dev` and observed with `git ls-remote` (`refs/heads/dev` = `a656c75…`, `refs/heads/main` = `066dbd0…`, so `main` is unchanged). Verified on candidate `2397613a…` built from the pre-commit tree. No package was built. This record was added by a later commit. CI: **not observed**.
 - `0dd5bfd`: **Phase 2B increment 1** (approvals with identical re-call, the operator role, the `/ui/` governance dashboard), review 13. Pushed to `origin/dev` and observed with `git ls-remote` (`refs/heads/dev` = `0dd5bfd…`, `refs/heads/main` = `066dbd0…`, so `main` is unchanged). Verified on candidate `84f76d69…` built from the pre-commit tree; a clean build of the commit (tox `788925fa…`, `source_dirty` false) has the same source digest `14dac47f…`. No package was built. This record was added by the follow-up commit. CI: **not observed**.
 
 ## Next (owner direction D20: finish TDflowMCP)
-1. **Phase 3, remaining:** file snapshots and restore. Code Mode, experiments and save exist (see above).
-2. **Phase 4, remaining:** capture TOP, scope leases. The network summary exists (see above).
+1. **Phase 3 and 4:** done on `dev` (see above), except host-project source-first and file snapshots outside the project.
+2. **Realistic agent dogfooding** of the new tools.
 3. **ADR-0014 stage 1** (approved, D17), if it does not delay completion: isolated candidate build/test bound to the `.tox` hash, plus a manual promotion. Not started.
 4. **Realistic coding-agent dogfooding** of the new capabilities, then the **1.0 release candidate** for the owner's acceptance (not a release).
 5. **Owner question:** whether to add agent-writable task, decision or ICM records (reopens D18).

@@ -1233,7 +1233,10 @@ class TDflowMCPExt:
         try:
             if m == "GET":
                 if p == "/api/overview":
-                    return ok(self._dash_overview(st, idn))
+                    ov = self._dash_overview(st, idn)
+                    eng = self.engine
+                    ov["leases"] = eng.leases_view() if eng is not None else []     # Phase 4 scope leases
+                    return ok(ov)
                 if p == "/api/sessions":
                     return ok({"sessions": st.sessions(limit=50)})
                 if p == "/api/agents":
@@ -1302,6 +1305,14 @@ class TDflowMCPExt:
                     st.append("admin", tool="agent_enable" if enabled else "agent_disable", agent_id=aid)
                     idn.set_enabled(aid, enabled)
                 return ok({"agent_id": aid, "enabled": enabled})
+            if p == "/api/leases/release":
+                # Review 17: the user can always end an agent's lease. Durable first.
+                scope = str(body.get("scope", ""))[:512]
+                eng = self.engine
+                if eng is None or scope not in {x["scope"] for x in eng.leases_view()}:
+                    return refuse("NOT_FOUND", "no such lease", 404)
+                st.append("admin", tool="lease_release", detail={"scope": scope})
+                return ok({"ok": eng.release_lease(scope)})
             if p in ("/api/grants/add", "/api/grants/remove"):
                 # Phase 2B permission editing. Durable first; the policy version changes, so pending approvals of
                 # this agent no longer match and must be asked again (security-model §4).

@@ -36,6 +36,13 @@
 | `tdflow_experiment_discard` | delete of the experiment | Delete an experiment (only experiments); undoable |
 | `tdflow_save_project` | execute on the project root; always approval | Save the project like TouchDesigner's own save; not reversible |
 
+**Phase 4 (implemented; [record](../research/2026-11-23-phase-4-extensions.md)):**
+
+| Tool | Classification | Purpose |
+|---|---|---|
+| `tdflow_capture_top` | read `path` | The TOP's current image as MCP image content (PNG/JPEG, ≤ 1920×1080, one per second); never in the audit or structured result |
+| `tdflow_lease_scope` | update `scope` (not the project root) | Reserve a scope: other agents' changes and undos inside or above it get `LEASED` (L2); release, expiry, a dashboard release, or the holder losing its token or permission end it; renewal for at most an hour |
+
 ## Continuity and memory tools
 
 | Tool | Phase | Actions | Purpose |
@@ -56,7 +63,7 @@ Errors added in 2A: `MEMORY_UNAVAILABLE` (no, an uninitialised, or more than one
 
 - **Phase 2B:** `tdflow_get_custom_parameters`, `tdflow_edit_custom_parameters` (capabilities from the original bridge; deleting a page or parameter counts as `delete`), `tdflow_search_operators`, `tdflow_get_docs` (offline operator and Python reference), `tdflow_cook_performance`, `tdflow_report` (session summary), `tdflow_approval_status`.
 - **Phase 3:** `tdflow_snapshot_create/restore`, `tdflow_search_api`/`tdflow_describe_api` (progressive disclosure), `tdflow_execute_python` (raw, disabled by default), `tdflow_get_call_output` (stdout/stderr of the agent's own script calls; no global redirect).
-- **Phase 4+ extensions:** `tdflow_x_capture_top` (visual analysis), `tdflow_x_trace_cook` (debugging), `tdflow_x_optimize_suggest`, multi-agent `tdflow_lease_scope`.
+- **Phase 4+ extensions (candidates):** `tdflow_x_trace_cook` (debugging). Implemented instead of the `tdflow_x_` names: `tdflow_capture_top`, `tdflow_describe_network` (hints), `tdflow_lease_scope`.
 
 ## Conventions
 

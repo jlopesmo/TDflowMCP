@@ -14,6 +14,7 @@ Implements ``tdflowmcp.engine.Adapter``:
 import hashlib
 import json
 import os
+import time
 
 import td
 
@@ -27,7 +28,10 @@ from tdflowmcp.policy import _name_denied
 DATA_TAG = "tdflowdata"
 EXPERIMENT_TAG = "tdflowexperiment"     # set by TDflowMCP only (agents cannot set tags, H7)
 EXPERIMENT_KEY = "tdflow_experiment_of"
+INERT_KEY = "tdflow_snapshot"
 RESERVED_TAGS = {"TDflowMCP", "tdflowProject"}
+MAX_CAPTURE_PIXELS = 1920 * 1080
+MAX_CAPTURE_BYTES = 8 * 1024 * 1024
 MAX_COPY = 500                         # operators inspected for a copy (the policy limit per call is lower)
 # Parameter styles whose value names another operator or a file: setting them can read or wire things
 # outside the agent's scope (review 6, H2), so they are classified as execute (denied in Phase 1).
@@ -89,6 +93,7 @@ class TDAdapter(Adapter):
         self.root_fn = root_fn                   # current Projectroot (main thread)
         self.store_fn = store_fn                 # current Store (for DAT snapshots)
         self.protected = {}                      # op path -> "instance" | "tdflowproject"
+        self._last_capture = 0.0
         self.memory_changed = False              # Phase 2A: a record was written (Tell Your Coding Agent refresh)
         self._mem_cache = {}                     # (record name, text sha) -> parsed entry (review 9, F5b)
         self.refresh_protected()
@@ -418,6 +423,31 @@ class TDAdapter(Adapter):
                          "anything to find out.")
         return r
 
+    def _t_capture_top(self, args, res, label, readable):
+        """Phase 4 visual analysis: the TOP's current image as PNG or JPEG (TouchDesigner's own encoder, on the main
+        thread, so the size is bounded; review 17: at most one capture per second per process). Reading the
+        pixels may let TouchDesigner finish a pending cook of that TOP."""
+        o = res.context["op"]
+        if o.family != "TOP":
+            raise ToolFailure("INVALID_ARGS", f"{o.path} is not a TOP.")
+        w, h = int(o.width), int(o.height)
+        if w * h > MAX_CAPTURE_PIXELS:
+            raise ToolFailure("INVALID_ARGS", f"{o.path} is {w}x{h}; capture works up to {MAX_CAPTURE_PIXELS} pixels. "
+                                              "Capture a smaller TOP (for example a resolution TOP after it).")
+        now = time.monotonic()
+        if now - self._last_capture < 1.0:
+            raise ToolFailure("RATE_LIMITED", "one capture per second; try again in a moment")
+        self._last_capture = now
+        fmt = args.get("format", "png")
+        data = bytes(o.saveByteArray("." + fmt))
+        if not data or len(data) > MAX_CAPTURE_BYTES:
+            raise ToolFailure("EXECUTION_FAILED", "the image could not be captured within the size limit")
+        return {"path": o.path, "width": w, "height": h, "format": fmt, "bytes": len(data),
+                "cook_count": _cooks(o), "note": "The image is attached as image content. An operator that never "
+                "cooked may show an empty image. A TOP can show content from outside your scope (for example a "
+                "Select or Render TOP).",
+                "_image": {"bytes": data, "mimeType": "image/png" if fmt == "png" else "image/jpeg"}}
+
     def _t_describe_network(self, args, res, label, readable):
         """Phase 4: one network level (the children of a COMP) as facts TouchDesigner already measured, plus
         heuristic hints. Reads attributes only; never cooks or evaluates anything."""
@@ -630,6 +660,11 @@ class TDAdapter(Adapter):
                                 raise ToolFailure("EXECUTION_FAILED", f"{c.path} could not be switched off")
             n.tags.add(EXPERIMENT_TAG)
             n.store(EXPERIMENT_KEY, src.path)
+            if args.get("inert"):                    # a snapshot: kept, not cooked, until it is promoted
+                n.allowCooking = False
+                n.store(INERT_KEY, True)
+                if n.allowCooking:
+                    raise ToolFailure("EXECUTION_FAILED", "the snapshot could not be kept from cooking")
             try:
                 n.nodeX, n.nodeY = int(src.nodeX) + int(src.nodeWidth) + 40, int(src.nodeY)
             except Exception:
@@ -637,6 +672,7 @@ class TDAdapter(Adapter):
             return n
         n, stack = self._mutate(label, do)
         return {"path": n.path, "copied_from": src.path, "operators": 1 + len(n.findChildren()),
+                "inert": bool(args.get("inert")),
                 "executable_operators_switched_off": sum(1 for c in n.findChildren() if c.OPType in EXECUTABLE_TYPES),
                 "_audit": {"kind": "create", "path": n.path, "type": n.OPType, "stack": stack,
                            "reversible": "td_undo" if stack else "no"}}
@@ -647,6 +683,7 @@ class TDAdapter(Adapter):
         e, origin = res.context["op"], res.context["origin"]
         name, path, typ = origin.name, origin.path, origin.OPType
         ins, outs = res.context["ins"], res.context["outs"]
+        inert = bool(e.fetch(INERT_KEY, False, search=False))
 
         def do():
             x, y = int(origin.nodeX), int(origin.nodeY)
@@ -668,12 +705,15 @@ class TDAdapter(Adapter):
                         e.outputConnectors[j].connect(owner.inputConnectors[idx])
                     except Exception:
                         lost += 1
-            e.tags.remove(EXPERIMENT_TAG)            # last: TD's undo does not revert tags (see undo)
+            if e.fetch(INERT_KEY, False, search=False):
+                e.allowCooking = True                # a restored snapshot cooks again
+            e.tags.remove(EXPERIMENT_TAG)            # last: TD's undo does not revert tags or storage (see undo)
             e.unstore(EXPERIMENT_KEY)
+            e.unstore(INERT_KEY)
             return lost
         lost, stack = self._mutate(label, do)
         return {"promoted": e.path, "replaced": typ, "connections_lost": lost,
-                "_audit": {"kind": "promote", "path": path, "type": typ, "experiment": args["path"],
+                "_audit": {"kind": "promote", "path": path, "type": typ, "experiment": args["path"], "inert": inert,
                            "experiment_type": e.OPType, "stack": stack, "reversible": "td_undo" if stack else "no"}}
 
     def _t_experiment_discard(self, args, res, label, readable):
@@ -758,8 +798,11 @@ class TDAdapter(Adapter):
                 try:
                     e.tags.add(EXPERIMENT_TAG)
                     e.store(EXPERIMENT_KEY, d.get("path"))
+                    if d.get("inert"):
+                        e.store(INERT_KEY, True)
+                        e.allowCooking = False
                 except Exception:
-                    pass
+                    pass                                  # _verify below reports it as unverified
         return {"undone": True, "verified": self._verify(d)}
 
     def _verify(self, d):
@@ -770,7 +813,8 @@ class TDAdapter(Adapter):
             if kind == "promote":
                 o, e = td.op(path), td.op(d.get("experiment", ""))
                 return o is not None and o.OPType == d.get("type") and e is not None and \
-                    e.OPType == d.get("experiment_type")
+                    e.OPType == d.get("experiment_type") and EXPERIMENT_TAG in e.tags and \
+                    (not d.get("inert") or not e.allowCooking)
             if kind == "delete":
                 o = td.op(path)
                 return o is not None and o.OPType == d.get("type")

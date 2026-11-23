@@ -137,6 +137,8 @@ class Engine:
         self.main = main or (lambda fn: fn())
         self.audit_failed = False                  # sticky: an outcome could not be recorded
         self.code_mode = False                     # ADR-0004: off until the user turns it on (dashboard)
+        self.leases: Dict[str, dict] = {}          # Phase 4: scope -> {agent_id, expires} (memory; audited)
+        self._lease_lock = threading.RLock()       # re-entrant: _lease checks holders while holding it
 
     def suspended(self) -> bool:
         return self.audit_failed or bool(self._suspended())
@@ -187,6 +189,8 @@ class Engine:
             return self._undo(tool, agent, base, t0, m)
         if tool.resolver == "memory":
             return self._memory(tool, agent, args, base, t0, m)
+        if tool.resolver == "lease":
+            return self._lease(tool, agent, args, base, t0, m)
         if tool.resolver == "script":
             if in_script:
                 return self._deny(base, "DENIED", "S1", "a script cannot run another script", None)
@@ -204,6 +208,9 @@ class Engine:
                 base.update(targets=d["targets"])
             return self._deny(base, d["code"], d["rule"], d["reason"], d["target"])
         base.update(targets=plan["targets"][:50], policy_version=plan["policy_version"])
+        held = self._leased(agent, plan["targets"])
+        if held:                                   # Phase 4: another agent leased this scope
+            return self._deny(base, "LEASED", "L2", self._lease_msg(agent, held), None)
         if plan.get("approval") and in_script:
             # Phase 3: the user approved the script text, not hidden requests made from it.
             return self._deny(base, "APPROVAL_REQUIRED_IN_SCRIPT", plan["approval"]["rule"], "inside a script, calls "
@@ -263,7 +270,13 @@ class Engine:
             return tool_error(failure.code, failure.message, audit_seq=oseq, **extra)
         if mutating:
             out.update(audit_seq=oseq, undo_label=label if reversible != "no" else None, reversible=reversible != "no")
-        return tool_result(out)
+        img = out.pop("_image", None)               # Phase 4: image content, encoded here (handler thread)
+        r = tool_result(out)
+        if isinstance(img, dict) and img.get("bytes"):
+            import base64
+            r["content"].append({"type": "image", "data": base64.b64encode(img["bytes"]).decode("ascii"),
+                                 "mimeType": img.get("mimeType", "image/png")})
+        return r
 
     # ---- main-thread steps ---------------------------------------------------------------------
     def _plan(self, tool: Tool, args: dict, agent: Agent) -> dict:
@@ -377,6 +390,9 @@ class Engine:
         if plan.get("approved") and APR.target_facts(res.targets) + _snapshot_fact(res) != plan["approval"]["facts"]:
             raise ToolFailure("APPROVAL_TARGETS_CHANGED", "The project changed since the approval; nothing was "
                                                           "executed. Ask again.")
+        held = self._leased(current, res.targets)
+        if held:
+            raise ToolFailure("LEASED", self._lease_msg(current, held) + "; nothing was executed")
         if plan.get("approved") and v.policy_version != plan["policy_version"]:
             raise ToolFailure("APPROVAL_POLICY_CHANGED", "Your permissions changed since the approval; nothing was "
                                                          "executed. Ask again.")
@@ -502,6 +518,118 @@ class Engine:
                               "log); undo them one by one with tdflow_undo if needed.", **out)
         return tool_result(out)
 
+    # ---- scope leases (Phase 4, multi-agent) ---------------------------------------------------
+    def _lease_valid(self, lease: dict, scope: str) -> bool:
+        """Review 17: a lease counts only while its holder is enabled, still has a live token and may still update
+        the scope (revocation and grant removal end it)."""
+        holder = self.identity.agents.get(lease["agent_id"])
+        if holder is None or not holder.enabled:
+            return False
+        if not any(v[2] == holder.id for v in self.identity._snap.values()):
+            return False
+        return self.policy.evaluate(holder, [Target("update", scope, change="lease")]).allow
+
+    def lease_holder(self, path: str, agent_id: str, now: Optional[float] = None) -> Optional[dict]:
+        """Another agent's valid, unexpired lease covering ``path`` (inside or above it), else None. Any thread."""
+        now = time.time() if now is None else now
+        with self._lease_lock:
+            for scope, lease in list(self.leases.items()):
+                if lease["expires"] <= now:
+                    del self.leases[scope]
+                    continue
+                if lease["agent_id"] == agent_id or not self._lease_valid(lease, scope):
+                    continue
+                if CM.inside(scope, path) or CM.inside(path, scope):
+                    holder = self.identity.agents.get(lease["agent_id"])
+                    return dict(lease, scope=scope, holder=holder.display_name if holder else lease["agent_id"])
+        return None
+
+    def _leased(self, agent: Agent, targets) -> Optional[dict]:
+        for t in targets:
+            action, path = (t.action, t.path) if hasattr(t, "action") else (t[0], t[1])
+            if action in ("create", "update", "delete", "execute"):
+                h = self.lease_holder(path, agent.id)
+                if h:
+                    return h
+        return None
+
+    def _lease_msg(self, agent: Agent, h: dict) -> str:
+        """Name the leased scope only if the caller may read it (review 17)."""
+        can = self.policy.evaluate(agent, [Target("read", h["scope"])]).allow
+        where = h["scope"] if can else "an area that includes it"
+        return f"{h['holder']} holds a lease on {where}; wait for it to end or ask the user"
+
+    def _lease(self, tool: Tool, agent: Agent, args: dict, base: dict, t0: float, m=None) -> dict:
+        scope = args["scope"].rstrip("/") or "/"
+        release = bool(args.get("release"))
+        facts = getattr(self.adapter, "path_facts", None)
+        try:
+            prot, anc = (m or self.main)(lambda: facts(scope)) if facts else ("", "")
+        except (MainNotRun, MainUnknown) as e:
+            return self._deny(base, _main_code(e), "M0", _main_reason(_main_code(e)), None)
+        verdict = self.policy.evaluate(agent, [Target("update", scope, protected=prot, ancestor_of=anc, change="lease")])
+        base.update(targets=[["update", scope]], policy_version=verdict.policy_version)
+        if not verdict.allow:
+            return self._deny(base, verdict.code, verdict.rule_id, verdict.reason, verdict.target)
+        if not release and scope == self.policy.root.rstrip("/"):
+            return self._deny(base, "DENIED", "L4", "the whole project cannot be leased; lease the part you work on",
+                              scope)
+        ttl = int(args.get("ttl_s", 600))
+        try:
+            iseq = self.store.append("intent", decision="ALLOW", rule_id="L", **base)
+        except AuditUnavailable:
+            return tool_error("AUDIT_UNAVAILABLE", "The audit store is unavailable, so nothing was leased.")
+        now = time.time()
+        with self._lease_lock:                     # check and write under one lock (review 17: no overlap race)
+            if release:
+                mine = self.leases.get(scope)
+                if not mine or mine["agent_id"] != agent.id:
+                    code, why, out = "NOT_FOUND", "you hold no lease on this scope", None
+                else:
+                    self.leases.pop(scope, None)
+                    code, why, out = None, "", {"released": scope}
+            else:
+                h = self.lease_holder(scope, agent.id, now)
+                old = self.leases.get(scope)
+                since = old["since"] if old and old["agent_id"] == agent.id else now
+                if h:
+                    code, why, out = "LEASED", self._lease_msg(agent, h), None
+                elif now - since > LEASE_MAX_TOTAL_S:
+                    code, why, out = "LEASE_LIMIT", (f"you have held this lease for {LEASE_MAX_TOTAL_S // 60} minutes; "
+                                                     "release it so others can work"), None
+                else:
+                    self.leases[scope] = {"agent_id": agent.id, "expires": now + ttl, "since": since}
+                    code, why, out = None, "", {"leased": scope, "expires_in_s": ttl}
+        try:
+            seq = self.store.append("outcome", decision="ALLOW" if code is None else code,
+                                    outcome="ok" if code is None else "error", error_code=code,
+                                    duration_ms=int((self.clock() - t0) * 1000),
+                                    detail=dict(out or {"reason": why}, intent_seq=iseq), **base)
+        except AuditUnavailable:
+            self._audit_failure()
+            return tool_error("OUTCOME_UNRECORDED", "The lease outcome could not be recorded durably, so all agents "
+                              "were suspended.")
+        if code is not None:
+            return tool_error(code, why, rule_id="L2" if code == "LEASED" else "L3", audit_seq=seq)
+        out["audit_seq"] = seq
+        return tool_result(out)
+
+    def release_lease(self, scope: str) -> bool:
+        """The user's release from the dashboard (audited by the caller)."""
+        with self._lease_lock:
+            return self.leases.pop(scope, None) is not None
+
+    def leases_view(self) -> List[dict]:
+        now = time.time()
+        with self._lease_lock:
+            rows = []
+            for s, v in sorted(self.leases.items()):
+                if v["expires"] > now:
+                    a = self.identity.agents.get(v["agent_id"])
+                    rows.append({"scope": s, "agent_id": v["agent_id"], "agent": a.display_name if a else "?",
+                                 "expires_in_s": int(v["expires"] - now), "valid": self._lease_valid(v, s)})
+            return rows
+
     # ---- helpers -------------------------------------------------------------------------------
     def _deny(self, base: dict, code: str, rule: str, reason: str, target: Optional[str]) -> dict:
         try:
@@ -599,6 +727,9 @@ class Engine:
             v = self.policy.evaluate(current, targets or [Target("update", self.policy.root + "/__none__")])
             if not v.allow:
                 raise ToolFailure(v.code, v.reason, rule_id=v.rule_id)
+            held = self._leased(current, targets)
+            if held:                                # review 17: an undo is a change like any other
+                raise ToolFailure("LEASED", self._lease_msg(current, held) + "; nothing was undone")
             return self.adapter.undo(dict(rec, detail=detail), snap)
         try:
             r = m(run_undo)
@@ -1064,6 +1195,7 @@ class Engine:
 APPROVABLE = {"A1": ("tdflow_set_parameters", "tdflow_set_dat_text", "tdflow_create_operator",
                      "tdflow_execute_script", "tdflow_experiment_create", "tdflow_save_project"),
               "A2": ("tdflow_delete_operator", "tdflow_experiment_promote", "tdflow_experiment_discard")}
+LEASE_MAX_TOTAL_S = 3600                    # one agent may keep renewing a lease for at most an hour
 MUTATION_LIMIT = 5000                       # audited mutations read per evidence window
 FP_CHUNK = 50                               # operators fingerprinted per main-thread step
 

@@ -2,19 +2,19 @@
 name: tdflow-core
 description: Use when working in a TouchDesigner project through the TDflowMCP MCP server (tools named tdflow_*). Covers checking identity and scope first, reading before changing, small audited changes, verified undo, resuming and handing over tasks through project memory, the kill switch, denials and what never to do without the user.
 metadata:
-  tdflow-skill-version: "1.4"
+  tdflow-skill-version: "1.5"
 ---
 
 # Working in TouchDesigner with TDflowMCP
 
-TDflowMCP skill version: 1.4 (tool surface 1). This file is guidance. The TDflowMCP server enforces
+TDflowMCP skill version: 1.5 (tool surface 1). This file is guidance. The TDflowMCP server enforces
 every permission itself; nothing here grants access.
 
 ## 1. Start every session with `tdflow_whoami`
 - It returns your role, your scopes (which operator paths you may read or change, and which actions),
   the project root, `server_version`, `tool_surface_version` and `expected_skill_version`.
-- If `expected_skill_version` differs from this skill's version (1.4), tell the user: "The TDflowMCP
-  Skills on this computer are version 1.4 but the component expects <version>. Update them from the
+- If `expected_skill_version` differs from this skill's version (1.5), tell the user: "The TDflowMCP
+  Skills on this computer are version 1.5 but the component expects <version>. Update them from the
   component's Setup page." Then continue carefully, trusting the server's answers over this file.
 - Work only inside your scopes. Do not probe paths outside them: denials are recorded in the audit log.
 
@@ -40,6 +40,17 @@ every permission itself; nothing here grants access.
     ask again only if it still makes sense.
   - `APPROVAL_UNAVAILABLE`: this component version has no approval surface.
 - Text DATs are writable only when they are data: a Table DAT, or a Text DAT the user tagged `tdflowdata`.
+- To try something risky, copy the component first: `tdflow_experiment_create` (path, name) makes a copy
+  next to it. Work on the copy, then `tdflow_experiment_promote` it to replace the original, or
+  `tdflow_experiment_discard` it. With `inert: true` the copy is a snapshot that does not cook; promoting it
+  brings back its operators and parameters (executable operators stay switched off until they are switched
+  on with approval, and wiring is reported in `connections_lost`).
+- `tdflow_capture_top` returns a TOP's image so you can look at the result (one per second).
+- When several agents work in one project, `tdflow_lease_scope` reserves a scope for you for a while; others
+  get `LEASED` there. Release it when you are done. If you get `LEASED`, wait or ask the user; do not work
+  around it.
+- `tdflow_save_project` needs a grant on the whole project and the user's approval. Only save when the user
+  asks for it.
 - `tdflow_describe_network` gives one network level in one call: operators, wiring, errors, cook times and
   hints. Hints are heuristics: check them before acting on them.
 - `tdflow_execute_script` (operator role; only when the user turned Code Mode on, otherwise `CODE_MODE_OFF`)

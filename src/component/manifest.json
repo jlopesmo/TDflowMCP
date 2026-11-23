@@ -426,6 +426,7 @@
   ],
   "active_tools": [
     "tdflow_approval_status",
+    "tdflow_capture_top",
     "tdflow_connect",
     "tdflow_create_operator",
     "tdflow_delete_operator",
@@ -441,6 +442,7 @@
     "tdflow_get_parameters",
     "tdflow_handoff_create",
     "tdflow_handoff_resume",
+    "tdflow_lease_scope",
     "tdflow_list_operators",
     "tdflow_project_info",
     "tdflow_session_list",

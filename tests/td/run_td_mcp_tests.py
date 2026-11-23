@@ -32,7 +32,7 @@ from tdflowmcp.net import oslisteners  # noqa: E402
 
 O = "http://127.0.0.1:9480"
 TOKENS, STATE = {}, {"cookies": {}}
-EXPECTED_TOOLS = sorted(["tdflow_approval_status", "tdflow_describe_network", "tdflow_experiment_create",
+EXPECTED_TOOLS = sorted(["tdflow_approval_status", "tdflow_capture_top", "tdflow_describe_network", "tdflow_lease_scope", "tdflow_experiment_create",
                          "tdflow_experiment_promote", "tdflow_experiment_discard", "tdflow_save_project"] + ["tdflow_connect", "tdflow_create_operator", "tdflow_delete_operator", "tdflow_disconnect",
                          "tdflow_get_dat_text", "tdflow_get_errors", "tdflow_get_operator", "tdflow_get_parameters",
                          "tdflow_list_operators", "tdflow_project_info", "tdflow_session_list", "tdflow_session_note",
@@ -191,7 +191,7 @@ def cp_enabled(data, pid):
     T("proto.notification_202", st == 202 and not r.get("body"))
     st, j, _ = B.rpc("tools/list")
     names = sorted(t["name"] for t in (j or {}).get("result", {}).get("tools", []))
-    T("proto.tools_list_26", names == EXPECTED_TOOLS, names=names)   # + tdflow_execute_script once Code Mode is on
+    T("proto.tools_list_28", names == EXPECTED_TOOLS, names=names)   # + tdflow_execute_script once Code Mode is on
     # modern era
     st, j, _ = B.rpc("server/discover", modern=True)
     T("proto.modern_discover", st == 200 and "2026-07-28" in j["result"]["supportedVersions"])
@@ -451,6 +451,27 @@ def script_flow(E):
     T("script.NO_HIDDEN_APPROVALS", x.get("code") == "APPROVAL_REQUIRED_IN_SCRIPT", r=x)
     u = E.call("tdflow_undo")
     T("script.changes_undoable_one_by_one", ok(u) and u.get("verified"), r=u)
+    # ADR-0004 benchmark: the same 20 parameter changes as separate calls and as one approved script. Measured: wall
+    # time of the calls and the bytes an agent sends and reads (arguments + structured results); not model tokens.
+    n, ind_bytes, t0 = 20, 0, time.perf_counter()
+    for i in range(n):
+        a = {"path": "/project1/fx/level1", "values": {"opacity": round(0.3 + i * 0.01, 2)}}
+        r = E.call("tdflow_set_parameters", a)
+        ind_bytes += len(json.dumps({"name": "tdflow_set_parameters", "arguments": a})) + len(json.dumps(r))
+    ind_ms = (time.perf_counter() - t0) * 1000
+    code = (f"for i in range({n}):\n"
+            "    tdflow.set_parameters(path='/project1/fx/level1', values={'opacity': round(0.3 + i * 0.01, 2)})\n"
+            "result = 'done'")
+    bargs = {"scope": "/project1/fx", "code": code}
+    req = E.call("tdflow_execute_script", bargs)
+    admin("POST", "/api/approvals/decide", {"id": req.get("approval_id"), "decision": "approved"})
+    t0 = time.perf_counter()
+    r = E.call("tdflow_execute_script", bargs)
+    sc_ms = (time.perf_counter() - t0) * 1000
+    sc_bytes = len(json.dumps({"name": "tdflow_execute_script", "arguments": bargs})) + len(json.dumps(r))
+    T("benchmark.CODE_MODE_MEASURED", ok(r) and r.get("calls") == n, individual={"calls": n, "ms": round(ind_ms, 1),
+      "bytes": ind_bytes}, script={"calls": 1, "facade_calls": r.get("calls"), "ms": round(sc_ms, 1), "bytes": sc_bytes,
+      "plus": "one approval by the user"})
 
 
 def experiment_flow(E):
@@ -477,6 +498,12 @@ def experiment_flow(E):
       ok(B.call("tdflow_get_operator", {"path": "/project1/fx/exp_try"})), r=u, a=a)
     d = B.call("tdflow_experiment_discard", {"path": "/project1/fx/exp_try"})
     T("experiment.DISCARDED", ok(d) and B.call("tdflow_get_operator", {"path": "/project1/fx/exp_try"}).get("code") == "NOT_FOUND", r=d)
+    sn = B.call("tdflow_experiment_create", {"path": "/project1/fx/exp_src", "name": "snap1", "inert": True})
+    T("snapshot.CREATED_INERT", ok(sn) and sn.get("inert") is True, r=sn)
+    B.call("tdflow_set_parameters", {"path": "/project1/fx/exp_src/n1", "values": {"amp": 0.75}})
+    rs = B.call("tdflow_experiment_promote", {"path": "/project1/fx/snap1"})
+    a = (B.call("tdflow_get_parameters", {"path": "/project1/fx/exp_src/n1", "names": ["amp"]}).get("parameters") or [{}])[0]
+    T("snapshot.RESTORED", ok(rs) and a.get("value") == amp0, r=rs, a=a)
     approved(E, "tdflow_set_parameters", {"path": "/project1/fx/exp_src/n1", "expressions": {"amp": "0.5"}})
     T("experiment.builder_cannot_copy_code", B.call("tdflow_experiment_create", {
         "path": "/project1/fx/exp_src", "name": "exp_b"}).get("rule_id") == "R1")
@@ -496,12 +523,40 @@ def experiment_flow(E):
     T("save.grant_removed_again", E.call("tdflow_save_project").get("code") == "DENIED")
 
 
+def lease_flow(E):
+    """Phase 4: a scope lease refuses another agent's changes inside it (reads stay open) until it is released."""
+    B = MCP(TOKENS["B"])
+    le = B.call("tdflow_lease_scope", {"scope": "/project1/fx", "ttl_s": 60})
+    T("lease.TAKEN", ok(le) and le.get("leased") == "/project1/fx", r=le)
+    ov = base.jbody(admin("GET", "/api/overview")) or {}
+    T("lease.shown_on_dashboard", any(x.get("scope") == "/project1/fx" for x in ov.get("leases") or []), leases=ov.get("leases"))
+    r = E.call("tdflow_set_parameters", {"path": "/project1/fx/level1", "values": {"opacity": 0.6}})
+    T("lease.OTHER_AGENT_REFUSED", r.get("code") == "LEASED" and r.get("rule_id") == "L2", r=r)
+    T("lease.reads_stay_open", ok(E.call("tdflow_get_operator", {"path": "/project1/fx/level1"})))
+    B.call("tdflow_lease_scope", {"scope": "/project1/fx", "release": True})
+    T("lease.RELEASED", ok(E.call("tdflow_set_parameters", {"path": "/project1/fx/level1", "values": {"opacity": 0.6}})))
+    B.call("tdflow_lease_scope", {"scope": "/project1/fx", "ttl_s": 600})
+    rl = admin("POST", "/api/leases/release", {"scope": "/project1/fx"})
+    T("lease.USER_ENDS_A_LEASE", rl["status"] == 200 and ok(E.call("tdflow_set_parameters", {
+        "path": "/project1/fx/level1", "values": {"opacity": 0.6}})), status=rl["status"])
+    T("lease.project_root_refused", MCP(TOKENS["D"]).call("tdflow_lease_scope", {"scope": "/project1"}).get("code") == "DENIED")
+
+
 def network_flow(B):
     """Phase 4: a bounded, read-only network summary with heuristic hints; it reads facts only."""
     d = B.call("tdflow_describe_network", {"path": "/project1/fx"})
     T("network.DESCRIBES_ONE_LEVEL", ok(d) and d.get("shown", 0) >= 1 and isinstance(d.get("edges"), list)
       and isinstance(d.get("hints"), list) and "by_family" in d, d={k: d.get(k) for k in ("shown", "total", "by_family", "code")})
     T("network.only_readable_operators", all(o["path"].startswith("/project1/fx/") for o in d.get("operators", [])))
+    st, j, _ = B.rpc("tools/call", {"name": "tdflow_capture_top", "arguments": {"path": "/project1/fx/noise1"}})
+    content = ((j or {}).get("result") or {}).get("content") or []
+    img = next((c for c in content if c.get("type") == "image"), {})
+    import base64 as _b64
+    raw = _b64.b64decode(img.get("data", "") or "")
+    T("capture.IMAGE_CONTENT_PNG", st == 200 and img.get("mimeType") == "image/png" and raw[:4] == b"\x89PNG",
+      bytes=len(raw), sc=((j or {}).get("result") or {}).get("structuredContent"))
+    T("capture.not_in_structured_or_audit", "_image" not in json.dumps(((j or {}).get("result") or {}).get("structuredContent") or {}))
+    T("capture.non_top_refused", B.call("tdflow_capture_top", {"path": "/project1/fx"}).get("code") in ("INVALID_ARGS", "DENIED"))
     T("network.out_of_scope_denied", B.call("tdflow_describe_network", {"path": "/project1"}).get("code") == "DENIED")
 
 
@@ -543,6 +598,7 @@ def approval_flow():
     script_flow(E)
     network_flow(MCP(TOKENS["B"]))
     experiment_flow(E)
+    lease_flow(E)
     # Dashboard: overview, live tail and a verified report.
     ov = base.jbody(admin("GET", "/api/overview")) or {}
     T("dashboard.overview", ov.get("mcp") is True and ov.get("cooking") is True and (ov.get("audit") or {}).get("ok") is True, ov=ov)

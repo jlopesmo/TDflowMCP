@@ -21,6 +21,7 @@ Resolver kinds (the adapter turns them into policy Targets):
   promote        delete of the original + update (rename) of the experiment args.path
   discard        delete of the experiment args.path/** (only an experiment)
   save           execute on the project root (approval only)
+  lease          Phase 4 scope lease: needs update on args.scope; other agents' changes there are refused (L2)
   memory         project memory (Phase 2A): read on the task's scopes; records are written only by the
                  memory path in the engine, never as operator targets (tdflowProject stays H4-denied)
 """
@@ -33,7 +34,7 @@ from tdflowmcp import schema
 from tdflowmcp.policy import ACTIONS
 
 RESOLVERS = {"none", "project", "read_path", "read_children", "read_tree", "set_params", "create", "delete",
-             "wire", "dat_text", "undo", "memory", "script", "copy", "promote", "discard", "save"}
+             "wire", "dat_text", "undo", "memory", "script", "copy", "promote", "discard", "save", "lease"}
 PATH = {"type": "string", "minLength": 1, "maxLength": 512, "pattern": r"^/[A-Za-z0-9_/]*$",
         "description": "Absolute operator path, e.g. /project1/geo1"}
 NAME = {"type": "string", "minLength": 1, "maxLength": 64, "pattern": r"^[A-Za-z_][A-Za-z0-9_]*$"}
@@ -174,6 +175,19 @@ def core_registry() -> Registry:
            "in Phase 1. Reversible with tdflow_undo (TDflowMCP snapshot; TD's own undo does not cover DAT text).",
            obj({"path": PATH, "text": {"type": "string", "maxLength": 200000}}, ["path", "text"]),
            ("update", "execute?"), "dat_text", "set_dat_text", idempotent=True, reversible="snapshot"))
+    # Phase 4: scope leases for several agents working in one project.
+    T(Tool("tdflow_lease_scope", "Lease scope", "Reserve a scope you can change (not the whole project), so other "
+           "agents' changes inside it, and changes to components containing it, are refused (LEASED) while you work; "
+           "reads stay open. The user can end a lease on the dashboard; renewing works for at most an hour. Leases end after ttl_s (default 600, at most "
+           "1800) or when you release them (release: true). Leases do not survive a restart.",
+           obj({"scope": PATH, "ttl_s": {"type": "integer", "minimum": 30, "maximum": 1800},
+                "release": {"type": "boolean"}}, ["scope"]), ("update",), "lease", "lease_scope"))
+    # Phase 4: visual analysis. The image is returned as MCP image content (read only, never cooks).
+    T(Tool("tdflow_capture_top", "Capture TOP", "The current image of a TOP as image content you can look at "
+           "(PNG or JPEG, up to 1920x1080 pixels, one per second). Use it to check what a network shows. An operator "
+           "that never cooked may show an empty image.",
+           obj({"path": PATH, "format": {"type": "string", "enum": ["png", "jpg"]}}, ["path"]), ("read",),
+           "read_path", "capture_top", read_only=True, idempotent=True))
     # Phase 4 (dogfood finding 5): bounded network summary with heuristic hints; reads facts, never cooks.
     T(Tool("tdflow_describe_network", "Describe network", "One network level (the children of a COMP) in one call: "
            "each readable operator's type, family, inputs, flags, errors and TouchDesigner's own cook count and "
@@ -212,7 +226,9 @@ def core_registry() -> Registry:
            "try changes on, leaving the original untouched. The copy is classified like creating each operator in "
            "it (at most about 50 operators per call); code inside it (executable operators, expressions, references) "
            "needs the user's approval, and copied executable operators are switched off. Undo with tdflow_undo.",
-           obj({"path": PATH, "name": NAME}, ["path", "name"]), ("read", "create", "execute?"), "copy",
+           obj({"path": PATH, "name": NAME, "inert": {"type": "boolean", "description": "true: a snapshot that does not "
+                "cook, to return to later with tdflow_experiment_promote (which makes it cook again)"}},
+               ["path", "name"]), ("read", "create", "execute?"), "copy",
            "experiment_create", reversible="td_undo"))
     T(Tool("tdflow_experiment_promote", "Promote experiment", "Replace the original component with the experiment "
            "(it takes the original's name, position and wiring). Counts as deleting the original. Undo with "
