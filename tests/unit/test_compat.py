@@ -36,7 +36,7 @@ class S5ReplayTests(unittest.TestCase):
         self.assertEqual(by["py.version"].result, "pass")
         self.assertEqual(by["py.deps"].result, "pass")
         self.assertEqual(by["net.capability"].result, "fail")
-        for unknown in ("net.bind", "net.port", "fs.datadir", "td.instances", "agent.clients"):
+        for unknown in ("net.bind", "net.port", "fs.datadir", "audit.integrity", "td.instances", "agent.clients"):
             self.assertEqual(by[unknown].result, "unknown", unknown)
 
     def test_s5_build_never_listens_and_never_enables_mcp(self):
@@ -94,7 +94,7 @@ class CheckRuleTests(unittest.TestCase):
             "transport": "webserver-dat",
             "webserver_par_names": S5_FACTS["webserver_par_names"] + ["localaddress"],
             "bind_evidence": verdict(["127.0.0.1"], []), "port_listeners_other": [],
-            "datadir_writable": True, "instances": 1,
+            "datadir_writable": True, "instances": 1, "audit_verify": {"ok": True, "events": 3},
             "clients": {"claude-code": {"selected": True, "support": "primary"}}, "selftest": True,
         }
         results = compat.run_checks(facts)
@@ -194,3 +194,17 @@ class SelfTestTests(unittest.TestCase):
         self.assertEqual(compat.check_sec_selftest({"selftest": True}).result, "pass")
         self.assertEqual(compat.check_sec_selftest({"selftest": False}).remediation_id, "sec.selftest.failed")
         self.assertEqual(compat.check_sec_selftest({}).result, "unknown")
+
+
+class StorageCheckTests(unittest.TestCase):
+    def test_identity_and_integrity_block_mcp(self):
+        for st in ("MOVED", "COPIED", "RELOCATE", "LEGACY", "BLOCKED"):
+            r = compat.check_datadir({"datadir_writable": True, "storage_status": st, "storage_reason": "x"})
+            self.assertEqual(r.result, "fail", st)
+            self.assertIn(r.remediation_id, TROUBLE["entries"])
+        self.assertEqual(compat.check_datadir({"datadir_writable": True, "storage_status": "FALLBACK"}).result, "pass")
+        bad = compat.check_audit_integrity({"audit_verify": {"ok": False, "chain_ok": True, "checkpoints_missing": True}})
+        self.assertEqual(bad.result, "fail")
+        self.assertIn(bad.remediation_id, TROUBLE["entries"])
+        ok, blockers = compat.mcp_enable_allowed([bad], True, True)
+        self.assertIn("audit.integrity", blockers)

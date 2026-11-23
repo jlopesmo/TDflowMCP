@@ -130,6 +130,31 @@ class StoreTests(Tmp):
         self.store = Store(self.store.datadir).open()
 
 
+class SplitStorageTests(unittest.TestCase):
+    def test_project_folder_holds_no_credentials_key_or_checkpoints(self):
+        root = tempfile.mkdtemp(prefix="tdflow-split-")
+        try:
+            proj, priv = os.path.join(root, "proj", ".tdflowmcp", "p"), os.path.join(root, "private")
+            st = Store(proj, priv).open()
+            idn = Identity(st)
+            agent, tok = idn.create_agent("A", "builder", ["/project1/**"])
+            st.append("intent", tool="x")
+            st.checkpoint()
+            st.close()
+            self.assertEqual(sorted(f for f in os.listdir(proj) if not f.endswith(("-wal", "-shm"))), ["tdflowmcp.sqlite"])
+            self.assertEqual(sorted(f for f in os.listdir(priv) if not f.endswith(("-wal", "-shm"))),
+                             ["audit.key", "checkpoints.jsonl", "credentials.sqlite"])
+            blob = b"".join(open(os.path.join(proj, f), "rb").read() for f in os.listdir(proj))
+            self.assertNotIn(tok.split(".")[1].encode(), blob)
+            self.assertNotIn(b"agt_", blob)
+            st2 = Store(proj, priv).open()
+            self.assertTrue(st2.verify()["ok"])
+            self.assertEqual(Identity(st2).agents[agent.id].display_name, "A")
+            st2.close()
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+
 class IdentityTests(Tmp):
     def test_create_authenticate_revoke(self):
         idn = Identity(self.store)
@@ -141,7 +166,7 @@ class IdentityTests(Tmp):
         self.assertIsNone(idn.authenticate(token[:-1] + ("A" if token[-1] != "A" else "B")))
         self.assertIsNone(idn.authenticate("tdf_xxx"))
         self.assertNotIn(token.split(".")[1], json.dumps(idn.public_list()))
-        rows = self.store.conn.execute("SELECT * FROM tokens").fetchall()
+        rows = self.store.cconn.execute("SELECT * FROM tokens").fetchall()
         self.assertNotIn(token.split(".")[1], repr(rows))
         self.assertTrue(idn.revoke(tid))
         self.assertIsNone(idn.authenticate(token))
@@ -249,3 +274,59 @@ class AdminTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CrashTailTests(unittest.TestCase):
+    def test_torn_final_checkpoint_line_is_ignored_but_middle_garbage_is_not(self):
+        d = tempfile.mkdtemp(prefix="tdflow-torn-")
+        try:
+            st = Store(d).open()
+            st.append("intent")
+            st.checkpoint()
+            with open(st.checkpoint_path, "a", encoding="utf-8") as f:
+                f.write('{"seq": 1, "ha')                       # killed while writing
+            self.assertTrue(st.verify()["ok"])
+            with open(st.checkpoint_path, "a", encoding="utf-8") as f:
+                f.write("\n")                                    # now a complete, bogus line
+            st.append("intent")
+            st.checkpoint()
+            self.assertFalse(st.verify()["ok"])
+            st.close()
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+
+class Review7StoreTests(unittest.TestCase):
+    def test_torn_tail_then_new_checkpoint_still_verifies(self):
+        d = tempfile.mkdtemp(prefix="tdflow-torn2-")
+        try:
+            st = Store(d).open()
+            st.append("intent")
+            st.checkpoint()
+            with open(st.checkpoint_path, "a", encoding="utf-8") as f:
+                f.write('{"seq": 1, "ha')                       # killed mid-write
+            st.append("intent")
+            st.checkpoint()                                     # must not glue onto the fragment
+            self.assertTrue(st.verify()["ok"])
+            st.close()
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_revoke_denies_even_if_reload_fails(self):
+        d = tempfile.mkdtemp(prefix="tdflow-rev-")
+        try:
+            st = Store(d).open()
+            idn = Identity(st)
+            agent, tok = idn.create_agent("A", "builder", ["/project1/**"])
+            tid = idn.authenticate(tok)
+            self.assertTrue(tid)
+
+            def boom():
+                raise RuntimeError("timeout")
+            idn.reload = boom
+            idn.revoke(tid)
+            self.assertIsNone(idn.authenticate(tok))
+            self.assertIsNone(idn.agent_for_token(tid))
+            st.close()
+        finally:
+            shutil.rmtree(d, ignore_errors=True)

@@ -61,6 +61,15 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual((st, r["result"]["isError"]), (200, False))
         self.assertEqual(self.host.calls[-1][2], {"name": "t", "version": "1"})
 
+    def test_modern_caching_hints(self):
+        # Found by the live Claude Code test: 2026-07-28 clients reject list results without them.
+        st, r = self.run_(*modern("tools/list"))
+        self.assertEqual((r["result"]["ttlMs"], r["result"]["cacheScope"]), (0, "private"))
+        st, r = self.run_(*modern("server/discover"))
+        self.assertIsInstance(r["result"]["ttlMs"], int)
+        self.assertGreaterEqual(r["result"]["ttlMs"], 0)
+        self.assertEqual(r["result"]["cacheScope"], "public")
+
     def test_modern_header_rules(self):
         body, h = modern("tools/list")
         for bad in ({"Mcp-Method": "tools/call"}, {"MCP-Protocol-Version": "2025-06-18"}):
@@ -195,7 +204,7 @@ class FakeAdapter(Adapter):
         self.executed.append((tool.name, undo_label))
         return {"done": tool.name, "_audit": {"x": 1}}
 
-    def undo(self, record):
+    def undo(self, record, snapshot=None):
         self.undone.append(record["seq"])
         return {"undone": True, "verified": True}
 
@@ -297,7 +306,7 @@ class EngineTests(unittest.TestCase):
     def test_undo_conflict_reported(self):
         self.eng.call(self.tid, "tdflow_set_parameters", {"path": "/project1/fx/a", "values": {"x": 1}})
 
-        def conflict(rec):
+        def conflict(rec, snap=None):
             raise ToolFailure("UNDO_CONFLICT", "not on top")
         self.ad.undo = conflict
         r = self.eng.call(self.tid, "tdflow_undo", {})
@@ -305,7 +314,7 @@ class EngineTests(unittest.TestCase):
 
     def test_unverified_undo_is_an_error(self):
         self.eng.call(self.tid, "tdflow_set_parameters", {"path": "/project1/fx/a", "values": {"x": 1}})
-        self.ad.undo = lambda rec: {"undone": True, "verified": False}
+        self.ad.undo = lambda rec, snap=None: {"undone": True, "verified": False}
         r = self.eng.call(self.tid, "tdflow_undo", {})
         self.assertEqual(r["structuredContent"]["code"], "UNDO_UNVERIFIED")
         self.assertTrue(r["isError"])
@@ -329,8 +338,85 @@ class EngineTests(unittest.TestCase):
             return real(kind, **kw)
         self.store.append = flaky
         r = self.eng.call(self.tid, "tdflow_set_parameters", {"path": "/project1/fx/a", "values": {"x": 1}})
-        self.assertIn("audit_warning", r["structuredContent"])
+        self.assertEqual(r["structuredContent"]["code"], "OUTCOME_UNRECORDED")     # never reported as success
+        self.assertTrue(r["isError"])
         self.assertEqual(hits, [1])
+        self.store.append = real
+        self.assertTrue(self.eng.suspended())
+        self.assertEqual(self.eng.call(self.tid, "tdflow_whoami", {})["structuredContent"]["code"], "SUSPENDED")
+
+    def test_kill_switch_between_plan_and_execute(self):
+        calls = []
+
+        def main(fn):
+            calls.append(1)
+            if len(calls) == 2:                     # the execute step: switch flipped during the intent wait
+                self.susp[0] = True
+            return fn()
+        self.eng.main = main
+        r = self.eng.call(self.tid, "tdflow_set_parameters", {"path": "/project1/fx/a", "values": {"x": 1}})
+        self.assertEqual(r["structuredContent"]["code"], "SUSPENDED")
+        self.assertEqual(self.ad.executed, [])
+        kinds = self.kinds()
+        self.assertEqual(kinds, ["intent", "outcome"])                        # accounted for, not executed
+
+    def test_project_changed_between_plan_and_execute(self):
+        n = [0]
+        real = self.ad.resolve
+
+        def resolve(tool, args):
+            n[0] += 1
+            r = real(tool, args)
+            if n[0] == 2:
+                r.targets[0] = r.targets[0].__class__("update", "/project1/fx/other", change="param", param="x")
+            return r
+        self.ad.resolve = resolve
+        r = self.eng.call(self.tid, "tdflow_set_parameters", {"path": "/project1/fx/a", "values": {"x": 1}})
+        self.assertEqual(r["structuredContent"]["code"], "PRECONDITION_CHANGED")
+        self.assertEqual(self.ad.executed, [])
+
+    def test_main_step_not_run_or_unknown(self):
+        from tdflowmcp.engine import MainNotRun, MainUnknown
+        state = {"n": 0}
+
+        def main(fn):
+            state["n"] += 1
+            if state["n"] == 2:
+                raise MainNotRun("TDFLOW_TIMEOUT")
+            return fn()
+        self.eng.main = main
+        r = self.eng.call(self.tid, "tdflow_set_parameters", {"path": "/project1/fx/a", "values": {"x": 1}})
+        self.assertEqual(r["structuredContent"]["code"], "TDFLOW_TIMEOUT")
+        self.assertFalse(self.eng.suspended())                               # never ran: nothing unaccounted
+        state["n"] = 0
+
+        def main2(fn):
+            state["n"] += 1
+            if state["n"] == 2:
+                raise MainUnknown("TDFLOW_TIMEOUT_AFTER_DISPATCH")
+            return fn()
+        self.eng.main = main2
+        r = self.eng.call(self.tid, "tdflow_set_parameters", {"path": "/project1/fx/a", "values": {"x": 1}})
+        self.assertEqual(r["structuredContent"]["code"], "OUTCOME_UNKNOWN")
+        self.assertTrue(self.eng.suspended())                                # may have run: suspend agents
+
+    def test_dat_snapshot_is_durable_before_execute(self):
+        seen = {}
+        real = self.ad.resolve
+
+        def resolve(tool, args):
+            r = real(tool, args)
+            if tool.resolver == "dat_text":
+                r.context["snapshot"] = ("/project1/fx/t", 7, "old", "a" * 64, "b" * 64)
+            return r
+
+        def execute(tool, args, res, label, readable):
+            seen["snap"] = self.store.get_snapshot(res.context["snapshot_id"])
+            return {"done": 1}
+        self.ad.resolve, self.ad.execute = resolve, execute
+        r = self.eng.call(self.tid, "tdflow_set_dat_text", {"path": "/project1/fx/t", "text": "new"})
+        self.assertFalse(r["isError"])
+        self.assertEqual(seen["snap"]["before_text"], "old")
 
     def test_session_note_is_redacted(self):
         tok = "tdf_" + "A" * 12 + "." + "b" * 43

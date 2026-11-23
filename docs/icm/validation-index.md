@@ -19,7 +19,10 @@ This file lists every check that exists, how to run it, and its last **executed 
 | Secret scan | `python tools/scan_secrets.py` | Every git-tracked file (CI step) | See runs below |
 | Spikes S4 / S7 | `python -I spikes/s4/run_s4.py .tmp/s4`, `python -I spikes/s7/run_s7.py .tmp/s7` | Undo semantics; frame callbacks with the timeline paused | Executed; see [S4](../research/2026-11-22-s4-undo-semantics.md), [S7](../../spikes/s7/README.md) |
 | Spike S6 (2025.32440) | `spikes/s6/` copied to `.tmp/s6/`, `python -I build_toe.py`, then `python -I s6_harness.py main` and `… conflict` with `TDFLOW_SRC` set | Embedded transport in TD: binding, LAN, threads, lifecycle, timeouts, conflicts, load, frame impact, recovery, static Setup page + headless browser, gate/auth/kill switch | Executed; see [S6 findings](../research/2026-11-22-s6-embedded-python-transport.md) |
-| Live coding-agent session, policy branch coverage, S1 | — | — | **Not executed** (1C item 21; no coverage tool; S1 optional) |
+| Audit-worker gate + storage + perf | `python -I tests/td/run_td_gate_tests.py [--only …]` | Five launches: storage decision, frame impact (idle/load/slow disk) and MCP latency, kill-switch race, overflow, outcome failure, crash + restart, move/copy/relocate; 1B baseline versus worker; `gate_bench` handoff costs | See runs below |
+| Phase 1C onboarding (live) | `python -I tests/td/run_td_onboard_tests.py [--no-live]` | Generated connect text → live Claude Code session (`--strict-mcp-config`, token in env only); Skills round-trip via the admin API; version mismatch; secrets | See runs below |
+| Release package | `python -I tools/package_release.py` | Clean-worktree build on 2025.32440; commit, dirty and hash checks; `dist/` | See runs below |
+| Policy branch coverage, S1, live sessions with other clients | — | — | **Not executed** (no coverage tool; S1 optional; Codex/Cursor/VS Code `documented` only) |
 
 ## Runs
 
@@ -68,6 +71,17 @@ This file lists every check that exists, how to run it, and its last **executed 
 | 2026-11-22 | TouchDesigner 2025.32440 (disposable, 2 launches) | **Phase 1B in-TD acceptance (final)** | **Pass: 41/41 in TD + 110/110 harness**; rc 0; audit 39 intent / 39 outcome / 30 deny |
 | 2026-11-22 | TouchDesigner 2025.32440 (disposable) | **Phase 1A suite on the 1B build (final)** | **Pass: 49/49 + 69/69** |
 | 2026-11-22 | TouchDesigner 2025.32440 + default browser | **Real-browser run (final)** | **Pass: 13/13 + 5/5** |
+| 2026-11-22 | TouchDesigner 2025.32440 (disposable) | `gate_bench` (handoff costs) | Main-thread append p50 5.1 ms; worker append 16.7 ms; main handoff 16.6 ms; worker read 0.03 ms. A `time.sleep(0)` yield in OnFrame had no effect (reverted) |
+| 2026-11-22 | TouchDesigner 2025.32440 | Gate suite, runs before review 7 | First run: 24/24 + 90/91 (two runner kwarg bugs aborted scripts; restart lacked fixtures). Second: 46/49 (TD's incremental save `name.1.toe` → **product fix**: base names). Third: 48/49 (test baseline bug) |
+| 2026-11-22 | TouchDesigner 2025.32440 + Claude Code 2.1.289 | Onboarding, runs before review 7 | Skills listing 404 (gate fix: `/setup/api/skills` is an admin read); then the live session connected but **rejected `tools/list`: missing MCP 2026-07-28 `ttlMs`/`cacheScope`** (fixed); then pass 5/5 + 45/45 |
+| 2026-11-22 | — | Independent review 7 (audit worker, storage, 1C) | 11 findings (0 critical, 1 High/Medium, 6 Medium, 4 Low), all fixed; see [review 7](../research/2026-11-22-phase-1c-review.md) |
+| 2026-11-22 | Windows 11, CPython 3.11.8 / TD Python 3.11.10 | unit tests (after review 7) | Pass: `Ran 231 tests … OK (skipped=2)` / `Ran 248 tests … OK (skipped=1)` (TD run includes `tests/`) |
+| 2026-11-22 | Windows PowerShell 5.1.26100 / PowerShell 7.7.0 | token-entry recipe | `[Net.NetworkCredential]::new('', <SecureString>).Password` returns the text on both |
+| 2026-11-22 | TouchDesigner 2025.32440 (working-tree build `1b6a44fd…`) | **Phase 1A suite (after review 7)** | **Pass: 49/49 + 69/69** |
+| 2026-11-22 | TouchDesigner 2025.32440 (`1b6a44fd…`) | **Phase 1B suite (after review 7)** | **Pass: 43/43 + 110/110** (`kill.queued_request_rejected` now also accepts the audited `SUSPENDED` tool error) |
+| 2026-11-22 | TouchDesigner 2025.32440 (`1b6a44fd…`; baseline clean `e15ec55` build `b9da9a18…`) | **Gate suite (after review 7)** | **Pass: 49/49 + 98/98.** OnFrame p99 1.54 ms under load, 1.44 ms with a 50 ms disk. Frames max 46.5 ms (1B) → 23.6 ms (worker). MCP sequential p50 55 ms (1B) → 83–152 ms (worker). Crash: 33/33 reported successes durable, 0 unaccounted. Overflow: 9 fail closed, 3 OK durable |
+| 2026-11-22 | TouchDesigner 2025.32440 + **Claude Code 2.1.289** (`1b6a44fd…`) | **Onboarding (after review 7)** | **Pass: 5/5 + 45/45**; `RESULT skill_version=1.0 expected_skill_version=1.0 opacity=0.25 audit_seq=22` |
+| 2026-11-22 | Windows 11 | `scan_secrets.py`, `check_docs.py` (pre-commit) | Pass: 0 findings; 0 problems |
 
 ## Local environment facts (file inspection only, 2026-11-22)
 

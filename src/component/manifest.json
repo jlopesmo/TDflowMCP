@@ -14,6 +14,9 @@
     "tdflowmcp.admin": {
       "path": "src/tdflowmcp/admin.py"
     },
+    "tdflowmcp.auditworker": {
+      "path": "src/tdflowmcp/auditworker.py"
+    },
     "tdflowmcp.compat": {
       "path": "src/tdflowmcp/compat.py"
     },
@@ -56,6 +59,12 @@
     },
     "tdflowmcp.setupapi": {
       "path": "src/tdflowmcp/setupapi.py"
+    },
+    "tdflowmcp.skills": {
+      "path": "src/tdflowmcp/skills.py"
+    },
+    "tdflowmcp.storage": {
+      "path": "src/tdflowmcp/storage.py"
     },
     "tdflowmcp.store": {
       "path": "src/tdflowmcp/store.py"
@@ -102,6 +111,12 @@
     "tellagent": {
       "text": "",
       "note": "Runtime copy of the Tell Your Coding Agent text (no secrets)"
+    },
+    "clients": {
+      "path": "src/integrations/clients.json"
+    },
+    "skill_tdflow_core": {
+      "path": "src/skills/tdflow-core/SKILL.md"
     }
   },
   "callbacks": {
@@ -145,7 +160,7 @@
       "label": "Status Detail",
       "readonly": true,
       "default": "Off. Pulse Open Setup to start the local Setup Assistant.",
-      "help": "What is happening, including browser-launch and clipboard failures"
+      "help": "One short sentence about what is happening (details: Setup page)"
     },
     {
       "page": "TDflowMCP",
@@ -156,70 +171,12 @@
     },
     {
       "page": "TDflowMCP",
-      "name": "Stopserver",
-      "type": "Pulse",
-      "label": "Stop Server",
-      "help": "Stop the listener"
-    },
-    {
-      "page": "TDflowMCP",
-      "name": "Rundiagnostics",
-      "type": "Pulse",
-      "label": "Run Diagnostics",
-      "help": "Re-run the compatibility checks"
-    },
-    {
-      "page": "TDflowMCP",
       "name": "Setupurl",
       "type": "Str",
       "label": "Setup URL",
       "readonly": true,
       "default": "",
       "help": "Address of the Setup Assistant while it is running"
-    },
-    {
-      "page": "TDflowMCP",
-      "name": "Port",
-      "type": "Int",
-      "label": "Port",
-      "default": 9480,
-      "min": 1024,
-      "max": 65535,
-      "help": "Listener port. Never changed automatically; changing it stops the listener"
-    },
-    {
-      "page": "TDflowMCP",
-      "name": "Portstatus",
-      "type": "Str",
-      "label": "Port Status",
-      "readonly": true,
-      "default": "not checked",
-      "help": "free / this component / in use by another process"
-    },
-    {
-      "page": "TDflowMCP",
-      "name": "Compatsummary",
-      "type": "Str",
-      "label": "Compatibility",
-      "readonly": true,
-      "default": "not run",
-      "help": "pass / warn / fail / unknown counts"
-    },
-    {
-      "page": "TDflowMCP",
-      "name": "Tellagent",
-      "type": "Str",
-      "label": "Tell Your Agent",
-      "readonly": true,
-      "default": "Not checked yet",
-      "help": "State of the coding-agent instructions"
-    },
-    {
-      "page": "TDflowMCP",
-      "name": "Copytellagent",
-      "type": "Pulse",
-      "label": "Copy Tell Agent",
-      "help": "Copy the Tell Your Coding Agent text to the clipboard"
     },
     {
       "page": "TDflowMCP",
@@ -271,23 +228,136 @@
     },
     {
       "page": "TDflowMCP",
+      "name": "Tellagent",
+      "type": "Str",
+      "label": "Tell Your Agent",
+      "readonly": true,
+      "default": "Not checked yet",
+      "help": "State of the coding-agent instructions"
+    },
+    {
+      "page": "TDflowMCP",
+      "name": "Copytellagent",
+      "type": "Pulse",
+      "label": "Copy Tell Agent",
+      "help": "Copy the Tell Your Coding Agent text to the clipboard"
+    },
+    {
+      "page": "TDflowMCP",
+      "name": "Viewinstructions",
+      "type": "Pulse",
+      "label": "View Agent Instructions",
+      "help": "Open the full Tell Your Coding Agent text in a viewer"
+    },
+    {
+      "page": "Advanced",
+      "name": "Stopserver",
+      "type": "Pulse",
+      "label": "Stop Server",
+      "help": "Stop the listener"
+    },
+    {
+      "page": "Advanced",
+      "name": "Rundiagnostics",
+      "type": "Pulse",
+      "label": "Run Diagnostics",
+      "help": "Re-run the compatibility checks"
+    },
+    {
+      "page": "Advanced",
+      "name": "Compatsummary",
+      "type": "Str",
+      "label": "Compatibility",
+      "readonly": true,
+      "default": "not run",
+      "help": "pass / warn / fail / unknown counts"
+    },
+    {
+      "page": "Advanced",
+      "name": "Port",
+      "type": "Int",
+      "label": "Port",
+      "default": 9480,
+      "min": 1024,
+      "max": 65535,
+      "help": "Listener port. Never changed automatically; changing it stops the listener"
+    },
+    {
+      "page": "Advanced",
+      "name": "Portstatus",
+      "type": "Str",
+      "label": "Port Status",
+      "readonly": true,
+      "default": "not checked",
+      "help": "free / this component / in use by another process"
+    },
+    {
+      "page": "Advanced",
       "name": "Projectroot",
       "type": "Str",
       "label": "Project Root",
       "default": "/project1",
-      "help": "Host project root for future agent scopes (Phase 1B); unused in 1A"
+      "help": "Agents can only see and change operators inside this component"
     },
     {
-      "page": "TDflowMCP",
+      "page": "Advanced",
+      "name": "Datalocation",
+      "type": "Menu",
+      "label": "Data Location",
+      "default": "project",
+      "menu": [
+        "project",
+        "private"
+      ],
+      "menu_labels": [
+        "Project Folder (.tdflowmcp)",
+        "Private Storage"
+      ],
+      "help": "Project Folder: a git-ignored .tdflowmcp folder next to the .toe (unsaved, read-only, network and cloud-synced folders fall back to private storage). Changing it requires Confirm Move."
+    },
+    {
+      "page": "Advanced",
       "name": "Datadir",
       "type": "Str",
-      "label": "Data Directory",
+      "label": "Data Location In Use",
       "readonly": true,
-      "default": "%LOCALAPPDATA%\\TDflowMCP",
-      "help": "Where runtime state will live (nothing is stored in Phase 1A)"
+      "default": "(not opened)",
+      "help": "Where this project's audit log, sessions and recovery snapshots are stored (credentials and keys always stay in private per-user storage)"
     },
     {
-      "page": "TDflowMCP",
+      "page": "Advanced",
+      "name": "Datastatus",
+      "type": "Str",
+      "label": "Data Status",
+      "readonly": true,
+      "default": "not opened",
+      "help": "Storage decision and anything that needs your confirmation"
+    },
+    {
+      "page": "Advanced",
+      "name": "Confirmmove",
+      "type": "Pulse",
+      "label": "Confirm Move",
+      "help": "This project was moved/renamed or its data location changed: verify and adopt or copy its audit log (the old copy is left untouched)"
+    },
+    {
+      "page": "Advanced",
+      "name": "Claimproject",
+      "type": "Pulse",
+      "label": "Claim As New Project",
+      "help": "Treat this project as new: new identity and empty audit log; existing data is left untouched; agents need new tokens"
+    },
+    {
+      "page": "Advanced",
+      "name": "Projectid",
+      "type": "Str",
+      "label": "Project ID",
+      "readonly": true,
+      "default": "",
+      "help": "TDflowMCP identity of this project (saved in the .toe; not a secret)"
+    },
+    {
+      "page": "Advanced",
       "name": "Loglevel",
       "type": "Menu",
       "label": "Log Level",

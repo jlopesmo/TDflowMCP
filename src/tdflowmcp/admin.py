@@ -51,6 +51,7 @@ class AdminAuth:
         self.pending: Optional[Dict] = None                  # {"hash", "code", "created", "state", "wall"}
         self._sessions: Dict[str, Tuple[str, float]] = {}     # sid_hash -> (csrf_hash, expires)   [immutable swap]
         self._ready: Dict[str, Tuple[str, str]] = {}          # pair_hash -> (sid, csrf) to hand out once
+        self._mut = __import__("threading").Lock()
 
     # ---- main thread ---------------------------------------------------------------------------
     def request(self) -> Tuple[str, str]:
@@ -82,9 +83,10 @@ class AdminAuth:
         if not p or p["state"] != "pending":
             return False
         sid, csrf = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
-        sessions = {}                                         # one admin session at a time: older ones end
-        sessions[_h(sid)] = (_h(csrf), self.clock() + self.session_seconds)
-        self._sessions = sessions
+        with self._mut:
+            sessions = {}                                     # one admin session at a time: older ones end
+            sessions[_h(sid)] = (_h(csrf), self.clock() + self.session_seconds)
+            self._sessions = sessions
         self._ready[p["hash"]] = (sid, csrf)
         self.pending["state"] = "approved"
         return True
@@ -108,9 +110,11 @@ class AdminAuth:
         return p["state"], None
 
     def logout(self, sid_hash: str):
-        sessions = dict(self._sessions)
-        sessions.pop(sid_hash, None)
-        self._sessions = sessions
+        """May run on a handler thread (admin API); guarded against a concurrent approval."""
+        with self._mut:
+            sessions = dict(self._sessions)
+            sessions.pop(sid_hash, None)
+            self._sessions = sessions
 
     def logout_all(self):
         self._sessions, self._ready, self.pending = {}, {}, None

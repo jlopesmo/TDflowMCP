@@ -18,6 +18,9 @@ Fact contract (all keys optional):
   bind_evidence: bindverify.Evidence
   port, port_listeners_other: list of (addr, port, pid) of OTHER processes; port_probe_tdflowmcp: bool
   datadir_writable: bool
+  storage_status: "OK"|"NEW"|"FALLBACK"|"UNSAVED"|"OVERRIDE" (usable) | "MOVED"|"COPIED"|"RELOCATE"|"LEGACY"
+                  (needs the user) | "BLOCKED" (storage could not open); storage_reason: str
+  audit_verify: None (store not open) | Store.verify() result
   instances: number of TDflowMCP components in the project (including this one)
   clients: {client_id: {"selected": bool, "present": bool | None, "support": str}}
 """
@@ -200,13 +203,35 @@ def check_sec_selftest(f: Mapping) -> CheckResult:
     return CheckResult("sec.selftest", "fail", "a security self-test failed; MCP cannot be enabled", "sec.selftest.failed")
 
 
+NEEDS_USER = ("MOVED", "COPIED", "RELOCATE", "LEGACY")
+
+
 def check_datadir(f: Mapping) -> CheckResult:
+    st, why = f.get("storage_status"), str(f.get("storage_reason") or "")
+    if st in NEEDS_USER:
+        return CheckResult("fs.datadir", "fail", f"project data needs your confirmation ({st.lower()}): {why}",
+                           "fs.datadir.identity")
+    if st == "BLOCKED":
+        return CheckResult("fs.datadir", "fail", "the audit store could not be opened: " + why, "fs.datadir.unwritable")
     w = f.get("datadir_writable")
     if not isinstance(w, bool):
         return CheckResult("fs.datadir", "unknown", "data directory not checked")
-    if w:
-        return CheckResult("fs.datadir", "pass", "data directory writable")
-    return CheckResult("fs.datadir", "fail", "data directory not writable", "fs.datadir.unwritable")
+    if not w:
+        return CheckResult("fs.datadir", "fail", "data directory not writable", "fs.datadir.unwritable")
+    if st in ("FALLBACK", "UNSAVED"):
+        return CheckResult("fs.datadir", "pass", "data kept in private per-user storage: " + why)
+    return CheckResult("fs.datadir", "pass", "data directory writable")
+
+
+def check_audit_integrity(f: Mapping) -> CheckResult:
+    v = f.get("audit_verify")
+    if not isinstance(v, Mapping):
+        return CheckResult("audit.integrity", "unknown", "audit log not opened yet")
+    if v.get("ok"):
+        return CheckResult("audit.integrity", "pass", f"audit chain and keyed checkpoints verify ({v.get('events', 0)} events)")
+    what = "hash chain broken" if not v.get("chain_ok") else (
+        "checkpoints missing" if v.get("checkpoints_missing") else "a keyed checkpoint does not match")
+    return CheckResult("audit.integrity", "fail", f"audit log failed verification: {what}", "audit.integrity.failed")
 
 
 def check_instances(f: Mapping) -> CheckResult:
@@ -231,7 +256,7 @@ def check_agent_clients(f: Mapping) -> CheckResult:
 
 CHECKS: Sequence[Callable[[Mapping], CheckResult]] = (
     check_td_build, check_py_version, check_py_deps, check_net_capability, check_net_bind,
-    check_net_port, check_datadir, check_instances, check_agent_clients, check_sec_selftest,
+    check_net_port, check_datadir, check_audit_integrity, check_instances, check_agent_clients, check_sec_selftest,
 )
 
 
@@ -258,7 +283,7 @@ def mcp_enable_allowed(results: Sequence[CheckResult], has_enabled_agent: bool,
     blockers = []
     if by.get("td.build") is None or by["td.build"].result in ("fail", "unknown"):
         blockers.append("td.build")
-    for cid in ("net.capability", "net.bind", "net.port", "fs.datadir"):
+    for cid in ("net.capability", "net.bind", "net.port", "fs.datadir", "audit.integrity"):
         if by.get(cid) is None or by[cid].result != "pass":
             blockers.append(cid)
     if not security_selftests_pass:

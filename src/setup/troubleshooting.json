@@ -174,6 +174,34 @@
       "allowed_actions": [
         "rerun_checks"
       ]
+    },
+    "fs.datadir.identity": {
+      "title": "This project's TDflowMCP data needs your confirmation",
+      "cause": "The project was moved, renamed or copied, its data location changed, or older TDflowMCP data was found. TDflowMCP never relocates or adopts audit data silently, so MCP stays disabled until you choose.",
+      "confirm": "Read Data Status on the component's Advanced page.",
+      "steps": [
+        "If you moved or renamed this project (or changed Data Location), pulse Confirm Move: the audit log is verified and copied (or adopted if it moved with the project); the old copy is left untouched.",
+        "If this is a copy that should be a separate project, pulse Claim As New Project: it gets a new identity and an empty audit log, and agents need new tokens.",
+        "Save the project afterwards so the component keeps its Project ID."
+      ],
+      "docs": [],
+      "allowed_actions": [
+        "rerun_checks"
+      ]
+    },
+    "audit.integrity.failed": {
+      "title": "The audit log failed verification",
+      "cause": "The hash chain or a keyed checkpoint in private storage does not match the audit database. The database may have been edited, replaced or restored from an older copy.",
+      "confirm": "Open the Setup page: the Audit section shows which check failed.",
+      "steps": [
+        "Do not delete anything: keep the .tdflowmcp folder for investigation.",
+        "If you restored the project from a backup, restore the matching .tdflowmcp folder too, then run the checks again.",
+        "To start over, pulse Claim As New Project: the old log stays untouched and a new identity and log are created."
+      ],
+      "docs": [],
+      "allowed_actions": [
+        "rerun_checks"
+      ]
     }
   }
 }

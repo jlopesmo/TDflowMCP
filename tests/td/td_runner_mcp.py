@@ -1,8 +1,9 @@
 """Phase 1B part of the in-TD runner (imported by td_runner.py; runs INSIDE a disposable project).
 
-Drives only the component's parameters, plus documented test seams (``launcher``, closing/reopening
-the store, a deliberate main-thread block, a human edit inside a ``ui.undo`` block). Network work is
-done by the external harness (run_td_mcp_tests.py) at checkpoints.
+Drives only the component's parameters, plus documented test seams (``launcher``, closing the store
+inside the audit worker, a deliberate main-thread block, a human edit inside a ``ui.undo`` block). Network
+work is done by the external harness (run_td_mcp_tests.py) at checkpoints. The main thread never waits for
+the audit worker: store reads are submitted and polled (``store_op``).
 """
 import json
 import os
@@ -12,6 +13,13 @@ import tempfile
 import time
 
 import td
+
+
+def store_op(ext, until, op, *args, **kw):
+    """Generator: run one store operation on the audit worker and poll for it (never blocks TD)."""
+    f = ext.worker.submit(op, *args, **kw)
+    yield until(f.done, 15, "store_" + op)
+    return f.result(0)
 
 
 def fixtures():
@@ -58,7 +66,7 @@ def run(comp, ext, T, frames, until, checkpoint, R, restart=False):
     T("pairing.param_shows_code", bool(code) and code in comp.par.Pairingrequest.eval(),
       param=comp.par.Pairingrequest.eval())
     comp.par.Approvepairing.pulse()
-    yield frames(5)
+    yield until(lambda: comp.par.Pairingrequest.eval() == "", 10, "pairing_approved")   # after a durable record
     T("pairing.approved_in_td", comp.par.Pairingrequest.eval() == "")
     yield checkpoint("pair_approved", {})
     # tokens are created by the harness through the paired admin API
@@ -68,7 +76,7 @@ def run(comp, ext, T, frames, until, checkpoint, R, restart=False):
     yield until(lambda: comp.par.Status.eval() == "Enabled", 15, "enable")
     T("enable.enabled", comp.par.Status.eval() == "Enabled" and comp.par.Enablemcp.eval(),
       status=comp.par.Status.eval(), detail=comp.par.Statusdetail.eval())
-    T("enable.store_in_test_datadir", ext.store is not None and ext.store.datadir == os.environ.get("TDFLOW_DATADIR"))
+    T("enable.store_in_test_datadir", ext.worker is not None and ext.worker.datadir == os.environ.get("TDFLOW_DATADIR"))
     g = yield checkpoint("enabled", {"pid": os.getpid(), "level_opacity": fx["level_opacity"]})
 
     # Human edit interleaved after an agent change (harness made one just before this checkpoint).
@@ -90,41 +98,45 @@ def run(comp, ext, T, frames, until, checkpoint, R, restart=False):
     comp.par.Suspendagents = False
     yield frames(3)
     yield checkpoint("resumed", {})
-    last_seq = ext.store.events(limit=1)[0]["seq"]
+    last_seq = (yield from store_op(ext, until, "events", limit=1))[0]["seq"]
     yield checkpoint("queue_block", {})                   # harness sends a call 0.5 s after this answer
     time.sleep(2.0)                                       # the request is now queued (main thread blocked)
     comp.par.Suspendagents = True                         # kill switch flipped before the job is dispatched
     R["kill_param_callback_synchronous"] = ext.suspended  # informational; OnFrame mirrors the parameter first
     yield frames(10)
-    new = [e for e in ext.store.events(limit=50) if e["seq"] > last_seq]
+    new = [e for e in (yield from store_op(ext, until, "events", limit=50)) if e["seq"] > last_seq]
     T("kill.queued_request_not_executed", not any(e["kind"] in ("intent", "outcome") for e in new),
       new_kinds=[e["kind"] for e in new])
     yield checkpoint("queue_checked", {})
     comp.par.Suspendagents = False
     yield frames(5)
 
-    # Audit store down → every call fails closed; then reopen.
+    # Audit store down → every call fails closed, MCP turns itself off; turning it on again reopens.
     before = td.op("/project1/fx/level1").par.opacity.eval()
-    real_ensure = ext.ensure_store
-    ext.ensure_store = lambda: False                     # test seam: the store cannot be reopened meanwhile
-    ext.store.close()
+    yield from store_op(ext, until, "close")              # test seam: the store dies inside the worker
     yield checkpoint("audit_down", {})
+    yield frames(5)
     T("audit.fail_closed_no_change", td.op("/project1/fx/level1").par.opacity.eval() == before)
-    del ext.ensure_store                                 # back to the real method
-    T("audit.reopened", real_ensure())
+    T("audit.mcp_turned_off", comp.par.Status.eval() != "Enabled" and not comp.par.Enablemcp.eval(),
+      status=comp.par.Status.eval(), detail=comp.par.Statusdetail.eval())
+    T("audit.no_silent_reopen", not ext.worker.available)
+    comp.par.Enablemcp = True                             # explicit user action: reopen and re-check
+    yield until(lambda: comp.par.Status.eval() == "Enabled", 15, "reenable_after_audit_down")
+    T("audit.reopened", comp.par.Status.eval() == "Enabled" and ext.worker.available)
     yield checkpoint("audit_up", {})
 
     # Integrity: verify, checkpoint, and detect tampering on a copy of the database.
-    v1 = ext.store.verify()
-    cp = ext.store.checkpoint()
-    v2 = ext.store.verify()
+    v1 = yield from store_op(ext, until, "verify")
+    cp = yield from store_op(ext, until, "checkpoint")
+    v2 = yield from store_op(ext, until, "verify")
     T("audit.chain_ok", v1["ok"] and v2["ok"] and v2["verified_through"] == cp["seq"], v1=v1, v2=v2)
     tmp = tempfile.mkdtemp(prefix="tdflow-tamper-", dir=os.environ.get("TDFLOW_RUN_DIR"))
+    dd = ext.worker.datadir
     for f in ("tdflowmcp.sqlite", "audit.key", "checkpoints.jsonl"):
-        shutil.copyfile(os.path.join(ext.store.datadir, f), os.path.join(tmp, f))
+        shutil.copyfile(os.path.join(dd, f), os.path.join(tmp, f))
     for f in ("tdflowmcp.sqlite-wal", "tdflowmcp.sqlite-shm"):
-        if os.path.exists(os.path.join(ext.store.datadir, f)):
-            shutil.copyfile(os.path.join(ext.store.datadir, f), os.path.join(tmp, f))
+        if os.path.exists(os.path.join(dd, f)):
+            shutil.copyfile(os.path.join(dd, f), os.path.join(tmp, f))
     S = __import__("sys").modules["tdflowmcp.store"].Store
     copy = S(tmp).open()
     copy.conn.execute("DROP TRIGGER events_no_update")
@@ -133,11 +145,12 @@ def run(comp, ext, T, frames, until, checkpoint, R, restart=False):
     copy.close()
     T("audit.tamper_detected", not vt["ok"] and vt["first_bad_seq"] is not None, verify=vt)
     shutil.rmtree(tmp, ignore_errors=True)
-    events = ext.store.events(limit=2000)
+    events = yield from store_op(ext, until, "events", limit=2000)
     R["audit_counts"] = {k: sum(1 for e in events if e["kind"] == k) for k in {e["kind"] for e in events}}
     T("audit.intent_before_every_outcome", _intent_pairs(events), counts=R["audit_counts"])
-    T("sessions.recorded", len(ext.store.sessions()) >= 1, sessions=len(ext.store.sessions()))
-    tokens_rows = ext.store.conn.execute("SELECT token_id, salt, digest FROM tokens").fetchall()
+    sess = yield from store_op(ext, until, "sessions")
+    T("sessions.recorded", len(sess) >= 1, sessions=len(sess))
+    tokens_rows = yield from store_op(ext, until, "token_rows")
     diag = ext.Diagnostics()
     T("threads.dispatch_on_main_thread_only", diag["dispatch_threads"]["other"] == 0 and diag["dispatch_threads"]["main"] > 0,
       dispatch=diag["dispatch_threads"])
@@ -151,7 +164,8 @@ def run(comp, ext, T, frames, until, checkpoint, R, restart=False):
     yield frames(5)
     T("disable.status", comp.par.Status.eval() == "Setup", status=comp.par.Status.eval())
     yield checkpoint("disabled", {})
-    R["datadir_files"] = sorted(os.listdir(ext.store.datadir))
+    R["datadir_files"] = sorted(os.listdir(ext.worker.datadir))
+    R["frame_stats_onframe"] = ext.FrameStats()
 
 
 def _intent_pairs(events):
@@ -168,7 +182,7 @@ def _restart(comp, ext, T, frames, until, checkpoint, R):
     yield until(lambda: comp.par.Status.eval() == "Enabled", 15, "enable_after_restart")
     T("restart.enabled_with_persisted_agents", comp.par.Status.eval() == "Enabled",
       status=comp.par.Status.eval(), detail=comp.par.Statusdetail.eval())
-    v = ext.store.verify()
+    v = yield from store_op(ext, until, "verify")
     T("restart.audit_chain_ok", v["ok"] and v["checkpoints"] >= 1, verify=v)
     yield checkpoint("restart_enabled", {"pid": os.getpid()})
     comp.par.Enablemcp = False

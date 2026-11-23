@@ -118,11 +118,15 @@ def handle(body: bytes, headers: Dict[str, str], host: ToolHost) -> Reply:
 
     if method == "ping":
         return ok({})
+    # 2026-07-28 caching hints (server/utilities/caching) are required on complete discover/list results.
+    # tools/list depends on the caller's token and on the kill switch: never cached, never shared.
     if method == "server/discover":
-        return ok({"supportedVersions": list(SUPPORTED), "capabilities": {"tools": {"listChanged": False}},
-                   "serverInfo": SERVER_INFO, "instructions": INSTRUCTIONS})
+        r = {"supportedVersions": list(SUPPORTED), "capabilities": {"tools": {"listChanged": False}},
+             "serverInfo": SERVER_INFO, "instructions": INSTRUCTIONS}
+        return ok(dict(r, ttlMs=60000, cacheScope="public") if modern else r)
     if method == "tools/list":
-        return ok({"tools": host.list_tools()})
+        r = {"tools": host.list_tools()}
+        return ok(dict(r, ttlMs=0, cacheScope="private") if modern else r)
     if method == "tools/call":
         name, args = params.get("name"), params.get("arguments", {})
         if not isinstance(name, str):

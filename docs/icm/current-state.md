@@ -1,37 +1,40 @@
 # TDflowMCP — Current state
 
-**Observed 2026-11-22, branch `dev`. Phase 1B (secure MCP core) is complete** (owner D12). The packaged development build passes its in-TouchDesigner security and functionality acceptance suite on TouchDesigner **2025.32440**, after independent review 6. Phase 1A stays verified on the same build. This file records evidence only. Plans live in the [roadmap](roadmap.md).
+**Observed 2026-11-22, branch `dev`. Phase 1C (agent onboarding) is complete in the development build, together with the ADR-0006 audit worker and project-local storage** (owner D13). A live Claude Code session connected using only the generated instructions, and the packaged component passes its in-TouchDesigner acceptance suites on **2025.32440**. Phases 1A and 1B are re-verified on the same build. This file records evidence only. Plans live in the [roadmap](roadmap.md).
 
 ## Verified
 - **Repository:** private `jlopesmo/TDflowMCP`. `main` = `066dbd0` (Phase 0 foundation), **unchanged**. Development continues on `dev`.
 - **ADRs:**
-  - 0002, 0003, 0006, 0007, 0009 and 0010: Conditionally Accepted, with Phase 1 gates recorded.
-  - **0012 and 0013: Conditionally Accepted** (owner D12).
-  - 0011: still Proposed (needed before 1C).
-  - **ADR-0006 write-latency gate: open** (≈ 5.3 ms per audit append with `synchronous=FULL`; owner decision).
-- **Phase 1A** ([record](../research/2026-11-22-phase-1a-component.md)): the component, embedded transport, bind gate and Setup Assistant. Re-verified on the 1B build: 49/49 + 69/69; real default browser 13/13 + 5/5.
-- **Phase 1B** ([record](../research/2026-11-22-phase-1b-mcp-core.md), [review 6](../research/2026-11-22-phase-1b-review.md)), in the development build `build/TDflowMCP.tox` v`0.2.0.dev1` (tool surface `1`, SHA-256 `52d039eb…`, git-ignored, not a release):
-  - **Policy:** server-side deny-by-default CRUD+execute scopes with hard denies:
-    - TDflowMCP instances and their subtrees, including reads;
-    - on ancestors: delete, rename, flags, extensions and cloning;
-    - `tdflowProject`, `/sys`, `/local`, `/ui`, and anything outside `Projectroot`.
-  - **Classification:** a creation **allowlist**. Expressions, Python, reference and file parameters, wires into DATs, and DAT text not tagged `tdflowdata` by the user are all `execute`, which is denied. **No arbitrary Python execution exists.**
-  - **Identity:** salted-hash tokens, created and revoked only from a browser session paired by approval **inside TD**; CSRF on admin reads and writes; server-side logout.
-  - **Durable SQLite audit:** intent before and outcome after every call; hash chain plus keyed checkpoints; tamper detection; **fail closed** (no audit, no call); a failed outcome write suspends all agents; session grouping and notes persist across a TD restart.
-  - **Kill switch** (`Suspendagents`): rejects every call, including requests already queued.
-  - **Enable MCP:** only after its preconditions pass.
-  - **MCP protocol:** 2026-07-28 stateless and the legacy `initialize` flow; conformance tests.
-  - **Tools:** 16 (14 core plus session note and session list), every call checked by policy and audited.
-  - **Verified undo:** for set parameters, create, delete, connect, disconnect and DAT text (snapshot). `UNDO_CONFLICT` after human, other-agent or restart interleaving (S4b).
-  - **Final in-TD acceptance:** **41/41 + 110/110** over two launches (`mcp`, `mcp_restart`); TD exit code 0; no listener left; other TD processes untouched.
-- **Spikes:**
-  - S4 (undo) and **S4b** (stack introspection, interleaving, ids, save/reload) ([S4 record](../research/2026-11-22-s4-undo-semantics.md));
-  - **S7** (paused timeline).
-- **TDMCP comparison:** documentation only ([record](../research/2026-11-22-tdmcp-comparison.md)). TDMCP requires 2025.33230+, so nothing was downloaded.
+  - 0002, 0003, 0006, 0007, 0009, 0010, 0012 and 0013: Conditionally Accepted, with their gates recorded.
+  - **0011: Conditionally Accepted** (owner D13); its 1C gates passed.
+  - **ADR-0006, revised:** main-thread latency gate passed with the audit worker. The MCP-latency tradeoff awaits owner acceptance ([B6](roadmap.md#open-blockers-and-owner-actions)).
+- **Phase 1A and 1B:** as recorded in the [1A record](../research/2026-11-22-phase-1a-component.md) and the [1B record](../research/2026-11-22-phase-1b-mcp-core.md). Re-verified on the 1C build after [review 7](../research/2026-11-22-phase-1c-review.md): **1A 49/49 + 69/69; 1B 43/43 + 110/110**.
+- **Audit worker** ([record](../research/2026-11-22-audit-worker-and-phase-1c.md)):
+  - One SQLite worker thread, FIFO; `synchronous=FULL` + WAL kept.
+  - TD's main thread never waits for disk I/O. MCP and admin requests are orchestrated on handler threads; TD steps run on the main thread via `call_main`.
+  - Durable intent before execute, durable outcome before success. Fail closed on overflow, timeout, worker failure or lost durability; agents are suspended when an outcome cannot be recorded.
+  - In TD:
+    - OnFrame p99 ≤ 1.6 ms under load and with a simulated 50 ms disk; frame max 23.6 ms (1B: 46.5 ms).
+    - Crash, kill-switch race, overflow, injected outcome failure and restart all pass.
+  - **MCP latency is higher:** ≈ 83–152 ms sequential p50, against 55 ms on a clean 1B build. Cause: TouchDesigner GIL handoffs, measured.
+- **Project-local storage:**
+  - The audit DB, sessions and DAT snapshots go in a git-ignored `.tdflowmcp/<name>/` next to the `.toe`. Credentials, the audit key and keyed checkpoints stay in private per-user storage.
+  - Unsaved, read-only, network and cloud-synced folders fall back to private storage (fallbacks unit-tested; project-local in TD).
+  - Moved, copied and relocated projects are detected, and nothing is relocated without Confirm Move (verified copy or adoption) or Claim As New Project. TD incremental saves count as the same project. All of this is verified in TD.
+- **Phase 1C:**
+  - **Client registry:** `src/integrations/clients.json`. Claude Code is primary; Codex, Cursor and VS Code Copilot are documented only.
+  - **Connection instructions:** "Connect your coding agent", with the token always `${TDFLOW_TOKEN}`.
+  - **Live Claude Code 2.1.289 session:** connected using the generated text; scoped edit audited; no token in any file or output.
+  - **Skills:** `tdflow-core` v1.0, with a consent-based install/update/uninstall round-trip and hash manifest.
+  - **Version mismatch** is surfaced on the Setup page and through `tdflow_whoami`.
+  - **UX corrections:** shorter Status Detail, an Advanced page, View Agent Instructions.
+  - **Packaging:** `tools/package_release.py` and the [install guide](../operations/install.md).
+- **Protocol fix found live:** MCP 2026-07-28 caching hints (`ttlMs`, `cacheScope`) on `tools/list` and `server/discover`.
 - **Tests and checks:**
-  - **204 unit tests** pass on CPython 3.11.8 (2 skipped) and TD Python 3.11.10 (1 skipped; that run includes the `jsonschema` cross-check).
-  - The doc checker passes.
-  - The **secret scan** (new CI step) finds nothing in the repository.
+  - 231 unit tests on CPython 3.11.8 (2 skipped) and 248 on TD Python 3.11.10 (1 skipped).
+  - Gate suite 49/49 + 98/98; onboarding 5/5 + 45/45.
+  - Doc checker and secret scan pass.
+  - Packaged-build results are in the [validation index](validation-index.md).
 
 ## Not implemented (nothing below exists)
 - **Withheld by design:**
@@ -41,34 +44,27 @@
 - **Later phases:**
   - the governance dashboard (2B);
   - checkpoints, handoffs and memory tools (2A);
-  - client connection instructions, Skills, `.tox` packaging and releases (1C).
-- **Dev mode:** file-synced DATs are not implemented.
+  - a dashboard UI for choosing data locations beyond the `Datalocation` parameter (2B).
+- **Not yet:**
+  - the main-thread continuation that would cut MCP latency (proposed);
+  - a 1.0 release (packages are `.dev` development builds);
+  - dev-mode file-synced DATs.
 
 ## Not observed / unverified
-- **CI:** no GitHub Actions run has been observed for any commit ([B3](roadmap.md#open-blockers-and-owner-actions)). The new secret-scan step has run locally only.
-- **Live coding-agent session:** a live Claude Code (or other client) session against the endpoint is a 1C item. The acceptance suite uses its own MCP client for both protocol eras.
+- **CI:** no GitHub Actions run has been observed for any commit ([B3](roadmap.md#open-blockers-and-owner-actions)).
+- **Other clients:** Codex CLI, Cursor and VS Code Copilot connections are documented only, with no live test. Codex facts came from a summarised documentation fetch.
+- **Literal paths not reproduced in TD:** network, cloud-synced and read-only folders are unit-tested with injected classifiers. Windows junction rejection for Skills is unit-tested; the in-TD round-trip did not create junctions.
 - **Policy branch coverage:** not measured (no coverage tool installed).
-- **Hands-on TDMCP comparison:** needs a machine with TD 2025.33230+.
+- **Hands-on TDMCP comparison:** needs TD 2025.33230+.
 - **Literal mouse drag:** not automated; `loadTox`, the same load path, is tested.
-- **Cloudflare / TDMCPSkills:** facts remain documentation-level.
 
 ## Commit record
 - `82b64f1`, `b70000a`, `066dbd0`, `380d317`: Phase 0. `main` = `066dbd0`.
-- `377841c`, `ec259ed`: S5. `591b01e`, `3d0081e`: S6. `e680b47`, `9939af9`: Phase 1A.
-- `e15ec55`: Phase 1B (secure MCP core, review 6 fixes). Pushed to `origin/dev` and observed with `git ls-remote` (`refs/heads/dev` = `e15ec55…`, `refs/heads/main` = `066dbd0…`, so `main` is unchanged). This record was added by the follow-up commit. CI: **not observed**.
+- `377841c`, `ec259ed`: S5. `591b01e`, `3d0081e`: S6. `e680b47`, `9939af9`: Phase 1A. `e15ec55`, `a4660cd`: Phase 1B.
+- Phase 1C + audit worker: recorded by the follow-up commit (SHA, push observation and package evidence).
 
-## Phase 1C prerequisites (next)
-1. **Owner decisions:**
-   - Accept or revise ADR-0011 (agent integration and Skills) (B5).
-   - Decide the ADR-0006 latency gate: keep `synchronous=FULL`, use WAL `NORMAL`, or batch read events.
-2. **Process:** an observed CI run (B3) with the new secret-scan step.
-3. **1C engineering:**
-   - the client registry with support levels (item 20);
-   - "Tell Your Coding Agent" connection instructions with a `${TDFLOW_TOKEN}` placeholder, plus a **live Claude Code session** against a disposable project (item 21; also ADR-0003's live-client gate);
-   - the Skills bundle with assisted writes (22);
-   - version management (23);
-   - `.tox` packaging and the install guide (24).
-4. **Follow-ups from review 6** (documented residual risks):
-   - anchor checkpoints outside `Datadir` (e.g. DPAPI);
-   - bind and export propagation;
-   - mitigating denial of service on pairing.
+## Next (owner decisions first)
+1. **B6:** accept the MCP-latency tradeoff of the audit worker, or request the main-thread continuation first.
+2. **B3:** an observed CI run.
+3. **Remaining review-6 follow-ups:** bind/export propagation; pairing DoS mitigation. Checkpoints are now anchored in private storage outside the project.
+4. **Phase 2A** (continuity and memory) per the [roadmap](roadmap.md).

@@ -1,0 +1,137 @@
+{
+  "schema": "tdflowmcp.clients/1",
+  "policy": "Instruction-only: TDflowMCP never writes coding-agent configuration. Tokens are referenced as ${TDFLOW_TOKEN} (or the client's own environment syntax) and never written into any file. 'verified' requires a recorded live test (docs/icm/validation-index.md).",
+  "facts_checked": "2026-11-22",
+  "server_name": "tdflow",
+  "clients": [
+    {
+      "id": "claude-code",
+      "display": "Claude Code",
+      "support": "primary",
+      "docs": [
+        "https://code.claude.com/docs/en/mcp",
+        "https://code.claude.com/docs/en/cli-reference",
+        "https://code.claude.com/docs/en/skills"
+      ],
+      "mcp": {
+        "transport": "http",
+        "config_file_note": "Project scope: .mcp.json at the project root (shared via version control). User/local scope: ~/.claude.json via 'claude mcp add'. ${VAR} is expanded in 'headers'.",
+        "json": {
+          "mcpServers": {
+            "tdflow": {
+              "type": "http",
+              "url": "{url}",
+              "headers": {
+                "Authorization": "Bearer ${TDFLOW_TOKEN}"
+              }
+            }
+          }
+        },
+        "add_command": {
+          "bash": "claude mcp add --transport http --scope user tdflow {url} --header 'Authorization: Bearer ${TDFLOW_TOKEN}'",
+          "zsh": "claude mcp add --transport http --scope user tdflow {url} --header 'Authorization: Bearer ${TDFLOW_TOKEN}'",
+          "powershell": "claude mcp add --transport http --scope user tdflow {url} --header 'Authorization: Bearer ${TDFLOW_TOKEN}'"
+        },
+        "add_command_note": "Single quotes keep ${TDFLOW_TOKEN} literal in bash, zsh and PowerShell, so the token itself is never stored. Documented form; the live test used the JSON form.",
+        "check": "claude mcp list"
+      },
+      "skills": {
+        "format": "skill-md",
+        "user_dir": "~/.claude/skills",
+        "project_dir": ".claude/skills"
+      },
+      "version_command": "claude --version",
+      "verified": {
+        "client_version": null,
+        "date": null,
+        "evidence": null
+      }
+    },
+    {
+      "id": "codex",
+      "display": "OpenAI Codex CLI",
+      "support": "documented",
+      "docs": [
+        "https://developers.openai.com/codex/mcp",
+        "https://developers.openai.com/codex/config-reference"
+      ],
+      "mcp": {
+        "transport": "http",
+        "config_file_note": "~/.codex/config.toml (or a trusted project's .codex/config.toml). bearer_token_env_var names the variable that holds the token.",
+        "toml": "[mcp_servers.tdflow]\nurl = \"{url}\"\nbearer_token_env_var = \"TDFLOW_TOKEN\""
+      },
+      "skills": null,
+      "facts_note": "From the vendor documentation (summarised by the fetch tool, not quoted verbatim). Not live-tested.",
+      "verified": {
+        "client_version": null,
+        "date": null,
+        "evidence": null
+      }
+    },
+    {
+      "id": "cursor",
+      "display": "Cursor",
+      "support": "documented",
+      "docs": [
+        "https://cursor.com/docs/context/mcp"
+      ],
+      "mcp": {
+        "transport": "http",
+        "config_file_note": "~/.cursor/mcp.json (all projects) or .cursor/mcp.json (one project). ${env:NAME} is resolved in 'headers'.",
+        "json": {
+          "mcpServers": {
+            "tdflow": {
+              "url": "{url}",
+              "headers": {
+                "Authorization": "Bearer ${env:TDFLOW_TOKEN}"
+              }
+            }
+          }
+        }
+      },
+      "skills": null,
+      "verified": {
+        "client_version": null,
+        "date": null,
+        "evidence": null
+      }
+    },
+    {
+      "id": "vscode-copilot",
+      "display": "VS Code (GitHub Copilot)",
+      "support": "documented",
+      "docs": [
+        "https://code.visualstudio.com/docs/agents/reference/mcp-configuration"
+      ],
+      "mcp": {
+        "transport": "http",
+        "config_file_note": "~/.copilot/mcp-config.json (user). ${NAME} references are allowed in HTTP header values; do not store literal credentials.",
+        "json": {
+          "mcpServers": {
+            "tdflow": {
+              "type": "http",
+              "url": "{url}",
+              "headers": {
+                "Authorization": "Bearer ${TDFLOW_TOKEN}"
+              },
+              "tools": [
+                "*"
+              ]
+            }
+          }
+        }
+      },
+      "skills": null,
+      "verified": {
+        "client_version": null,
+        "date": null,
+        "evidence": null
+      }
+    }
+  ],
+  "token_env": {
+    "bash": "read -rs TDFLOW_TOKEN && export TDFLOW_TOKEN   # paste the token, press Enter (not echoed, not in history)",
+    "zsh": "read -rs TDFLOW_TOKEN && export TDFLOW_TOKEN   # paste the token, press Enter (not echoed, not in history)",
+    "powershell": "$env:TDFLOW_TOKEN = [Net.NetworkCredential]::new('', (Read-Host -AsSecureString 'TDflowMCP token')).Password   # this terminal only; Windows PowerShell 5.1 and 7"
+  }
+}

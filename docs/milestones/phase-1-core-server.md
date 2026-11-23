@@ -3,7 +3,7 @@
 **Status:**
 - Scope and sequencing: **Conditionally Accepted** (owner, 2026-11-22, [ADR-0001](../decisions/0001-product-scope.md)).
 - Detailed work items and acceptance criteria: as below.
-- Implemented: **Phase 1A** (development build, 2026-11-22). Every 1A item below is done and its acceptance verified in TouchDesigner 2025.32440 ([Phase 1A record](../research/2026-11-22-phase-1a-component.md)). CI observation (item 6) and secret scanning remain open. 1B and 1C: nothing implemented.
+- Implemented: **Phase 1A** (development build, 2026-11-22). Every 1A item below is done and its acceptance verified in TouchDesigner 2025.32440 ([Phase 1A record](../research/2026-11-22-phase-1a-component.md)). CI observation (item 6) remains open. **Phase 1B** and **Phase 1C** are implemented in the development build (records: [1B](../research/2026-11-22-phase-1b-mcp-core.md), [audit worker + 1C](../research/2026-11-22-audit-worker-and-phase-1c.md)).
 
 Phase 1 must not start production `.tox` or MCP server implementation until Phase 0 is closed ([phase-0](phase-0-foundation.md)). Spikes are the first Phase 1 work.
 
@@ -62,11 +62,13 @@ Phase 1 must not start production `.tox` or MCP server implementation until Phas
 
 | # | Item | Output / acceptance |
 |---|---|---|
-| 20 | Client registry with support levels; Claude Code `primary` | Facts verified against the current Claude Code docs, with the date recorded |
-| 21 | "Tell Your Coding Agent" connection section; `Copytellagent` | Claude Code connects using only the generated text (live test, recorded) |
-| 22 | Skills bundle v1 + instruction mode + assisted write (preview, confirm, manifest, no overwrite of modified files, uninstall) | Round-trip on a disposable target directory; audit events |
-| 23 | Version management (`tdflow_whoami`, Skills frontmatter, manifest comparison) | Mismatch is surfaced in the Setup page and to the agent |
-| 24 | `.tox` packaging + install guide | Built from a clean checkout on the minimum build 2025.32440; sha256 recorded |
+| 19a | **(Done)** Audit worker (ADR-0006 revision) and project-local storage (owner, 2026-11-22) | Main thread never waits on disk; durability tests in TD (crash, restart, load, slow disk, overflow, kill-switch race, outcome failure); 1B-vs-worker performance comparison |
+| 20 | **(Done)** Client registry with support levels; Claude Code `primary` | Facts checked against vendor docs on 2026-11-22 (URLs in `clients.json`) |
+| 21 | **(Done)** "Tell Your Coding Agent" connection section; `Copytellagent`, `Viewinstructions` | Claude Code 2.1.289 connected using only the generated text (live test, recorded) |
+| 22 | **(Done)** Skills bundle v1 + instruction mode + assisted write (preview, confirm, manifest, no overwrite of modified files, uninstall) | Round-trip on a disposable home and project folder; audit events |
+| 23 | **(Done)** Version management (`tdflow_whoami`, Skills frontmatter, manifest comparison) | Mismatch surfaced on the Setup page and to the agent |
+| 24 | **(Done)** `.tox` packaging + install guide | Built from a clean checkout on 2025.32440; SHA-256 recorded in the [validation index](../icm/validation-index.md) |
+| 24a | **(Done)** Limited UX corrections (owner) | Shorter Status Detail; essential versus Advanced parameter pages; full agent instructions one pulse away |
 
 **1C acceptance:**
 1. A fresh disposable project goes from drop-in to a scoped edit by Claude Code with no manual steps beyond pairing, token creation, setting `TDFLOW_TOKEN`, and following the generated text.

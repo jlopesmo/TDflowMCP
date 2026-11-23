@@ -78,15 +78,20 @@ CREATE TRIGGER IF NOT EXISTS events_no_delete BEFORE DELETE ON events
   BEGIN SELECT RAISE(ABORT, 'audit events are append-only'); END;
 CREATE INDEX IF NOT EXISTS events_session ON events(session_id);
 CREATE INDEX IF NOT EXISTS events_agent ON events(agent_id);
+CREATE TABLE IF NOT EXISTS snapshots (id INTEGER PRIMARY KEY, created_at TEXT NOT NULL, path TEXT NOT NULL,
+  op_id INTEGER, before_text TEXT NOT NULL, before_sha TEXT NOT NULL, after_sha TEXT NOT NULL,
+  audit_seq INTEGER, restored_at TEXT);
+"""
+
+# Credentials live in PRIVATE per-user storage, never in the project folder (owner decision 2026-11-22).
+_DDL_CRED = """
+CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS agents (id TEXT PRIMARY KEY, display_name TEXT NOT NULL, role TEXT NOT NULL,
   enabled INTEGER NOT NULL, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS tokens (token_id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, salt TEXT NOT NULL,
   digest TEXT NOT NULL, created_at TEXT NOT NULL, revoked_at TEXT);
 CREATE TABLE IF NOT EXISTS grants (id INTEGER PRIMARY KEY, agent_id TEXT NOT NULL, scope TEXT NOT NULL,
   actions TEXT NOT NULL, effect TEXT NOT NULL DEFAULT 'allow');
-CREATE TABLE IF NOT EXISTS snapshots (id INTEGER PRIMARY KEY, created_at TEXT NOT NULL, path TEXT NOT NULL,
-  op_id INTEGER, before_text TEXT NOT NULL, before_sha TEXT NOT NULL, after_sha TEXT NOT NULL,
-  audit_seq INTEGER, restored_at TEXT);
 """
 
 
@@ -95,20 +100,48 @@ def now_iso() -> str:
 
 
 class Store:
-    def __init__(self, datadir: str):
+    """``datadir``: the audit database (events, sessions, DAT snapshots); by default the project-local
+    ``.tdflowmcp/<toe>/`` folder. ``private_dir``: per-user private storage for credentials (agents,
+    tokens, grants), the audit key and the keyed checkpoints. Defaults to ``datadir`` (tests)."""
+
+    def __init__(self, datadir: str, private_dir: Optional[str] = None):
         self.datadir = datadir
+        self.private_dir = private_dir or datadir
         self.db_path = os.path.join(datadir, "tdflowmcp.sqlite")
-        self.key_path = os.path.join(datadir, "audit.key")
-        self.checkpoint_path = os.path.join(datadir, "checkpoints.jsonl")
+        self.cred_path = os.path.join(self.private_dir, "credentials.sqlite")
+        self.key_path = os.path.join(self.private_dir, "audit.key")
+        self.checkpoint_path = os.path.join(self.private_dir, "checkpoints.jsonl")
         self.conn: Optional[sqlite3.Connection] = None
+        self.cconn: Optional[sqlite3.Connection] = None
         self.checkpoint_every = 50
         self._key: bytes = b""
         self.last_error = ""
 
     # ---- lifecycle -----------------------------------------------------------------------------
-    def open(self) -> "Store":
+    def open(self, readonly: bool = False) -> "Store":
+        """``readonly``: a migration source. Nothing is created or modified (no key, no schema, no
+        credentials database); only the events, meta and snapshots of an existing database are read."""
+        if readonly:
+            try:
+                with open(self.key_path, encoding="ascii") as f:
+                    self._key = bytes.fromhex(f.read().strip())
+                if len(self._key) != 32:
+                    raise ValueError("bad audit key")
+                # Cleanly closed (no -wal file): immutable, so not even SQLite's -shm/-wal side files are
+                # created. Otherwise (crash, or another TouchDesigner still writing) read-only with WAL, so
+                # committed WAL frames are not missed; SQLite may then leave its -shm index file.
+                clean = not os.path.exists(self.db_path + "-wal")
+                uri = "file:" + os.path.abspath(self.db_path).replace("\\", "/") + ("?immutable=1" if clean else "?mode=ro")
+                self.conn = sqlite3.connect(uri, uri=True, isolation_level=None, timeout=2.0)
+                self.conn.execute("SELECT 1 FROM events LIMIT 1")
+            except (OSError, ValueError, sqlite3.Error) as e:
+                self.last_error = type(e).__name__
+                self.close()
+                raise AuditUnavailable(self.last_error) from None
+            return self
         try:
             os.makedirs(self.datadir, exist_ok=True)
+            os.makedirs(self.private_dir, exist_ok=True)
             if not os.path.exists(self.key_path):
                 with open(self.key_path, "x", encoding="ascii") as f:      # never overwrite a key
                     f.write(secrets.token_hex(32))
@@ -121,18 +154,29 @@ class Store:
             self.conn.execute("PRAGMA synchronous=FULL")
             self.conn.executescript(_DDL)
             self.conn.execute("INSERT OR IGNORE INTO meta(k, v) VALUES('schema', ?)", (str(SCHEMA_VERSION),))
+            self.cconn = sqlite3.connect(self.cred_path, isolation_level=None, timeout=2.0)
+            self.cconn.execute("PRAGMA journal_mode=WAL")
+            self.cconn.execute("PRAGMA synchronous=FULL")
+            self.cconn.executescript(_DDL_CRED)
         except (OSError, ValueError, sqlite3.Error) as e:
             self.last_error = type(e).__name__
-            self.conn = None
+            self.close()
             raise AuditUnavailable(self.last_error) from None
         return self
 
     def close(self):
-        if self.conn is not None:
-            try:
-                self.conn.close()
-            finally:
-                self.conn = None
+        for attr in ("conn", "cconn"):
+            c = getattr(self, attr)
+            if c is not None:
+                try:
+                    c.close()
+                finally:
+                    setattr(self, attr, None)
+
+    def _cc(self) -> sqlite3.Connection:
+        if self.cconn is None:
+            raise AuditUnavailable(self.last_error or "closed")
+        return self.cconn
 
     @property
     def available(self) -> bool:
@@ -227,6 +271,21 @@ class Store:
                 "checkpoints_missing": missing, "verified_through": last_ok, "unverified_tail": tail,
                 "ok": first_bad is None and cp_bad is None and not missing}
 
+    def bind_project(self, project_id: str) -> str:
+        """Tie this audit database to one TDflowMCP project id (copy/relocation detection). A database
+        that already belongs to another project is refused, never adopted."""
+        c = self._c()
+        try:
+            row = c.execute("SELECT v FROM meta WHERE k='project_id'").fetchone()
+            if row is None:
+                c.execute("INSERT INTO meta(k, v) VALUES('project_id', ?)", (project_id,))
+                return project_id
+        except sqlite3.Error as e:
+            raise AuditUnavailable(type(e).__name__) from None
+        if row[0] != project_id:
+            raise AuditUnavailable("DATA_BELONGS_TO_ANOTHER_PROJECT")
+        return row[0]
+
     def _cp_mac(self, seq: int, h: str) -> str:
         return hmac.new(self._key_for(b"checkpoint"), f"{seq}:{h}".encode(), hashlib.sha256).hexdigest()
 
@@ -236,23 +295,43 @@ class Store:
             return None
         cp = {"seq": row[0], "hash": row[1], "ts": now_iso(), "mac": self._cp_mac(row[0], row[1])}
         try:
+            self._repair_checkpoint_tail()
             with open(self.checkpoint_path, "a", encoding="utf-8", newline="\n") as f:
                 f.write(json.dumps(cp, sort_keys=True) + "\n")
+                f.flush()
+                os.fsync(f.fileno())            # durable before the database records it (crash safety)
             self._c().execute("INSERT OR REPLACE INTO meta(k, v) VALUES('last_checkpoint_seq', ?)", (str(row[0]),))
         except (OSError, sqlite3.Error) as e:
             raise AuditUnavailable(type(e).__name__) from None
         return cp
+
+    def _repair_checkpoint_tail(self):
+        """Review 7 F8: drop a torn, newline-less final fragment (a crash mid-write) before appending. It
+        cannot validate anything (no complete MAC), so removing it loses nothing."""
+        if not os.path.exists(self.checkpoint_path):
+            return
+        with open(self.checkpoint_path, "rb+") as f:
+            data = f.read()
+            if data and not data.endswith(b"\n"):
+                f.truncate(data.rfind(b"\n") + 1)
+                f.flush()
+                os.fsync(f.fileno())
 
     def _read_checkpoints(self) -> List[Dict[str, Any]]:
         if not os.path.exists(self.checkpoint_path):
             return []
         out = []
         with open(self.checkpoint_path, encoding="utf-8") as f:
-            for line in f:
-                try:
-                    out.append(json.loads(line))
-                except ValueError:
-                    out.append({"seq": -1, "hash": "", "mac": ""})
+            lines = f.read().split("\n")
+        for i, line in enumerate(lines):
+            if not line.strip():
+                continue
+            try:
+                out.append(json.loads(line))
+            except ValueError:
+                if i == len(lines) - 1:
+                    continue        # torn final line from a crash mid-write: it validates nothing
+                out.append({"seq": -1, "hash": "", "mac": ""})
         return out
 
     def events(self, where: str = "", params: Tuple = (), limit: int = 200) -> List[Dict[str, Any]]:
@@ -273,7 +352,7 @@ class Store:
 
     # ---- identity tables -----------------------------------------------------------------------
     def put_agent(self, agent_id: str, display_name: str, role: str, grants: Iterable[Tuple[str, str, str]]):
-        c = self._c()
+        c = self._cc()
         c.execute("BEGIN IMMEDIATE")
         try:
             c.execute("INSERT INTO agents(id, display_name, role, enabled, created_at) VALUES (?,?,?,1,?)",
@@ -287,20 +366,27 @@ class Store:
             raise
 
     def put_token(self, token_id: str, agent_id: str, salt: str, digest: str):
-        self._c().execute("INSERT INTO tokens(token_id, agent_id, salt, digest, created_at) VALUES (?,?,?,?,?)",
+        self._cc().execute("INSERT INTO tokens(token_id, agent_id, salt, digest, created_at) VALUES (?,?,?,?,?)",
                           (token_id, agent_id, salt, digest, now_iso()))
 
     def revoke_token(self, token_id: str) -> bool:
-        cur = self._c().execute("UPDATE tokens SET revoked_at=? WHERE token_id=? AND revoked_at IS NULL",
+        cur = self._cc().execute("UPDATE tokens SET revoked_at=? WHERE token_id=? AND revoked_at IS NULL",
                                 (now_iso(), token_id))
         return cur.rowcount == 1
 
     def set_agent_enabled(self, agent_id: str, enabled: bool) -> bool:
-        cur = self._c().execute("UPDATE agents SET enabled=? WHERE id=?", (1 if enabled else 0, agent_id))
+        cur = self._cc().execute("UPDATE agents SET enabled=? WHERE id=?", (1 if enabled else 0, agent_id))
         return cur.rowcount == 1
 
+    def set_grant_actions(self, agent_id: str, actions_csv: str) -> None:
+        self._cc().execute("UPDATE grants SET actions=? WHERE agent_id=?", (actions_csv, agent_id))
+
+    def token_rows(self) -> List[tuple]:
+        """For tests and diagnostics: (token_id, salt, digest). Never contains a secret."""
+        return [tuple(r) for r in self._cc().execute("SELECT token_id, salt, digest FROM tokens").fetchall()]
+
     def load_identity(self) -> Tuple[List[tuple], List[tuple], List[tuple]]:
-        c = self._c()
+        c = self._cc()
         agents = c.execute("SELECT id, display_name, role, enabled, created_at FROM agents ORDER BY created_at").fetchall()
         tokens = c.execute("SELECT token_id, agent_id, salt, digest, created_at, revoked_at FROM tokens").fetchall()
         grants = c.execute("SELECT agent_id, scope, actions, effect FROM grants ORDER BY id").fetchall()

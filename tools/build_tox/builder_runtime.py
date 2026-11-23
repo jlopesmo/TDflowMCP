@@ -49,7 +49,7 @@ def _par(page, spec):
     elif t == "Menu":
         p = page.appendMenu(name, label=label)[0]
         p.menuNames = spec["menu"]
-        p.menuLabels = [m.capitalize() for m in spec["menu"]]
+        p.menuLabels = spec.get("menu_labels") or [m.capitalize() for m in spec["menu"]]
     else:
         raise ValueError(t)
     if "default" in spec:
@@ -96,9 +96,12 @@ def build(plan):
                      ("active", True)):
         if hasattr(pe.par, par):
             setattr(pe.par, par, val)
-    page = comp.appendCustomPage("TDflowMCP")
-    for spec in plan["parameters"]:
-        _par(page, spec)
+    pages = {}
+    for spec in plan["parameters"]:                 # essential controls first, then the Advanced page
+        name = spec.get("page", "TDflowMCP")
+        if name not in pages:
+            pages[name] = comp.appendCustomPage(name)
+        _par(pages[name], spec)
     ext = plan["extension"]
     comp.par.extension1 = f"op('./{ext['dat']}').module.{ext['class']}(me)"
     comp.par.promoteextension1 = bool(ext.get("promote"))

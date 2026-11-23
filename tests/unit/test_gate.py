@@ -90,6 +90,7 @@ class BrowserRouteTests(unittest.TestCase):
         self.assertEqual(decide("GET", "/setup/api/pair/status", h(X_TDflow_Request="1", Sec_Fetch_Site="cross-site"),
                                 S, CFG).code, "CROSS_SITE_FETCH")
         self.assertEqual(decide("GET", "/setup/api/agents", h(X_TDflow_Request="1"), S, CFG).next, "admin_session+csrf")
+        self.assertEqual(decide("GET", "/setup/api/skills", h(X_TDflow_Request="1"), S, CFG).next, "admin_session+csrf")
 
     def test_mutations_need_exact_origin_and_csrf(self):
         ok = decide("POST", "/setup/api/tokens", h(Origin="http://127.0.0.1:9480", X_TDflow_CSRF="t"), S, CFG)

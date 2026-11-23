@@ -139,7 +139,12 @@ class TDAdapter(Adapter):
             data = o.OPType in ("tableDAT", "textDAT") and DATA_TAG in o.tags
             if not data:                       # TD may execute it (module, callbacks, script, eval): execute
                 ts.append(self._facts(o, "execute", change="text"))
-            return Resolution(ts, {"op": o})
+            before = o.text
+            if len(before) > MAX_TEXT:
+                raise ToolFailure("INVALID_ARGS", "the current text is too large to snapshot safely")
+            # Plain-data snapshot; the engine persists it durably (audit worker) before execution.
+            snap = (o.path, int(o.id), before, _sha(before), _sha(args.get("text", "")))
+            return Resolution(ts, {"op": o, "snapshot": snap})
         raise ToolFailure("INVALID_ARGS", "unsupported tool")
 
     def _resolve_params(self, args):
@@ -392,25 +397,27 @@ class TDAdapter(Adapter):
 
     def _t_set_dat_text(self, args, res, label, readable):
         o, text = res.context["op"], args["text"]
-        store = self.store_fn()
+        snap, planned = res.context.get("snapshot_id"), res.context.get("planned_snapshot")
         before = o.text
-        if len(before) > MAX_TEXT:
-            raise ToolFailure("INVALID_ARGS", "the current text is too large to snapshot safely")
-        snap = store.put_snapshot(o.path, int(o.id), before, _sha(before), _sha(text))  # durable before the edit
+        if snap is None or not planned or _sha(before) != planned[3]:
+            # The durable snapshot must describe exactly the text being replaced.
+            raise ToolFailure("PRECONDITION_CHANGED", "the DAT text changed since the request was checked; "
+                              "nothing was written. Retry.")
         o.text = text
         if _sha(o.text) != _sha(text):
             o.text = before
             raise ToolFailure("EXECUTION_FAILED", "the DAT did not accept the text", rolled_back=True,
                               _audit={"rolled_back": _sha(o.text) == _sha(before)})
         return {"path": o.path, "length": len(text), "previous_sha256": _sha(before), "sha256": _sha(o.text),
-                "_audit": {"kind": "dat_text", "path": o.path, "snapshot": snap, "after_sha": _sha(o.text)}}
+                "_audit": {"kind": "dat_text", "path": o.path, "snapshot": snap, "after_sha": _sha(o.text),
+                           "before_sha": planned[3]}}             # anchors the snapshot in the hash chain
 
     # ---- undo ----------------------------------------------------------------------------------
-    def undo(self, record):
+    def undo(self, record, snapshot=None):
         d = record["detail"]
         kind = d.get("kind")
         if kind == "dat_text":
-            return self._undo_text(d)
+            return self._undo_text(d, snapshot)
         if not d.get("stack") or self._stack() != d.get("stack"):     # None/unrecorded is never 'unchanged'
             raise ToolFailure("UNDO_CONFLICT", "other changes happened since (or TouchDesigner was restarted)")
         td.ui.undo.undo()
@@ -440,14 +447,16 @@ class TDAdapter(Adapter):
             return False
         return False
 
-    def _undo_text(self, d):
-        store = self.store_fn()
-        snap = store.get_snapshot(int(d["snapshot"]))
+    def _undo_text(self, d, snap):
         o = td.op(d["path"])
-        if snap is None or snap["restored_at"] or o is None or _sha(o.text) != snap["after_sha"]:
+        expected = d.get("after_sha") or (snap or {}).get("after_sha")   # hash of the text actually written
+        if snap is None or snap["restored_at"] or o is None or _sha(o.text) != expected:
             raise ToolFailure("UNDO_CONFLICT", "the DAT text changed since (or was already restored)")
+        # Review 7: the snapshot row lives in the project folder; only restore text whose hash matches both the
+        # row and the value recorded in the (chain-covered) outcome event.
+        anchored = d.get("before_sha")
+        if _sha(snap["before_text"]) != snap["before_sha"] or (anchored and anchored != snap["before_sha"]):
+            raise ToolFailure("UNDO_FAILED", "the recovery snapshot does not match the audit log; nothing was restored")
         o.text = snap["before_text"]
         ok = _sha(o.text) == snap["before_sha"]
-        if ok:
-            store.mark_restored(snap["id"])
         return {"undone": ok, "verified": ok, "code": None if ok else "UNDO_FAILED"}

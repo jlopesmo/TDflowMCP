@@ -21,10 +21,11 @@ TOX = os.environ.get("TDFLOW_TOX", "")
 ROOT = os.environ.get("TDFLOW_SRC_ROOT", "")
 MODE = os.environ.get("TDFLOW_TEST_MODE", "full")
 MAIN = threading.main_thread()
-EXPECTED_PARS = ["Version", "Status", "Statusdetail", "Opensetup", "Stopserver", "Rundiagnostics", "Setupurl",
-                 "Port", "Portstatus", "Compatsummary", "Tellagent", "Copytellagent", "Enablemcp", "Suspendagents",
-                 "Pairingrequest", "Approvepairing", "Rejectpairing", "Agentsummary", "Projectroot", "Datadir",
-                 "Loglevel"]
+EXPECTED_PARS = ["Version", "Status", "Statusdetail", "Opensetup", "Setupurl", "Enablemcp", "Suspendagents",
+                 "Pairingrequest", "Approvepairing", "Rejectpairing", "Agentsummary", "Tellagent", "Copytellagent",
+                 "Viewinstructions", "Stopserver", "Rundiagnostics", "Compatsummary", "Port", "Portstatus",
+                 "Projectroot", "Datalocation", "Datadir", "Datastatus", "Confirmmove", "Claimproject",
+                 "Projectid", "Loglevel"]
 
 R = {"mode": MODE, "tests": [], "harness": {}, "frames": [], "errors": []}
 S = {"gen": None, "wait": None, "label": "boot", "done": False}
@@ -88,6 +89,10 @@ def script():
     comp = load()
     yield frames(20)
     ext = comp.ext.TDflowMCPExt
+    if MODE.startswith(("gate", "perf", "onboard")):                 # audit-worker gate + 1B-vs-worker comparison
+        ext.launcher = lambda url: True
+        yield from __import__("td_runner_gate").run(MODE, comp, ext, T, frames, until, checkpoint, R)
+        return
     T("load.component", comp is not None and comp.name == "TDflowMCP" and ext is not None)
     T("load.params", [p.name for p in comp.customPars] == EXPECTED_PARS, params=[p.name for p in comp.customPars])
     T("load.defaults", comp.par.Status.eval() == "Off" and comp.par.Port.eval() == 9480
@@ -96,7 +101,7 @@ def script():
     T("load.version", comp.par.Version.eval().startswith(ext.version), version=comp.par.Version.eval())
     T("load.readonly", all(getattr(comp.par, n).readOnly for n in
                            ("Version", "Status", "Statusdetail", "Setupurl", "Portstatus", "Compatsummary",
-                            "Tellagent", "Datadir", "Pairingrequest", "Agentsummary")))
+                            "Tellagent", "Datadir", "Datastatus", "Projectid", "Pairingrequest", "Agentsummary")))
     T("load.mcp_off_by_default", not comp.par.Enablemcp.eval() and not comp.par.Suspendagents.eval())
     man = json.loads(comp.op("manifest").text)
     mism = [n for n, m in man["modules"].items() if sha_text(comp.op("src").op(m["dat"]).text) != m["sha256"]]
@@ -400,6 +405,9 @@ def on_frame(me, frame):
 def drive():
     if S["done"]:
         return
+    bj = S.get("bench_jobs")                  # gate_bench: run queued main-thread handoffs once per frame
+    while bj is not None and not bj.empty():
+        bj.get_nowait()()
     R["frames"].append((S["label"], time.perf_counter()))
     if S["gen"] is None:
         S["gen"] = script()

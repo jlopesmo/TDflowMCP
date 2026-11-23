@@ -18,7 +18,7 @@ The component **never listens until the user acts** (pulse or toggle). After the
 
 ## 2. Essential custom parameters
 
-Page **TDflowMCP** (TouchDesigner custom parameter names are capitalised-then-lowercase). The 1A rows are **built** from [`src/component/manifest.json`](../../src/component/manifest.json) and verified in TD. Builder notes from S5:
+Two pages (owner UX correction, Phase 1C): **TDflowMCP** holds the essential controls (Version, Status, Status Detail, Open Setup, Setup URL, Enable MCP, Suspend Agents, pairing, Agents, Tell Your Agent, Copy Tell Agent, View Agent Instructions); **Advanced** holds the rest (Stop Server, Run Diagnostics, Compatibility, Port, Port Status, Project Root, Data Location, Data Location In Use, Data Status, Confirm Move, Claim As New Project, Project ID, Log Level). TouchDesigner custom parameter names are capitalised-then-lowercase. The 1A rows are **built** from [`src/component/manifest.json`](../../src/component/manifest.json) and verified in TD. Builder notes from S5:
 - a menu's `.default` does not change its current value, so `.val` must be set explicitly;
 - a `readOnly` parameter can still be set by script, which suits status parameters;
 - a pulse fired on the same frame its Parameter Execute DAT is created is not delivered, so callbacks must be wired at least one frame before use.
@@ -27,7 +27,7 @@ Page **TDflowMCP** (TouchDesigner custom parameter names are capitalised-then-lo
 |---|---|---|---|---|
 | `Version` | Str, read-only | build version | 1A | Component version + tool-surface version |
 | `Status` | Str, read-only | `Off` | 1A | Current state + error code (`Off`, `Starting`, `Setup`, `Stopping`, `Error: <code>`) |
-| `Statusdetail` | Str, read-only | — | 1A | Plain-language detail, including **browser-launch and clipboard failures** (with the URL to open manually) |
+| `Statusdetail` | Str, read-only | — | 1A; **shortened in 1C** | One plain-language item, at most 160 characters: the newer of the latest note and the state message (listener errors always win), including **browser-launch and clipboard failures** (with the URL). Details live on the Setup page |
 | `Opensetup` | Pulse | — | 1A | Run checks, start the Setup listener if allowed, and only after the bind gate passes open `http://127.0.0.1:<Port>/setup/` in the default browser. Uses Python's `webbrowser` on a background thread, which never touches TD. Verified end-to-end on 2025.32440. Pulsing again while serving re-opens the page |
 | `Stopserver` | Pulse | — | 1A | Stop listener (forces `Enablemcp` off in 1B). From `Error`, it acknowledges the error and returns to `Off` |
 | `Setupurl` | Str, read-only | empty | 1A | The Setup address while serving |
@@ -36,7 +36,12 @@ Page **TDflowMCP** (TouchDesigner custom parameter names are capitalised-then-lo
 | `Rundiagnostics` | Pulse | — | 1A | Re-run compatibility checks. Shown as "Run Diagnostics"; previously proposed as `Runchecks` (renamed by the owner, 2026-11-22) |
 | `Compatsummary` | Str, read-only | — | 1A | e.g. `9 pass · 1 warn · 0 fail` |
 | `Projectroot` | Str | `/project1` | 1A (unused until 1B) | Host project root for scopes (agents can never target outside it) |
-| `Datadir` | Str, read-only | `%LOCALAPPDATA%\TDflowMCP` | 1A | Location of runtime state, displayed unexpanded (no username saved into the `.toe`). The per-project `<key>` arrives with the first stored state (1B). Nothing is written in 1A |
+| `Datadir` | Str, read-only | `(not opened)` | 1A; **1C storage** | "Data Location In Use": `Project folder: .tdflowmcp\<name> (git-ignored)` or `Private storage: %LOCALAPPDATA%\TDflowMCP\projects\<id>\data` (never an absolute path, since parameters are saved in the `.toe`) |
+| `Datalocation` | Menu | `project` | 1C (**implemented**) | `project` (`.tdflowmcp/` next to the `.toe`; unsuitable folders fall back to private storage) or `private`. Changing it turns MCP off and needs Confirm Move |
+| `Datastatus` | Str, read-only | `not opened` | 1C (**implemented**) | Storage decision (`New`, `Ok`, `Fallback (<reason>)`, `Unsaved`), audit verification, or what needs confirmation (moved, copied, relocated, older data) |
+| `Confirmmove` / `Claimproject` | Pulse | — | 1C (**implemented**) | Confirm Move: verify and adopt the audit log that moved with the project, or make a verified copy from the previous location (never moves or deletes the source). Claim As New Project: new identity and an empty audit log; existing data untouched; agents need new tokens |
+| `Projectid` | Str, read-only | empty | 1C (**implemented**) | TDflowMCP identity of the project (`prj_` + 16 hex), saved in the `.toe`; not a secret |
+| `Viewinstructions` | Pulse | — | 1C (**implemented**) | Open the full Tell Your Coding Agent text (the `tellagent` DAT) in a TouchDesigner viewer |
 | `Tellagent` | Str, read-only | — | 1A | One-line state of the agent instructions (e.g. `Ready: connect · v0.1`) |
 | `Copytellagent` | Pulse | — | 1A | Copy the full "Tell Your Coding Agent" text to the clipboard with `ui.clipboard`. Success is verified by reading it back; failure is reported in `Statusdetail`. The text is also shown on the Setup page (with its own Copy button) and in the internal `tellagent` DAT |
 | `Enablemcp` | Toggle | **Off** | 1B (**implemented**) | Enable `/mcp`; refused, and switched back off, unless preconditions (§4) pass. Status Detail names the blocking checks. Never re-enabled silently after a reload |
@@ -60,15 +65,16 @@ Each check yields `{id, result: pass|warn|fail|unknown, evidence, remediation_id
 | `net.capability` | Pre-activation, per transport ([§8.2 step 0](security-model.md#82-bind-verification-gate)). Embedded (default): bind host is the literal `127.0.0.1` and exclusive binding is available. Web Server DAT (optional): the DAT exposes `localaddress` | pass → the listener may be activated; fail → never activated. On 2025.32440: embedded **pass** (S6); Web Server DAT **fail** (S5) |
 | `net.bind` | Bind-verification gate: OS listening-socket table + non-loopback connection attempts ([§8.2](security-model.md#82-bind-verification-gate)) | positively verified loopback-only; else listener closed |
 | `net.port` | Port 9480 (or `Port`) free / owned by this instance; identify other TDflowMCP instances via `GET /.well-known/tdflowmcp` on loopback | free or self |
-| `fs.datadir` | Runtime data dir writable, outside project and repo | writable |
+| `fs.datadir` | Storage decision and writability (1C): fail when the project data needs the user's confirmation (moved, copied, relocated, older data) or the store could not open; pass with the reason when data falls back to private storage | writable, identity confirmed |
+| `audit.integrity` | The audit chain and keyed checkpoints verify (checked when the store opens and again before Enable MCP) | verifies |
 | `td.instances` | Number of TDflowMCP components in the project | exactly one |
 | `agent.clients` | Coding agents the user selected; optional `present`/`absent` detection of CLIs on PATH via `shutil.which` (no execution, no paths reported) | ≥1 supported client |
-| `agent.skills` | Installed Skills manifest vs bundled version (1C) | match |
+| `agent.skills` | Installed Skills manifest vs bundled version (1C). **Implemented as the Setup page's Skills table** (installed vs bundled, mismatch flagged), not as a compatibility check | match |
 | `sec.selftest` | Gate rejects foreign/other-port Origin; bind verified; tokens hashed (1B) | all pass |
 
 ## 4. Preconditions to enable MCP (1B)
 
-`td.build` not fail · `net.bind` pass · `net.port` free/self · `fs.datadir` pass · `sec.selftest` pass · at least one enabled agent token exists. Older builds may enable MCP **only** if all security self-tests pass — there is no override.
+`td.build` not fail · `net.bind` pass · `net.port` free/self · `fs.datadir` pass · `audit.integrity` pass · `sec.selftest` pass · at least one enabled agent token exists; then a fresh verification, the `mcp enabled` record and a checkpoint must be confirmed durable before `/mcp` opens. Older builds may enable MCP **only** if all security self-tests pass — there is no override.
 
 ## 5. Guided troubleshooting
 

@@ -36,7 +36,18 @@ python -m unittest discover -s tests -t .
 ```
 python -I tests/td/run_td_tests.py                       # full suite -> build/td-test-results.json
 python -I tests/td/run_td_tests.py --mode real_browser   # opens your default browser once
+python -I tests/td/run_td_mcp_tests.py                   # Phase 1B MCP acceptance -> build/td-mcp-test-results.json
+python -I tests/td/run_td_gate_tests.py                  # audit-worker gate, storage, perf -> build/td-gate-test-results.json
+python -I tests/td/run_td_onboard_tests.py               # 1C: live Claude Code + Skills -> build/td-onboard-test-results.json
 ```
+- **Gate suite** (`run_td_gate_tests.py`, five TouchDesigner launches, all under `.tmp/td-gate-tests/`):
+  - `gate`: project-local storage decision; idle, load and simulated slow-disk frame impact (OnFrame cost and frame intervals) with MCP latency measured separately; the kill switch flipped while an intent is being written; queue overflow; an injected outcome-write failure.
+  - `gate_crash`: load from 8 clients, then a hard kill of that TouchDesigner process (own child only).
+  - `gate_restart`: recovery checks (chain and keyed checkpoints verify; every reported success is durable); then move/rename, copy and data-location flows via Save As.
+  - `perf_baseline` and `perf_worker`: the same load against `--baseline` (default: a clean `e15ec55` build in `.tmp/wt-e15ec55/build/`) and the current build.
+  - `gate_bench` (`--only gate_bench`): handoff costs inside TD (worker read/append, main-thread append, main-thread handoff).
+  Private storage goes to `TDFLOW_PRIVATE_ROOT` under `.tmp`, so nothing is written to your real profile.
+- **Onboarding suite** (`run_td_onboard_tests.py`; `--no-live` skips Claude Code): takes the Claude Code JSON entry from the generated "Tell Your Coding Agent" text into a temporary `--mcp-config` file and runs `claude -p` with `--strict-mcp-config` and an explicit `--allowedTools` list. The token is passed only in the child process environment. The suite never runs `claude mcp add` and never writes your Claude Code configuration. Skills go only to a disposable `TDFLOW_SKILLS_HOME` and the disposable project folder. Claude Code itself still keeps its usual session history for that run.
 - **How it works:** the harness generates a disposable project whose runner (`td_runner.py`) loads the built `.tox` into `/project1` with `loadTox`, the same load path as dropping the file into a network. The runner drives the component only through its custom parameters, plus two test seams on the extension (`launcher`, `clipboard_writer`) and one injected fault. At named checkpoints the harness runs external probes: the OS socket table, LAN connects, HTTP, the gate matrix, headless Chrome and a secrets scan.
 - **Safety:**
   - The harness aborts if a test port is busy.
@@ -45,5 +56,11 @@ python -I tests/td/run_td_tests.py --mode real_browser   # opens your default br
   - It restores your clipboard text after the clipboard test.
 - **`real_browser` mode:** uses the production launcher, and passes only if your browser actually loaded `/setup/`, `app.js` and `/setup/api/status`. The tab stays open after TouchDesigner quits.
 
-## 4. Spikes
+## 4. Packaging (Phase 1C item 24)
+```
+python -I tools/package_release.py [--commit HEAD]
+```
+Builds from a **clean detached worktree** of the commit (never the working tree) on TouchDesigner 2025.32440. It refuses the package unless `TDflowMCP.json` reports that commit, not dirty, TD 2025.32440 and no embedded hash mismatch. The output is `dist/TDflowMCP-<version>-<commit>/` (`TDflowMCP.tox`, `TDflowMCP.json`, `INSTALL.md` from [install.md](install.md), `SHA256SUMS`) plus a `.zip`. `dist/` is git-ignored. `.dev` versions are development packages, not releases.
+
+## 5. Spikes
 `spikes/s4` (undo semantics), `spikes/s5`, `spikes/s6`. They are disposable and reproducible; see each README.

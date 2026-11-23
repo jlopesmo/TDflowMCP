@@ -398,7 +398,9 @@ def main():
         return finish(a, None)
     shutil.copyfile(os.path.join(HERE, "td_runner.py"), os.path.join(run_dir, "td_runner.py"))
     toe = make_toe(run_dir, "td_tests", boot_script("td_runner", start_frame=20))
-    td = TDProcess(toe, run_dir, env={"TDFLOW_TOX": tox, "TDFLOW_SRC_ROOT": ROOT, "TDFLOW_TEST_MODE": a.mode})
+    # Open Setup opens the audit store: keep its private storage inside the disposable run folder too.
+    td = TDProcess(toe, run_dir, env={"TDFLOW_TOX": tox, "TDFLOW_SRC_ROOT": ROOT, "TDFLOW_TEST_MODE": a.mode,
+                                      "TDFLOW_PRIVATE_ROOT": os.path.join(run_dir, "private")})
     H["preexisting_td"] = len(td.preexisting)
     done = set()
     deadline = time.time() + 600

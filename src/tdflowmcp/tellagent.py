@@ -6,6 +6,7 @@ evidence strings (they may hold environment detail), operator names, paths, addr
 """
 from __future__ import annotations
 
+import json
 from typing import Mapping, Sequence
 
 from tdflowmcp import __version__
@@ -30,8 +31,58 @@ def _state_sentence(state: str, error_code: str, port: int) -> str:
     return "Off. No listener is running. The user starts it with the component's Open Setup button."
 
 
+SHELLS = (("bash", "bash"), ("zsh", "zsh"), ("powershell", "PowerShell"))
+
+
+def _fill(obj, url: str):
+    """Substitute the endpoint into a registry snippet. Only '{url}' is replaced; ${TDFLOW_TOKEN} stays."""
+    if isinstance(obj, str):
+        return obj.replace("{url}", url)
+    if isinstance(obj, dict):
+        return {k: _fill(v, url) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_fill(v, url) for v in obj]
+    return obj
+
+
+def connect_section(port: int, clients: Mapping) -> list:
+    """'Connect' section from the client registry (src/integrations/clients.json). Allowlisted inputs only:
+    the port and the registry; the token is always the literal placeholder ${TDFLOW_TOKEN}."""
+    url = f"http://127.0.0.1:{int(port)}/mcp"
+    reg = clients.get("clients", []) if isinstance(clients, Mapping) else []
+    env = clients.get("token_env", {}) if isinstance(clients, Mapping) else {}
+    out = ["", "## Connect your coding agent",
+           "The user does these steps; show them the commands, do not run configuration commands yourself.",
+           "1. On the Setup page (Agents and access), create an agent token. It is shown once.",
+           "2. Put it in the TDFLOW_TOKEN environment variable of the terminal that starts the agent "
+           "(never in a file, a commit or the chat):"]
+    for key, label in SHELLS:
+        if env.get(key):
+            out.append(f"   - {label}: `{env[key]}`")
+    out.append("3. Register the server named `tdflow` (Streamable HTTP, " + url + "):")
+    for c in reg:
+        mcp = _fill(c.get("mcp") or {}, url)
+        tag = {"primary": "primary, tested", "verified": "tested"}.get(c.get("support"), "from vendor docs, not tested")
+        out.append(f"   - {c.get('display')} ({tag}):")
+        if mcp.get("json"):
+            out.append("     JSON config entry: `" + json.dumps(mcp["json"], separators=(", ", ": ")) + "`")
+        if mcp.get("toml"):
+            out.append("     TOML config entry (one line per `;`): `" + mcp["toml"].replace("\n", "; ") + "`")
+        cmds = mcp.get("add_command") or {}
+        for key, label in SHELLS:
+            if cmds.get(key):
+                out.append(f"     {label}: `{cmds[key]}`")
+        if mcp.get("config_file_note"):
+            out.append("     Where: " + mcp["config_file_note"])
+    out += ["4. Start (or restart) the agent from that terminal and call `tdflow_whoami` to confirm the "
+            "connection and see your scopes.",
+            "5. Optional: install the TDflowMCP Skills from the Setup page (preview first, nothing is "
+            "overwritten). `tdflow_whoami` reports `expected_skill_version`; tell the user if your Skills differ."]
+    return out
+
+
 def build(state: str, error_code: str, port: int, td_build: str, checks: Sequence[CheckResult],
-          troubleshooting: Mapping, version: str = __version__) -> str:
+          troubleshooting: Mapping, version: str = __version__, clients: Mapping = None) -> str:
     entries = troubleshooting.get("entries", {}) if isinstance(troubleshooting, Mapping) else {}
     problems = [c for c in checks if c.result in ("fail", "warn")]
     lines = [
@@ -49,6 +100,10 @@ def build(state: str, error_code: str, port: int, td_build: str, checks: Sequenc
          "- MCP access is not enabled. The user turns it on with the component's Enable MCP toggle after creating "
          "an agent token on the Setup page. Do not write MCP or agent configuration for TDflowMCP yourself."),
         f"- Compatibility checks: {summary(checks) if checks else 'not run yet (pulse Run Diagnostics)'}.",
+    ]
+    if clients and state in ("Setup", "Enabled", "Suspended"):
+        lines += connect_section(port, clients)
+    lines += [
         "",
         "## Repair",
         f"Rules: {RULES}",
@@ -79,4 +134,4 @@ def one_line(state: str, error_code: str, checks: Sequence[CheckResult], version
         return f"Repair: {n} check(s) need attention{' · ' + error_code if error_code else ''} · v{version}"
     if not checks:
         return f"Not checked yet · v{version}"
-    return f"Ready: setup (MCP not available in 1A) · v{version}"
+    return f"Ready · v{version}"

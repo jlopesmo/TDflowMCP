@@ -156,6 +156,66 @@
     $("audit").textContent = "Audit log: " + au.events + " events, chain " + (au.chain_ok ? "intact" : "BROKEN") +
       ", checkpoints " + (au.checkpoints_ok ? "valid" : "INVALID") + ".";
     $("audit").dataset.ok = String(!!au.ok);
+    if (!skillsPending) await refreshSkills();
+  }
+
+  // ---- Skills (preview -> confirm the exact preview digest) -----------------------------------
+  let skillsPending = null;
+
+  async function refreshSkills() {
+    const r = await api("GET", "/setup/api/skills");
+    if (!r.ok || !r.data) return;
+    const body = $("skills").tBodies[0];
+    body.replaceChildren();
+    for (const t of r.data.targets) {
+      const tr = el("tr");
+      tr.dataset.client = t.client;
+      tr.dataset.scope = t.scope;
+      const act = el("td");
+      if (t.error) {
+        act.textContent = t.error === "PROJECT_UNSAVED" ? "Save the project first" : t.error;
+      } else {
+        const inst = el("button", t.installed_version ? (t.mismatch ? "Update" : "Reinstall") : "Install", "small");
+        inst.type = "button";
+        inst.addEventListener("click", () => showPlan(t, "install"));
+        act.append(inst);
+        if (t.installed_version) {
+          const un = el("button", "Uninstall", "secondary small");
+          un.type = "button";
+          un.addEventListener("click", () => showPlan(t, "uninstall"));
+          act.append(un);
+        }
+      }
+      const status = t.error ? "–" : (t.installed_version || "not installed") + (t.mismatch ? " (differs from bundled)" : "");
+      tr.append(el("td", t.client), el("td", (t.target || t.scope) + (t.in_git_repo ? " (inside a Git repository)" : "")),
+                el("td", status, t.mismatch ? "warn" : ""), el("td", r.data.bundled_version), act);
+      body.append(tr);
+    }
+  }
+
+  function showPlan(t, op) {
+    const plan = t[op];
+    const lines = [(op === "install" ? "Install / update " : "Uninstall ") + "TDflowMCP Skills " + t.bundled_version +
+                   " for " + t.client + " in " + t.target + ":"];
+    for (const a of plan.actions) lines.push("  " + a.action.padEnd(14) + a.path + "  sha256 " + a.sha256.slice(0, 12) + "…");
+    if (plan.conflicts && plan.conflicts.length) lines.push("", "Stopped: these files were changed by someone else and will not be overwritten: " + plan.conflicts.join(", "));
+    if (t.in_git_repo) lines.push("", "Note: this folder is inside a Git repository, so the files will appear in git status.");
+    $("skills-plan").textContent = lines.join("\n");
+    $("skills-confirm").disabled = !!(plan.conflicts && plan.conflicts.length);
+    skillsPending = { op, client: t.client, scope: t.scope, digest: plan.digest };
+    $("skills-preview").hidden = false;
+  }
+
+  async function confirmSkills() {
+    if (!skillsPending) return;
+    const p = skillsPending;
+    skillsPending = null;
+    $("skills-preview").hidden = true;
+    const r = await api("POST", "/setup/api/skills/" + p.op, { client: p.client, scope: p.scope, digest: p.digest });
+    $("skills-status").textContent = r.ok ? (p.op === "install" ? "Skills installed: " + (r.data.written || []).length + " file(s) written."
+                                                                : "Skills removed. Kept (changed by you): " + ((r.data.kept_modified || []).join(", ") || "none") + ".")
+                                         : "Not done: " + ((r.data && (r.data.message || r.data.code || r.data.error)) || r.status) + ".";
+    await refreshSkills();
   }
 
   function unpaired(msg) {
@@ -204,6 +264,8 @@
     $("logout").addEventListener("click", async () => { await api("POST", "/setup/api/logout"); unpaired("Unpaired."); });
     $("token-form").addEventListener("submit", createToken);
     $("copy-token").addEventListener("click", () => copyText($("token-value").textContent, "copy-token-status"));
+    $("skills-confirm").addEventListener("click", confirmSkills);
+    $("skills-cancel").addEventListener("click", () => { skillsPending = null; $("skills-preview").hidden = true; });
     refresh();
     setInterval(refresh, 2000);
   });

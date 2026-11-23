@@ -125,11 +125,13 @@ PENDING, CLAIMED, CANCELLED, DONE = "pending", "claimed", "cancelled", "done"
 
 
 class Job:
-    """One queued request. Fields are read-only for the dispatcher; it returns a ``Response``."""
+    """One queued request. Fields are read-only for the dispatcher; it returns a ``Response``.
+    A job with ``fn`` is a main-thread step submitted by ``RouteContext.call_main``: ``pump`` runs ``fn()``
+    on the owner thread and stores its result (or exception) instead of calling the dispatcher."""
     __slots__ = ("rid", "method", "path", "route", "principal", "headers", "body", "created",
-                 "lock", "state", "done", "response")
+                 "lock", "state", "done", "response", "fn", "result", "fn_error", "ran")
 
-    def __init__(self, rid, method, path, route, principal, headers, body):
+    def __init__(self, rid, method, path, route, principal, headers, body, fn=None):
         self.rid, self.method, self.path, self.route = rid, method, path, route
         self.principal, self.headers, self.body = principal, headers, body
         self.created = time.monotonic()
@@ -137,6 +139,36 @@ class Job:
         self.state = PENDING
         self.done = threading.Event()
         self.response: Optional[Response] = None
+        self.fn, self.result, self.fn_error, self.ran = fn, None, None, False
+
+
+class MainStepError(Exception):
+    """``call_main`` outcome other than a result. ``ran`` is False when the step certainly never executed
+    and None when it may have executed (dispatched, but no answer in time)."""
+    def __init__(self, code: str, ran: Optional[bool]):
+        super().__init__(code)
+        self.code, self.ran = code, ran
+
+
+class RouteContext:
+    """What a handler-thread route handler gets (no TD access): the authenticated request plus
+    ``call_main(fn)`` to run a step on TouchDesigner's main thread and wait for its result."""
+
+    def __init__(self, owner, rid, method, path, route, principal, headers, body):
+        self._o = owner
+        self.rid, self.method, self.path, self.route = rid, method, path, route
+        self.principal, self.headers, self.body = principal, headers, body
+
+    def call_main(self, fn):
+        o = self._o
+        job = Job(self.rid, self.method, self.path, self.route, self.principal, {}, b"", fn=fn)
+        resp = o._submit(job)
+        if job.ran:
+            if job.fn_error is not None:
+                raise job.fn_error
+            return job.result
+        code = _code_of(resp)
+        raise MainStepError(code, None if code == "TDFLOW_TIMEOUT_AFTER_DISPATCH" else False)
 
 
 Authenticator = Callable[[str, object], Optional[str]]  # (decision.next, headers) -> principal | None
@@ -315,6 +347,19 @@ class _Handler(BaseHTTPRequestHandler):
             resp = Response(200, asset[1], asset[0]) if asset else error(404, "NOT_FOUND")
             return self._reply(resp, rid, dec.route, dec.path, "OK" if asset else "NOT_FOUND", t0)
         fwd = {h: self.headers.get(h) for h in FORWARDED_HEADERS if self.headers.get(h) is not None}
+        handler = o.route_handlers.get(dec.route)
+        if handler is not None:
+            # Handler-thread route (e.g. MCP, admin API): may wait for audit I/O, never touches TD itself;
+            # TD steps go through call_main. Returning None falls back to the main-thread dispatcher.
+            ctx = RouteContext(o, rid, self.command, dec.path, dec.route, principal, fwd, body)
+            try:
+                resp = handler(ctx)
+            except Exception as e:
+                o._bump("route_handler_errors")
+                o.last_handler_error = type(e).__name__
+                resp = error(500, "INTERNAL_ERROR")
+            if resp is not None:
+                return self._reply(resp, rid, dec.route, dec.path, _code_of(resp), t0, principal)
         job = Job(rid, self.command, dec.path, dec.route, principal, fwd, body)
         resp = o._submit(job)
         self._reply(resp, rid, dec.route, dec.path, _code_of(resp), t0, principal)
@@ -379,6 +424,7 @@ class EmbeddedHTTPTransport:
                  io_timeout: float = 5.0, max_connection_seconds: float = 30.0,
                  job_timeout: float = 5.0, dispatch_grace: float = 5.0, audit_max: int = 2048,
                  unauth_queue_max: int = 4, mcp_enabled: bool = False,
+                 route_handlers: Optional[Mapping[str, Callable[["RouteContext"], Optional[Response]]]] = None,
                  heartbeat_timeout: Optional[float] = None):
         if host not in BIND_HOSTS:
             raise TransportError("BIND_REFUSED", "only the literal 127.0.0.1 may be bound")
@@ -411,6 +457,7 @@ class EmbeddedHTTPTransport:
         self.unauth_queue_max = unauth_queue_max
         self._unauth_pending = 0
         self._mcp_enabled = bool(mcp_enabled)    # Phase 1A components pass False: /mcp -> 503 MCP_DISABLED
+        self.route_handlers = dict(route_handlers or {})
         # Orphan watchdog: if the owner stops pumping for this long (component deleted, extension lost),
         # the serve thread closes the listener by itself. None disables it (unit tests).
         self.heartbeat_timeout = heartbeat_timeout
@@ -475,6 +522,13 @@ class EmbeddedHTTPTransport:
             elif job.route == "mcp" and self._suspended:
                 resp = error(503, "SUSPENDED")
                 self._bump("dropped_suspended")
+            elif job.fn is not None:
+                try:
+                    job.result = job.fn()
+                except BaseException as e:  # handed back to the waiting handler thread
+                    job.fn_error = e
+                job.ran = True
+                resp = Response(200)
             else:
                 try:
                     resp = dispatch(job)

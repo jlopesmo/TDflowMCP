@@ -43,23 +43,29 @@ class TokenRecord:
 
 
 class Identity:
-    def __init__(self, store):
+    def __init__(self, store, preload=None):
+        """``preload``: rows from ``store.load_identity()`` already fetched by the audit worker, so the TD
+        main thread can build the identity snapshot without waiting for disk I/O."""
         self.store = store
         self.agents: Dict[str, Agent] = {}
         self.tokens: Dict[str, TokenRecord] = {}
         self.created: Dict[str, str] = {}
         self._snap: Dict[str, Tuple[str, str, str]] = {}     # token_id -> (salt, digest, agent_id)  [immutable]
-        self.reload()
+        self._apply(preload) if preload is not None else self.reload()
 
     def reload(self):
-        agents, tokens, grants = self.store.load_identity()
+        self._apply(self.store.load_identity())
+
+    def _apply(self, rows):
+        agents, tokens, grants = rows
         g: Dict[str, List[Grant]] = {}
         for agent_id, scope, actions, effect in grants:
             g.setdefault(agent_id, []).append(Grant(scope=scope, actions=frozenset(actions.split(",")), effect=effect))
         self.agents = {a[0]: Agent(id=a[0], display_name=a[1], role=a[2], enabled=bool(a[3]),
                                    grants=tuple(g.get(a[0], ()))) for a in agents}
-        self.created = {a[0]: a[4] for a in agents}
-        self.tokens = {t[0]: TokenRecord(*t) for t in tokens}
+        created = {a[0]: a[4] for a in agents}
+        toks = {t[0]: TokenRecord(*t) for t in tokens}
+        self.created, self.tokens = created, toks
         self._snap = {t.token_id: (t.salt, t.digest, t.agent_id) for t in self.tokens.values()
                       if t.revoked_at is None and self.agents.get(t.agent_id) and self.agents[t.agent_id].enabled}
 
@@ -86,8 +92,16 @@ class Identity:
         return f"tdf_{token_id}.{secret}"
 
     def revoke(self, token_id: str) -> bool:
+        # Review 7 F1: deny in memory *before* the durable write, and never depend on a second I/O call for
+        # the denial to hold. If the write fails the caller reports it; the token stays unusable here.
+        self._snap = {k: v for k, v in self._snap.items() if k != token_id}
         ok = self.store.revoke_token(token_id)
-        self.reload()
+        try:
+            self.reload()
+        except Exception:
+            self._snap = {k: v for k, v in self._snap.items() if k != token_id}
+        if token_id in self._snap:                       # a concurrent reload raced the write: deny again
+            self._snap = {k: v for k, v in self._snap.items() if k != token_id}
         return ok
 
     def set_enabled(self, agent_id: str, enabled: bool) -> bool:

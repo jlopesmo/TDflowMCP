@@ -1,6 +1,6 @@
 # TDflowMCP — Project map
 
-This map lists the repository's actual contents (Phase 1B). Planned directories are listed in [source-of-truth.md](../architecture/source-of-truth.md#directory-layout). **They do not exist yet.**
+This map lists the repository's actual contents (Phase 1C). Planned directories are listed in [source-of-truth.md](../architecture/source-of-truth.md#directory-layout). **They do not exist yet.**
 
 | Path | Purpose | Governing doc |
 |---|---|---|
@@ -19,15 +19,19 @@ This map lists the repository's actual contents (Phase 1B). Planned directories 
 | `docs/operations/` | Git workflow, verification and release procedures | — |
 | `tools/check_docs.py` | Stdlib doc validator (required files, links/anchors, ADR status vs index, privacy patterns) | [validation-index](validation-index.md) |
 | `tests/test_check_docs.py`, `tests/__init__.py` | Unit tests for the doc validator | [validation-index](validation-index.md) |
-| `src/tdflowmcp/` | Pure-Python core (no `td`), all embedded into the `.tox`:<br>• 1A: `controller.py`, `net/` (`pyhttp`, `evidence`, `bindverify`, `oslisteners`), `gate.py`, `compat.py`, `tellagent.py`, `setupapi.py`.<br>• 1B: `policy.py` (CRUD+execute, hard denies, create allowlist), `identity.py` (hashed tokens, sessions), `store.py` (SQLite audit chain, checkpoints, snapshots), `admin.py` (pairing, admin sessions), `protocol.py` (MCP 2026-07-28 + legacy), `schema.py`, `tools.py` (registry, 16 tools), `engine.py` (call orchestration) | [security model §8](../architecture/security-model.md#8-network-posture), [setup assistant](../architecture/setup-assistant.md) |
+| `src/tdflowmcp/` | Pure-Python core (no `td`), all embedded into the `.tox`:<br>• 1A: `controller.py`, `net/` (`pyhttp`, `evidence`, `bindverify`, `oslisteners`), `gate.py`, `compat.py`, `tellagent.py`, `setupapi.py`.<br>• 1B: `policy.py` (CRUD+execute, hard denies, create allowlist), `identity.py` (hashed tokens, sessions), `store.py` (SQLite audit chain, checkpoints, snapshots), `admin.py` (pairing, admin sessions), `protocol.py` (MCP 2026-07-28 + legacy), `schema.py`, `tools.py` (registry, 16 tools), `engine.py` (call orchestration: plan → durable intent → execute → durable outcome).<br>• 1C: `auditworker.py` (single SQLite worker thread, `StoreProxy`), `storage.py` (project-local `.tdflowmcp/` vs private storage, identity/copy/move detection, verified migration), `skills.py` (consent-based Skills install/uninstall) | [security model §8](../architecture/security-model.md#8-network-posture), [setup assistant](../architecture/setup-assistant.md) |
 | `src/td_adapter/` | The only code that touches `td`: `extension.py` (TDflowMCPExt), `tdops.py` (tool execution, classification, verified undo), `loader.py` (embedded-module finder with hash check), `callbacks_execute.py`, `callbacks_parexec.py` | [source-of-truth](../architecture/source-of-truth.md) |
 | `src/component/manifest.json` | Component layout + custom parameters; the builder's only input list | [ADR-0007](../decisions/0007-source-first-build.md) |
 | `src/setup/web/` | Setup Assistant page (`index.html`, `app.css`, `app.js`), embedded into the `.tox` | [setup assistant §7](../architecture/setup-assistant.md#7-setup-assistant-web) |
 | `tools/build_tox/` | Source-first builder (`build.py` outside TD, `builder_runtime.py` inside) → `build/TDflowMCP.tox` + `TDflowMCP.json` | [build and test](../operations/build-and-test.md) |
 | `tools/scan_secrets.py` | Secret scanner over git-tracked files (CI step) | [validation-index](validation-index.md) |
 | `tools/tdtoe.py`, `tools/tdrun.py` | Disposable `.toe` generator; TouchDesigner launcher that protects other TD processes | [build and test](../operations/build-and-test.md) |
-| `tests/td/` | In-TouchDesigner tests: `td_runner.py` and `td_runner_mcp.py` (inside TD), plus the external harnesses `run_td_tests.py` (1A → `build/td-test-results*.json`) and `run_td_mcp_tests.py` (1B → `build/td-mcp-test-results.json`) | [validation-index](validation-index.md) |
+| `tests/td/` | In-TouchDesigner tests: `td_runner.py`, `td_runner_mcp.py`, `td_runner_gate.py` (inside TD), plus the external harnesses `run_td_tests.py` (1A), `run_td_mcp_tests.py` (1B), `run_td_gate_tests.py` (audit gate, storage, perf) and `run_td_onboard_tests.py` (1C live Claude Code + Skills) → `build/td-*-results.json` | [validation-index](validation-index.md) |
 | `build/` | **Git-ignored** build output: `TDflowMCP.tox` (development build), `TDflowMCP.json`, `reproducibility.json`, test results | [build and test](../operations/build-and-test.md) | [security model §8](../architecture/security-model.md#8-network-posture), [setup assistant §3](../architecture/setup-assistant.md#3-compatibility-checks) |
+| `src/integrations/clients.json` | Coding-agent registry (support levels, verified connection snippets, token-entry recipes), embedded as the `clients` DAT | [agent integration](../architecture/agent-integration.md) |
+| `src/skills/tdflow-core/SKILL.md` | TDflowMCP Skill v1.0 (authored independently), embedded and installed only by user consent | [ADR-0011](../decisions/0011-agent-integration-and-skills.md) |
+| `tools/package_release.py` | Packages the `.tox` from a clean worktree into git-ignored `dist/` (+ `INSTALL.md`, `SHA256SUMS`, zip) | [build and test](../operations/build-and-test.md) |
+| `docs/operations/install.md` | End-user install guide (shipped in the package as `INSTALL.md`) | — |
 | `src/setup/troubleshooting.json` | Remediation entries for every warn/fail check; internal actions only | [ADR-0010](../decisions/0010-setup-assistant-and-component-parameters.md) |
 | `tests/unit/` | Unit tests for the core, including the boundary tests | [validation-index](validation-index.md) |
 | `spikes/s4/` | Disposable S4 + S4b spikes (undo semantics; interleaving, save/reload) | [S4 record](../research/2026-11-22-s4-undo-semantics.md) |
@@ -37,4 +41,4 @@ This map lists the repository's actual contents (Phase 1B). Planned directories 
 | `reference/historical/mcp_bridge/` | Read-only historical reference: owner's original bridge audit + extracted source zip + provenance README. Never built, loaded or tested | [ADR-0008](../decisions/0008-upstream-reuse-policy.md) |
 | `reference/third_party/` | **Git-ignored**; future home of official third-party releases downloaded for hands-on testing | [ADR-0008](../decisions/0008-upstream-reuse-policy.md) |
 
-No `.tox` or `.toe` is committed (builds are git-ignored). No governance dashboard, approvals, memory tools or Skills exist yet.
+No `.tox` or `.toe` is committed (builds and `dist/` are git-ignored). No governance dashboard, approvals or memory tools exist yet.

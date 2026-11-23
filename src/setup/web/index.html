@@ -70,6 +70,14 @@
       <h3>Recent sessions</h3>
       <table id="sessions"><thead><tr><th scope="col">Session</th><th scope="col">Agent</th><th scope="col">Last activity</th><th scope="col">Calls</th></tr></thead><tbody></tbody></table>
       <p id="audit" class="hint"></p>
+      <h3>Skills</h3>
+      <p class="hint">TDflowMCP Skills teach your coding agent how to use these tools safely (guidance only; the server enforces every rule). Installing shows a preview first, never overwrites files you changed, and is recorded in the audit log.</p>
+      <table id="skills"><thead><tr><th scope="col">Agent</th><th scope="col">Where</th><th scope="col">Installed</th><th scope="col">Bundled</th><th scope="col">Action</th></tr></thead><tbody></tbody></table>
+      <div id="skills-preview" hidden>
+        <pre id="skills-plan" tabindex="0"></pre>
+        <div class="row"><button id="skills-confirm" type="button">Confirm</button><button id="skills-cancel" type="button" class="secondary">Cancel</button></div>
+      </div>
+      <span id="skills-status" role="status"></span>
     </div>
   </section>
 

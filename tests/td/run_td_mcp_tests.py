@@ -191,7 +191,8 @@ def cp_enabled(data, pid):
     st, j, _ = B.rpc("server/discover", modern=True)
     T("proto.modern_discover", st == 200 and "2026-07-28" in j["result"]["supportedVersions"])
     st, j, _ = B.rpc("tools/list", modern=True)
-    T("proto.modern_tools_list", st == 200 and j["result"]["resultType"] == "complete" and len(j["result"]["tools"]) == 16)
+    T("proto.modern_tools_list", st == 200 and j["result"]["resultType"] == "complete" and len(j["result"]["tools"]) == 16
+      and j["result"].get("ttlMs") == 0 and j["result"].get("cacheScope") == "private")
     st, j, _ = B.rpc("tools/list", modern=True, extra={"Mcp-Method": "tools/call"})
     T("proto.modern_header_mismatch", st == 400 and j["error"]["code"] == -32020)
     st, j, _ = B.rpc("tools/call", {"name": "tdflow_nope", "arguments": {}}, modern=True)
@@ -353,14 +354,20 @@ def cp_queue_checked(data, pid):
     th, out = STATE.pop("queue")
     th.join(20)
     st, j, r = out.get("r", (None, None, {}))
-    T("kill.queued_request_rejected", st == 503 and base.code(r) == "SUSPENDED", status=st)
+    sc = ((j or {}).get("result") or {}).get("structuredContent") or {}
+    # Audit-worker build: the queued plan step is dropped at dispatch and the engine answers with an audited
+    # SUSPENDED tool error; a request still waiting for the HTTP layer gets 503 SUSPENDED. Both: not executed.
+    T("kill.queued_request_rejected", (st == 503 and base.code(r) == "SUSPENDED") or
+      (st == 200 and sc.get("code") == "SUSPENDED" and (j or {}).get("result", {}).get("isError") is True), status=st)
 
 
 def cp_audit_down(data, pid):
     B = MCP(TOKENS["B"])
     T("audit.fail_closed_mutation", B.call("tdflow_set_parameters", {"path": "/project1/fx/level1",
                                                                      "values": {"opacity": 0.11}}).get("code") == "AUDIT_UNAVAILABLE")
-    T("audit.fail_closed_read", B.call("tdflow_get_operator", {"path": "/project1/fx/level1"}).get("code") == "AUDIT_UNAVAILABLE")
+    r = B.call("tdflow_get_operator", {"path": "/project1/fx/level1"})
+    # Fail closed either way: the call itself fails, or TDflowMCP already turned MCP off (worker failed).
+    T("audit.fail_closed_read", r.get("code") == "AUDIT_UNAVAILABLE" or r.get("_code") == "MCP_DISABLED", result=r)
 
 
 def cp_audit_up(data, pid):
@@ -426,7 +433,7 @@ def launch(mode, tox, run_dir, datadir):
     shutil.copyfile(os.path.join(HERE, "td_runner_mcp.py"), os.path.join(run_dir, "td_runner_mcp.py"))
     toe = make_toe(run_dir, "td_tests", boot_script("td_runner", start_frame=20))
     td = TDProcess(toe, run_dir, env={"TDFLOW_TOX": tox, "TDFLOW_SRC_ROOT": ROOT, "TDFLOW_TEST_MODE": mode,
-                                      "TDFLOW_DATADIR": datadir})
+                                      "TDFLOW_DATADIR": datadir, "TDFLOW_PRIVATE_ROOT": os.path.join(os.path.dirname(datadir), "private-root")})
     done, deadline = set(), time.time() + 600
     try:
         while td.alive() and time.time() < deadline:

@@ -1,6 +1,6 @@
 # ADR-0011 — Agent integration, Skills and "Tell Your Coding Agent"
 
-**Status:** Proposed (2026-11-22). The requirements (P13, P14) are owner-approved; this design awaits acceptance.
+**Status:** Conditionally Accepted (owner, 2026-11-22), subject to its validation gates. The requirements (P13, P14) are owner-approved. Implemented in Phase 1C ([record](../research/2026-11-22-audit-worker-and-phase-1c.md)).
 
 ## Context
 The owner requires MCP and agent Skills integration with client-aware installation and version management, and a dynamic "Tell Your Coding Agent" parameter covering setup, connection, repair and work resumption. Reference projects auto-write client configs and permission postures; Envoy writes `.claude/settings.local.json` with auto-approve defaults ([research](../research/2026-11-22-landscape-and-comparison.md)). That conflicts with TDflowMCP's server-side enforcement and its no-unauthorized-changes requirement.
@@ -20,3 +20,7 @@ Adopt [agent-integration.md](../architecture/agent-integration.md) and [setup-as
 
 ## Validation gates
 Phase 1C acceptance: Claude Code connects using only the generated text, and a Skills install/update/uninstall round-trip passes on a disposable target directory.
+- **Live connection: passed** (Claude Code 2.1.289, the JSON entry taken from the generated text, `--strict-mcp-config`, token only in the environment; a scoped edit audited). The first attempt found missing MCP 2026-07-28 caching hints, which are now fixed.
+- **Skills round-trip: passed** on a disposable home and project folder. Preview/confirm, stale preview refused, modified file never overwritten, uninstall keeps modified files, unlisted target refused, audited. Junction rejection is unit-tested on Windows.
+- **Version mismatch: surfaced** on the Setup page and to the agent (`expected_skill_version`).
+- Codex CLI, Cursor and VS Code Copilot remain `documented` (no live test).

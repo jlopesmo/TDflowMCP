@@ -6,7 +6,7 @@
 
 | Tool | Actions | Annotations | Purpose |
 |---|---|---|---|
-| `tdflow_whoami` | none | readOnly | Agent identity, role, effective scopes, `server_version`, `tool_surface_version`, `expected_skill_version`, limits |
+| `tdflow_whoami` | none | readOnly | Agent identity, role, effective scopes, `server_version`, `tool_surface_version`, `expected_skill_version` (`1.0` since 1C; the bundled Skills compare it), limits |
 | `tdflow_project_info` | none (fixed summary) | readOnly | TD build, project name, top-level COMP names under the host root **filtered to those the agent can read**, FPS, cook state |
 | `tdflow_list_operators` | read `path/*` | readOnly | Children with type and family, paginated; protected subtrees filtered |
 | `tdflow_get_operator` | read `path` | readOnly | Type, flags, inputs/outputs, errors/warnings |
