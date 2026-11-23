@@ -23,7 +23,7 @@ class FakeHost(protocol.ToolHost):
     def list_tools(self):
         return [{"name": "tdflow_whoami", "inputSchema": {"type": "object", "additionalProperties": False}}]
 
-    def call_tool(self, name, arguments, client_info):
+    def call_tool(self, name, arguments, client_info, meta=None):
         self.calls.append((name, arguments, client_info))
         return None if name == "nope" else protocol.tool_result({"ok": True})
 
@@ -130,8 +130,8 @@ class ProtocolTests(unittest.TestCase):
 
 
 class RegistryTests(unittest.TestCase):
-    def test_twenty_tools_with_classification(self):
-        self.assertEqual(len(ALL), 20)               # 16 Phase 1B tools + 4 Phase 2A memory tools
+    def test_registered_tools_with_classification(self):
+        self.assertEqual(len(ALL), 21)               # 16 Phase 1B + 4 Phase 2A memory + tdflow_approval_status (2B)
         reg = core_registry()
         for t in reg.all():
             d = t.describe()

@@ -75,7 +75,13 @@ class BrowserRouteTests(unittest.TestCase):
 
     def test_dashboard_api_reads_require_admin(self):
         d = decide("GET", "/api/audit", h(X_TDflow_Request="1"), S, CFG)
-        self.assertEqual(d.next, "admin_session")
+        self.assertEqual(d.next, "admin_session+csrf")          # Phase 2B: cookies span ports, so reads need CSRF too
+        d = decide("GET", "/api/overview", h(X_TDflow_Request="1", Origin="http://127.0.0.1:9481"), S, CFG)
+        self.assertEqual((d.allow, d.code), (False, "BAD_ORIGIN"))
+        d = decide("POST", "/api/kill", h(Origin="http://127.0.0.1:9480"), S, CFG)
+        self.assertEqual((d.allow, d.code), (False, "MISSING_CSRF"))
+        d = decide("POST", "/api/kill", h(X_TDflow_CSRF="x"), S, CFG)
+        self.assertEqual((d.allow, d.code), (False, "BAD_ORIGIN"))                  # a missing Origin is rejected
         d = decide("GET", "/setup/api/status", h(X_TDflow_Request="1"), S, GateConfig(setup_reads_need_admin=True))
         self.assertEqual(d.next, "admin_session")
 

@@ -21,7 +21,7 @@
 | `tdflow_get_errors` | read `path/**` | readOnly | Errors and warnings under a scope (filtered), plus `never_cooked` operators whose errors are unknown (with total and truncation flags; this tool does not cook anything) |
 | `tdflow_undo` | inverse actions on the audited targets | | Undo the agent's own newest audited change, only if TD's undo stack is exactly as it was right after that change (S4b), else `UNDO_CONFLICT`. Reports `verified` after checking the restored state |
 
-`tdflow_approval_status` is deferred to Phase 2B together with the approval flow.
+`tdflow_approval_status` (**Phase 2B, implemented**): read-only state of one of the caller's own approval requests. Never executes anything; an approved call runs when the agent repeats it identically. Errors added in 2B: `APPROVAL_REQUIRED` (nothing ran; a request is waiting), `APPROVAL_PENDING`, `APPROVAL_DENIED`, `APPROVAL_TARGETS_CHANGED`, `APPROVAL_POLICY_CHANGED`, `APPROVAL_MISMATCH`, `APPROVAL_INVALID`, `APPROVAL_QUEUE_FULL`, `APPROVAL_REFUSED`. `tdflow_set_parameters` sets `expressions` after approval.
 
 ## Continuity and memory tools
 

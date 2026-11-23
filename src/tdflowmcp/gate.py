@@ -27,7 +27,7 @@ class GateConfig:
     setup_reads_need_admin: bool = False   # True would require the admin session for every Setup read
     # Setup reads that always need the paired admin session (Phase 1B): agent/session information.
     admin_read_prefixes: tuple = ("/setup/api/agents", "/setup/api/sessions", "/setup/api/skills",
-                                  "/setup/api/memory")
+                                  "/setup/api/memory", "/api")      # every dashboard read (Phase 2B)
 
     @property
     def canonical_origin(self) -> str:

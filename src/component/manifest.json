@@ -93,6 +93,12 @@
     },
     "tdflowmcp_td.tdops": {
       "path": "src/td_adapter/tdops.py"
+    },
+    "tdflowmcp.approvals": {
+      "path": "src/tdflowmcp/approvals.py"
+    },
+    "tdflowmcp.dashboard": {
+      "path": "src/tdflowmcp/dashboard.py"
     }
   },
   "dats": {
@@ -129,6 +135,21 @@
     },
     "skill_tdflow_core": {
       "path": "src/skills/tdflow-core/SKILL.md"
+    },
+    "ui_index_html": {
+      "path": "src/dashboard/index.html",
+      "serve": "/ui/",
+      "content_type": "text/html; charset=utf-8"
+    },
+    "ui_app_css": {
+      "path": "src/dashboard/app.css",
+      "serve": "/ui/app.css",
+      "content_type": "text/css; charset=utf-8"
+    },
+    "ui_app_js": {
+      "path": "src/dashboard/app.js",
+      "serve": "/ui/app.js",
+      "content_type": "text/javascript; charset=utf-8"
     }
   },
   "callbacks": {
@@ -398,6 +419,7 @@
     }
   ],
   "active_tools": [
+    "tdflow_approval_status",
     "tdflow_connect",
     "tdflow_create_operator",
     "tdflow_delete_operator",

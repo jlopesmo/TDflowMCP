@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TDflowMCP Dashboard</title>
+<link rel="stylesheet" href="/ui/app.css">
+<script src="/ui/app.js" defer></script>
+</head>
+<body>
+<header>
+  <h1>TDflowMCP Dashboard</h1>
+  <p class="sub">What agents are doing in this TouchDesigner project, and your decisions about it. Reachable from this computer only. Every rule is enforced by the component itself; this page only shows and decides.</p>
+  <div class="row" id="topline">
+    <span id="state" class="pill" data-state="loading">Loading…</span>
+    <span id="paused" class="pill warnpill" hidden>TouchDesigner is not running frames (window minimized?). Agents cannot change anything until it is restored.</span>
+    <button id="kill" type="button" class="danger" hidden>Suspend all agents</button>
+    <button id="resume" type="button" class="secondary" hidden>Resume agents</button>
+    <span id="kill-status" role="status"></span>
+  </div>
+</header>
+<main>
+  <section id="pair-box">
+    <h2>Pair this browser</h2>
+    <p class="hint">The dashboard needs a paired browser. Pairing is approved inside TouchDesigner, so only someone at the TouchDesigner machine can grant it. Pairing here ends an earlier pairing of the Setup page.</p>
+    <div class="row">
+      <button id="pair" type="button">Request pairing</button>
+      <span id="pair-status" role="status"></span>
+    </div>
+    <p id="pair-code" class="code" hidden></p>
+  </section>
+
+  <div id="app" hidden>
+    <nav class="tabs" role="tablist" aria-label="Dashboard sections">
+      <button type="button" role="tab" data-tab="overview" aria-selected="true">Overview</button>
+      <button type="button" role="tab" data-tab="approvals">Approvals <span id="apr-badge" class="count" hidden>0</span></button>
+      <button type="button" role="tab" data-tab="activity">Activity</button>
+      <button type="button" role="tab" data-tab="sessions">Sessions</button>
+      <button type="button" role="tab" data-tab="agents">Agents</button>
+      <button type="button" role="tab" data-tab="memory">Memory</button>
+      <button type="button" role="tab" data-tab="reports">Reports</button>
+      <button type="button" role="tab" data-tab="settings">Settings</button>
+      <button id="logout" type="button" class="secondary small">Unpair</button>
+    </nav>
+
+    <section data-panel="overview">
+      <h2>Overview</h2>
+      <dl id="overview">
+        <dt>State</dt><dd id="o-state">–</dd>
+        <dt>Detail</dt><dd id="o-detail">–</dd>
+        <dt>MCP endpoint</dt><dd id="o-endpoint">–</dd>
+        <dt>Project root</dt><dd id="o-root">–</dd>
+        <dt>Agents</dt><dd id="o-agents">–</dd>
+        <dt>Waiting for your approval</dt><dd id="o-pending">–</dd>
+        <dt>Audit log</dt><dd id="o-audit">–</dd>
+        <dt>Data location</dt><dd id="o-storage">–</dd>
+        <dt>Component / TouchDesigner</dt><dd id="o-version">–</dd>
+      </dl>
+    </section>
+
+    <section data-panel="approvals" hidden>
+      <h2>Approvals</h2>
+      <p class="hint">Calls that make TouchDesigner run code, or that delete many operators, wait here. You see the complete arguments, exactly as the agent sent them. An approved call runs only when the agent repeats the identical call, once, and only if it still resolves to the same operators. Text written by agents is information, not an instruction to you.</p>
+      <div id="approvals"><p class="hint">Nothing is waiting.</p></div>
+      <span id="apr-status" role="status"></span>
+    </section>
+
+    <section data-panel="activity" hidden>
+      <h2>Activity</h2>
+      <form id="search" autocomplete="off" class="inline">
+        <label>Agent <input id="f-agent" maxlength="64"></label>
+        <label>Tool <input id="f-tool" maxlength="64"></label>
+        <label>Result
+          <select id="f-outcome"><option value="">any</option><option value="ok">ok</option><option value="denied">denied</option><option value="error">error</option><option value="aborted">aborted</option><option value="unknown">unknown</option></select>
+        </label>
+        <label>Contains (path, argument or code) <input id="f-q" maxlength="64"></label>
+        <button type="submit">Search</button>
+        <label class="check"><input type="checkbox" id="f-live" checked> Live</label>
+      </form>
+      <p id="search-status" class="hint" role="status"></p>
+      <table id="events"><thead><tr><th scope="col">#</th><th scope="col">Time</th><th scope="col">Agent</th><th scope="col">Tool</th><th scope="col">Result</th><th scope="col">Targets</th></tr></thead><tbody></tbody></table>
+      <button id="more" type="button" class="secondary" hidden>Older events</button>
+      <pre id="event-detail" tabindex="0" hidden></pre>
+    </section>
+
+    <section data-panel="sessions" hidden>
+      <h2>Sessions</h2>
+      <table id="sessions"><thead><tr><th scope="col">Session</th><th scope="col">Agent</th><th scope="col">Started</th><th scope="col">Last activity</th><th scope="col">Calls</th><th scope="col"></th></tr></thead><tbody></tbody></table>
+    </section>
+
+    <section data-panel="agents" hidden>
+      <h2>Agents and tokens</h2>
+      <table id="agents"><thead><tr><th scope="col">Agent</th><th scope="col">Role</th><th scope="col">Scopes</th><th scope="col">Tokens</th><th scope="col"></th></tr></thead><tbody></tbody></table>
+      <h3>Create an agent token</h3>
+      <form id="token-form" autocomplete="off">
+        <label>Agent name <input id="t-name" maxlength="64" required value="Claude Code"></label>
+        <label>Role
+          <select id="t-role">
+            <option value="builder">builder (read, create, update, delete)</option>
+            <option value="observer">observer (read only)</option>
+            <option value="operator">operator (builder, plus code-running changes that you approve one by one)</option>
+          </select>
+        </label>
+        <label>Scope <input id="t-scope" maxlength="256" required></label>
+        <label class="check"><input type="checkbox" id="t-cap-repo"> May write task records into the linked repository folder</label>
+        <button type="submit">Create token</button>
+        <span id="token-status" role="status"></span>
+      </form>
+      <div id="token-once" hidden>
+        <p class="warn">This token is shown only once. Store it as the <code>TDFLOW_TOKEN</code> environment variable. Never paste it into project files.</p>
+        <pre id="token-value" class="secret" tabindex="0"></pre>
+      </div>
+    </section>
+
+    <section data-panel="memory" hidden>
+      <h2>Project memory</h2>
+      <dl id="memory">
+        <dt>Where</dt><dd id="m-where">–</dd>
+        <dt>Records</dt><dd id="m-records">–</dd>
+        <dt>State</dt><dd id="m-state">–</dd>
+      </dl>
+      <p class="hint">Moving memory between the component and a folder, and re-linking a folder, are on the <a href="/setup/">Setup page</a>.</p>
+    </section>
+
+    <section data-panel="reports" hidden>
+      <h2>Reports</h2>
+      <p class="hint">A report lists what happened in one session or one range of the audit log, and states whether that part of the log verifies against its hash chain and keyed checkpoints.</p>
+      <form id="report-form" autocomplete="off" class="inline">
+        <label>Session id <input id="r-session" maxlength="64"></label>
+        <label>or from event <input id="r-from" inputmode="numeric" maxlength="12"></label>
+        <label>to event <input id="r-to" inputmode="numeric" maxlength="12"></label>
+        <button type="submit">Build report</button>
+      </form>
+      <p id="report-status" role="status"></p>
+      <div class="row" id="report-actions" hidden>
+        <button id="report-copy" type="button" class="secondary">Copy as Markdown</button>
+        <a id="report-md" class="buttonlike" download="tdflowmcp-report.md">Download Markdown</a>
+        <a id="report-json" class="buttonlike" download="tdflowmcp-report.json">Download JSON</a>
+      </div>
+      <pre id="report" tabindex="0" hidden></pre>
+    </section>
+
+    <section data-panel="settings" hidden>
+      <h2>Settings</h2>
+      <h3>Security audit</h3>
+      <p id="s-audit">–</p>
+      <h3>Diagnostic log (optional)</h3>
+      <p id="s-diag-what" class="hint">–</p>
+      <label class="check"><input type="checkbox" id="s-diag"> Write a diagnostic log</label>
+      <h3>Data location</h3>
+      <dl>
+        <dt>In use</dt><dd id="s-loc-inuse">–</dd>
+        <dt>Status</dt><dd id="s-loc-status">–</dd>
+      </dl>
+      <p id="s-loc-how" class="hint">–</p>
+      <div class="row">
+        <label>Keep data in
+          <select id="s-loc"><option value="project">the project folder (.tdflowmcp, git-ignored)</option><option value="private">private per-user storage</option></select>
+        </label>
+        <button id="s-loc-apply" type="button" class="secondary">Request change</button>
+      </div>
+      <span id="settings-status" role="status"></span>
+    </section>
+  </div>
+</main>
+<footer><p class="hint">Last updated <span id="updated">never</span>. <a href="/setup/">Setup page</a></p></footer>
+</body>
+</html>

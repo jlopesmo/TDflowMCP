@@ -27,6 +27,7 @@ import time
 from typing import Callable, Dict, List, Optional, Sequence
 
 from tdflowmcp import SKILL_VERSION, TOOL_SURFACE_VERSION, __version__, schema
+from tdflowmcp import approvals as APR
 from tdflowmcp import memory as MEM
 from tdflowmcp import memrepo as REPO
 from tdflowmcp.identity import Identity, Sessions
@@ -37,7 +38,9 @@ from tdflowmcp.tools import Registry, Tool
 
 # Undo re-check (security model §3.3, revised): undoing a create removes it (needs delete); undoing a delete
 # restores the user's original operator, so it needs the same delete grant that allowed the change.
-INVERSE = {"create": "delete", "delete": "delete", "update": "update", "read": "read", "execute": "execute"}
+# Phase 2B: undoing an (approved) code-running change needs update, not execute again. Undo only ever restores the
+# verified state from right before the agent's own change, so it never brings in code that was not already there.
+INVERSE = {"create": "delete", "delete": "delete", "update": "update", "read": "read", "execute": "update"}
 
 
 class MainNotRun(Exception):
@@ -152,7 +155,8 @@ class Engine:
                 and (t.resolver in ("none",) or agent.grants)]
 
     def call(self, token_id: str, name: str, args: dict, client_info: Optional[dict] = None,
-             request_id: str = "", main: Optional[Callable[[Callable], object]] = None) -> Optional[dict]:
+             request_id: str = "", main: Optional[Callable[[Callable], object]] = None,
+             meta: Optional[dict] = None) -> Optional[dict]:
         """Handler thread. ``main`` runs a step on TD's main thread for this request (default: engine-wide)."""
         m = main or self.main
         tool = self.registry.get(name)
@@ -193,6 +197,12 @@ class Engine:
                 base.update(targets=d["targets"])
             return self._deny(base, d["code"], d["rule"], d["reason"], d["target"])
         base.update(targets=plan["targets"][:50], policy_version=plan["policy_version"])
+        if plan.get("approval"):
+            # Phase 2B (security-model §4): nothing runs without the user's approval of exactly this call.
+            given = ((meta or {}).get("tdflow") or {}).get("approval_id") if isinstance((meta or {}).get("tdflow"), dict) else None
+            stop = self._approval_gate(tool, args, agent, base, plan, given if isinstance(given, str) else None)
+            if stop is not None:
+                return stop
         mutating = not tool.read_only
         # 2. Durable intent (and DAT snapshot) before anything executes.
         snap_id = None
@@ -258,11 +268,84 @@ class Engine:
             return {"deny": {"code": f.code, "rule": "R0", "reason": f.message, "target": None}}
         verdict = self.policy.evaluate(agent, res.targets)
         targets = [[t.action, t.path] for t in res.targets]
+        if not verdict.allow and verdict.code == "APPROVAL_REQUIRED" and tool.name not in APPROVABLE.get(verdict.rule_id, ()):
+            # Phase 2B increment 1: only the effects with a tested execution path can be approved. Others stay
+            # denied as before (for example text written into a DAT that TouchDesigner runs).
+            return {"deny": {"code": "APPROVAL_UNAVAILABLE", "rule": verdict.rule_id, "target": verdict.target,
+                             "reason": "approval is not available for this kind of change in this version",
+                             "policy_version": verdict.policy_version, "targets": targets}}
+        if not verdict.allow and verdict.code == "APPROVAL_REQUIRED":
+            # Everything else passed (hard denies, role, grants, allowlists, limits): only approval is missing.
+            return {"deny": None, "targets": targets, "rule": verdict.rule_id, "policy_version": verdict.policy_version,
+                    "snapshot": res.context.get("snapshot"),
+                    "approval": {"rule": verdict.rule_id, "reason": verdict.reason,
+                                 "reasons": self.policy.approval_reasons(res.targets),
+                                 "facts": APR.target_facts(res.targets)}}
         if not verdict.allow:
             return {"deny": {"code": verdict.code, "rule": verdict.rule_id, "reason": verdict.reason,
                              "target": verdict.target, "policy_version": verdict.policy_version, "targets": targets}}
         return {"deny": None, "targets": targets, "rule": verdict.rule_id, "policy_version": verdict.policy_version,
                 "snapshot": res.context.get("snapshot")}
+
+    def _approval_gate(self, tool: Tool, args: dict, agent: Agent, base: dict, plan: dict,
+                       given_id: Optional[str]) -> Optional[dict]:
+        """Handler thread. None: an approval of exactly this call was redeemed just now (single use) and the call
+        may proceed. Otherwise the answer to return: a new pending request, "still pending", or a refusal.
+        The approval is found by (agent, tool, argument digest): coding agents cannot attach ``_meta``."""
+        ap = plan["approval"]
+        try:
+            text, sha = APR.digest(tool.name, args)
+        except APR.ApprovalError as e:
+            return self._deny(base, e.code, ap["rule"], e.message, None)
+        try:
+            now = time.time()
+            row = self.store.approval_find(agent.id, tool.name, sha)
+            state = APR.usable(row, now) if row else None
+            if state == "approved":
+                # Announced before the approval is consumed: a crash in between leaves a trace (review 13).
+                self.store.append("approval", outcome="redeeming", rule_id=ap["rule"], **dict(base, approval_id=row["id"]))
+                r = self.store.approval_redeem(row["id"], agent.id, tool.name, sha, ap["facts"],
+                                               plan["policy_version"], given_id)
+                if not r.get("ok"):
+                    self.store.append("approval", outcome="refused", error_code=r["code"], rule_id=ap["rule"],
+                                      **dict(base, approval_id=row["id"]))
+                    return tool_error(r["code"], r["message"], approval_id=row["id"], rule_id=ap["rule"])
+                base["approval_id"] = row["id"]
+                self.store.append("approval", outcome="redeemed", rule_id=ap["rule"], detail={"args_sha256": sha}, **base)
+                plan["approved"] = True
+                return None
+            if state == "pending":
+                self.store.append("deny", decision="APPROVAL_PENDING", rule_id=ap["rule"], error_code="APPROVAL_PENDING",
+                                  **dict(base, approval_id=row["id"]))
+                return tool_error("APPROVAL_PENDING", "The user has not decided yet. Nothing was executed. Repeat the "
+                                  "identical call after the user approved it on the TDflowMCP dashboard.",
+                                  **APR.summary_for_agent(row, now))
+            if state == "denied":
+                self.store.append("deny", decision="APPROVAL_DENIED", rule_id=ap["rule"], error_code="APPROVAL_DENIED",
+                                  **dict(base, approval_id=row["id"]))
+                return tool_error("APPROVAL_DENIED", "The user denied this request. Nothing was executed. Do not retry "
+                                  "it or look for another way; ask the user.", **APR.summary_for_agent(row, now))
+            r = self.store.approval_request(agent.id, base["token_id"], tool.name, text, sha,
+                                            APR.targets_key(ap["facts"]), plan["policy_version"], ap["reasons"])
+            if not r.get("ok"):
+                return self._deny(base, r["code"], ap["rule"], r["message"], None)
+            row = r["approval"]
+            try:
+                self.store.append("approval", outcome="requested", rule_id=ap["rule"],
+                                  detail={"args_sha256": sha, "reasons": ap["reasons"]}, **dict(base, approval_id=row["id"]))
+            except AuditUnavailable:
+                # A request the audit log does not know about must never be approvable (review 13).
+                try:
+                    self.store.approval_cancel(row["id"])
+                except AuditUnavailable:
+                    pass
+                raise
+            return tool_error("APPROVAL_REQUIRED", "This call needs the user's approval (" + ap["reason"] + "). Nothing "
+                              "was executed. The request is now waiting on the TDflowMCP dashboard; tell the user, then "
+                              "repeat the identical call once they approved it.", status="pending_approval",
+                              reasons=ap["reasons"], rule_id=ap["rule"], **APR.summary_for_agent(row, now))
+        except AuditUnavailable:
+            return tool_error("AUDIT_UNAVAILABLE", "The audit store is unavailable, so nothing was requested or executed.")
 
     def _execute(self, tool: Tool, args: dict, agent: Agent, token_id: str, plan: dict, label: str, snap_id) -> dict:
         # Kill switch and revocation are re-checked right before execution (race with the intent wait).
@@ -275,9 +358,17 @@ class Engine:
         if [[t.action, t.path] for t in res.targets] != plan["targets"]:
             raise ToolFailure("PRECONDITION_CHANGED", "The project changed since the request was checked; "
                                                       "nothing was executed. Retry.")
-        v = self.policy.evaluate(current, res.targets)
+        # Policy is evaluated again at execution, at the current version. With a redeemed approval only the
+        # approval rules are skipped; a grant revoked in between still denies.
+        v = self.policy.evaluate(current, res.targets, approved=bool(plan.get("approved")))
         if not v.allow:
             raise ToolFailure(v.code, v.reason, rule_id=v.rule_id)
+        if plan.get("approved") and APR.target_facts(res.targets) != plan["approval"]["facts"]:
+            raise ToolFailure("APPROVAL_TARGETS_CHANGED", "The project changed since the approval; nothing was "
+                                                          "executed. Ask again.")
+        if plan.get("approved") and v.policy_version != plan["policy_version"]:
+            raise ToolFailure("APPROVAL_POLICY_CHANGED", "Your permissions changed since the approval; nothing was "
+                                                         "executed. Ask again.")
         if snap_id is not None:
             res.context["snapshot_id"] = snap_id
             res.context["planned_snapshot"] = plan.get("snapshot")
@@ -300,7 +391,12 @@ class Engine:
                    "tool_surface_version": TOOL_SURFACE_VERSION, "expected_skill_version": SKILL_VERSION,
                    "limits": {"max_ops_per_call": self.policy.max_ops, "max_delete_without_approval": self.policy.max_delete},
                    "memory": {"repository_write": CAP_MEMORY_REPO_WRITE in agent.capabilities},
-                   "approvals": "unavailable in Phase 1 (execute and large deletes are denied)"}
+                   "approvals": ("available: calls that run code or delete many operators wait for the user's "
+                                 "approval on the dashboard, then run when you repeat the identical call"
+                                 if self.policy.approvals else
+                                 "unavailable in Phase 1 (execute and large deletes are denied)")}
+        elif tool.name == "tdflow_approval_status":
+            out = None
         elif tool.name == "tdflow_session_note":
             out = {"noted": True, "session_id": base["session_id"]}
         elif tool.name == "tdflow_session_list":
@@ -309,7 +405,13 @@ class Engine:
             raise ToolFailure("INTERNAL_ERROR", "unknown identity tool")
         try:                                                          # intent + outcome, like every call (§6)
             iseq = self.store.append("intent", decision="ALLOW", rule_id="I", **base)
-            if out is None:
+            if out is None and tool.name == "tdflow_approval_status":
+                row = self.store.approval_get(str(args.get("approval_id", "")))
+                if row is None or row.get("agent_id") != agent.id:      # never another agent's request
+                    out = {"approval_id": args.get("approval_id"), "state": "not_found"}
+                else:
+                    out = APR.summary_for_agent(row, time.time())
+            elif out is None:
                 out = {"sessions": self.store.sessions(agent.id, int(args.get("limit", 10)))}
             seq = self.store.append("outcome", decision="ALLOW", outcome="ok", duration_ms=int((self.clock() - t0) * 1000),
                                     detail=dict({"intent_seq": iseq}, **({"note": redact(args.get("text", ""), 2000)}
@@ -829,6 +931,9 @@ class Engine:
         return self._memory_read_result(base, t0, out)
 
 
+# Which tools may be approved, per approval rule (Phase 2B increment 1): A1 (runs code) only for parameter
+# expressions and reference parameters; A2 (large delete) for deletes.
+APPROVABLE = {"A1": ("tdflow_set_parameters",), "A2": ("tdflow_delete_operator",)}
 MUTATION_LIMIT = 5000                       # audited mutations read per evidence window
 FP_CHUNK = 50                               # operators fingerprinted per main-thread step
 

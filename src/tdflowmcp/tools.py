@@ -135,8 +135,9 @@ def core_registry() -> Registry:
                                                       "limit": {"type": "integer", "minimum": 1, "maximum": 200}}, ["path"]),
            ("read",), "read_path", "get_parameters", read_only=True, idempotent=True))
     T(Tool("tdflow_set_parameters", "Set parameters", "Set constant parameter values. Returns previous values. "
-           "Expressions, binds, exports and Python-evaluated parameters need execute and are not available in "
-           "Phase 1. Reversible with tdflow_undo.",
+           "Expressions (the expressions argument) and parameters that name operators or files make TouchDesigner "
+           "run code: they need the operator role and the user's approval of that exact call. Reversible with "
+           "tdflow_undo.",
            obj({"path": PATH, "values": {"type": "object", "maxProperties": 50, "additionalProperties":
                                          {"type": ["string", "number", "integer", "boolean"]}},
                 "expressions": {"type": "object", "maxProperties": 50,
@@ -180,6 +181,11 @@ def core_registry() -> Registry:
     T(Tool("tdflow_session_list", "Session list", "Your recent sessions (counts only).",
            obj({"limit": {"type": "integer", "minimum": 1, "maximum": 50}}), (), "none", "session_list",
            read_only=True, idempotent=True))
+    # Phase 2B: approvals (security-model §4). Read-only: execution happens only on the identical re-call.
+    T(Tool("tdflow_approval_status", "Approval status", "State of one of your own approval requests (pending, approved, "
+           "denied, expired, redeemed). It never executes anything: repeat the identical call to run an approved one.",
+           obj({"approval_id": {"type": "string", "minLength": 20, "maxLength": 20, "pattern": r"^apr_[A-Za-z0-9]{16}$"}},
+               ["approval_id"]), (), "none", "approval_status", read_only=True, idempotent=True))
     # Phase 2A: task checkpoints, verified handoffs (ADR-0012) on single-authority project memory (ADR-0013).
     T(Tool("tdflow_task_list", "Task list", "Tasks in this project's memory (the user's tdflowProject component) "
            "that you can read, with their latest revision and status, and whether memory is writable.",

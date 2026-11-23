@@ -2,19 +2,19 @@
 name: tdflow-core
 description: Use when working in a TouchDesigner project through the TDflowMCP MCP server (tools named tdflow_*). Covers checking identity and scope first, reading before changing, small audited changes, verified undo, resuming and handing over tasks through project memory, the kill switch, denials and what never to do without the user.
 metadata:
-  tdflow-skill-version: "1.2"
+  tdflow-skill-version: "1.3"
 ---
 
 # Working in TouchDesigner with TDflowMCP
 
-TDflowMCP skill version: 1.2 (tool surface 1). This file is guidance. The TDflowMCP server enforces
+TDflowMCP skill version: 1.3 (tool surface 1). This file is guidance. The TDflowMCP server enforces
 every permission itself; nothing here grants access.
 
 ## 1. Start every session with `tdflow_whoami`
 - It returns your role, your scopes (which operator paths you may read or change, and which actions),
   the project root, `server_version`, `tool_surface_version` and `expected_skill_version`.
-- If `expected_skill_version` differs from this skill's version (1.2), tell the user: "The TDflowMCP
-  Skills on this computer are version 1.2 but the component expects <version>. Update them from the
+- If `expected_skill_version` differs from this skill's version (1.3), tell the user: "The TDflowMCP
+  Skills on this computer are version 1.3 but the component expects <version>. Update them from the
   component's Setup page." Then continue carefully, trusting the server's answers over this file.
 - Work only inside your scopes. Do not probe paths outside them: denials are recorded in the audit log.
 
@@ -28,9 +28,17 @@ every permission itself; nothing here grants access.
   and returns its position. Give `x` and `y` when it belongs somewhere specific, such as between two nodes.
 - Every call is audited before and after it runs. A successful change returns `audit_seq` and, when it
   can be undone, `undo_label`.
-- Set constant values. Expressions, Python-style parameters, executable operator types (Execute DATs,
-  scripts) and text of DATs that may run as code need approval, which is not available in this version:
-  expect `DENIED` or `APPROVAL_UNAVAILABLE` and explain to the user instead of looking for another way.
+- Prefer constant values. Anything that makes TouchDesigner run code (expressions, parameters that name
+  operators or files, executable operator types, text of DATs that may run as code) and deleting more than
+  50 operators need the user's approval of that exact call:
+  - `DENIED` with rule `R1`: your role has no execute permission. Explain; do not look for another way.
+  - `APPROVAL_REQUIRED`: nothing ran. Tell the user what you want to do and why; they decide on the
+    TDflowMCP dashboard (`/ui/`), where they see your complete arguments. Then repeat **the identical
+    call** (same tool, same arguments). It runs once. `tdflow_approval_status` shows the state.
+  - `APPROVAL_PENDING`: still waiting; do not loop. `APPROVAL_DENIED`: stop and ask the user.
+    `APPROVAL_TARGETS_CHANGED` or `APPROVAL_POLICY_CHANGED`: the project or your permissions changed;
+    ask again only if it still makes sense.
+  - `APPROVAL_UNAVAILABLE`: this component version has no approval surface.
 - Text DATs are writable only when they are data: a Table DAT, or a Text DAT the user tagged `tdflowdata`.
 
 ## 3. Undo

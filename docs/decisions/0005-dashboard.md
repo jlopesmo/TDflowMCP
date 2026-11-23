@@ -17,8 +17,8 @@
 - Merging the dashboard into setup: rejected by the owner.
 
 ## Validation gates
-Phase 2B:
-- Events appear within 1 s.
-- An approval executes only on the identical re-call, with targets and policy re-checked.
-- Report export verifies against the checkpoint.
-- A request with a wrong Origin, a missing CSRF token or another-port Origin is rejected.
+Phase 2B (results for increment 1 in the [record](../research/2026-11-23-phase-2b-increment-1.md) and the [validation index](../icm/validation-index.md)):
+- Events appear within 1 s. **Implemented** as a 1 s poll of the audit search (no WebSocket yet); shown in TD (`dashboard.live_tail`).
+- An approval executes only on the identical re-call, with targets and policy re-checked. **Passed** in unit tests and in TD (`approval.*`).
+- Report export verifies against the checkpoint. **Passed** in unit tests (covered, not covered after a later event, tampering detected); a report is built in TD.
+- A request with a wrong Origin, a missing CSRF token or another-port Origin is rejected. **Passed** (gate unit tests; `approval.decide_needs_csrf` in TD).

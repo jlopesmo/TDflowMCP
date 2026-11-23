@@ -596,6 +596,11 @@ class EmbeddedHTTPTransport:
         self._own("suspended")
         self._suspended = bool(value)
 
+    def suspend_now(self) -> None:
+        """Any thread: suspending is always allowed (the dashboard's kill switch must work while the owner runs
+        no frames). Resuming stays owner-only, through the setter."""
+        self._suspended = True
+
     def begin_close(self) -> None:
         """Kill switch for the transport itself: stop accepting, fail queued jobs, close the socket
         off-thread (never blocks the frame). Idempotent. Confirm with ``is_closed`` and the OS table."""

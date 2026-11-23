@@ -51,8 +51,8 @@ class ToolHost:
     def list_tools(self) -> list:  # pragma: no cover - interface
         raise NotImplementedError
 
-    def call_tool(self, name: str, arguments: dict, client_info: Optional[dict]) -> dict:  # pragma: no cover
-        raise NotImplementedError
+    def call_tool(self, name: str, arguments: dict, client_info: Optional[dict], meta: Optional[dict] = None) -> dict:
+        raise NotImplementedError  # pragma: no cover
 
 
 def handle(body: bytes, headers: Dict[str, str], host: ToolHost) -> Reply:
@@ -133,7 +133,7 @@ def handle(body: bytes, headers: Dict[str, str], host: ToolHost) -> Reply:
             return _err(400 if modern else 200, mid, -32602, "params.name must be a string")
         if not isinstance(args, dict):
             return _err(400 if modern else 200, mid, -32602, "params.arguments must be an object")
-        result = host.call_tool(name, args, client_info)
+        result = host.call_tool(name, args, client_info, meta)
         if result is None:
             return _err(400 if modern else 200, mid, -32602, f"Unknown tool: {name}")
         return ok(result)

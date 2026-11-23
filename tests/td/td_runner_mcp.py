@@ -71,7 +71,7 @@ def run(comp, ext, T, frames, until, checkpoint, R, restart=False):
     yield checkpoint("pair_approved", {})
     # tokens are created by the harness through the paired admin API
     yield checkpoint("tokens_created_wait", {})
-    T("agents.summary", comp.par.Agentsummary.eval().startswith(("4 agent", "5 agent")), summary=comp.par.Agentsummary.eval())
+    T("agents.summary", comp.par.Agentsummary.eval().startswith(("5 agent", "6 agent")), summary=comp.par.Agentsummary.eval())
     comp.par.Enablemcp = True
     yield until(lambda: comp.par.Status.eval() == "Enabled", 15, "enable")
     T("enable.enabled", comp.par.Status.eval() == "Enabled" and comp.par.Enablemcp.eval(),

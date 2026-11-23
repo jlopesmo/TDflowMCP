@@ -51,7 +51,7 @@ class TDflowMCPExt:
         self.manifest = ownerComp.op("loader").module.install_from_comp(ownerComp)
         from tdflowmcp import SKILL_VERSION, __version__, admin, auditworker, compat, controller, engine, identity, \
             policy, protocol, setupapi, skills, storage, store, tellagent, tools
-        from tdflowmcp import memory, memrepo
+        from tdflowmcp import approvals, dashboard, memory, memrepo
         from tdflowmcp.net import bindverify, evidence, oslisteners, oswindow
         from tdflowmcp.net.pyhttp import EmbeddedHTTPTransport, MainStepError, Response, error
         from tdflowmcp_td import tdops
@@ -61,7 +61,7 @@ class TDflowMCPExt:
                                         engine=engine, identity=identity, policy=policy, protocol=protocol,
                                         store=store, tools=tools, tdops=tdops, auditworker=auditworker,
                                         storage=storage, MainStepError=MainStepError, skills=skills,
-                                        memory=memory, memrepo=memrepo, oswindow=oswindow)
+                                        memory=memory, memrepo=memrepo, oswindow=oswindow, approvals=approvals, dashboard=dashboard)
         self.skill_version = SKILL_VERSION
         self.version = __version__
         old = _REGISTRY.instances.get(ownerComp.id)
@@ -87,6 +87,12 @@ class TDflowMCPExt:
         self._msg, self._msg_at = "", 0.0
         self._static_facts = None
         self._published = {}
+        self._dash = {}                  # main thread publishes; dashboard handler threads read (plain values)
+        self._dash_switch = None         # kill-switch request from the dashboard, applied to the parameter in OnFrame
+        self._switch_lock = threading.Lock()   # review 13: dashboard (handler thread) and OnFrame (main thread)
+        self._suspend_gen = 0            # bumped by every suspend; a resume only completes for the generation it saw
+        self._dash_location = None       # data-location request from the dashboard
+        self._diag_on = False            # optional diagnostic log (owner D14)
         self._shut = False
         # Phase 1B state. Handler threads read only: identity/admin snapshots, engine, store proxy, mirrors.
         self.admin = admin.AdminAuth()
@@ -170,8 +176,8 @@ class TDflowMCPExt:
             if info.get("serve"):
                 data = self.ownerComp.op(name).text.replace("\r\n", "\n").encode("utf-8")
                 assets[info["serve"]] = (info["content_type"], data)
-                if info["serve"] == "/setup/":
-                    assets["/setup"] = assets["/setup/"]
+                if info["serve"] in ("/setup/", "/ui/"):
+                    assets[info["serve"].rstrip("/")] = assets[info["serve"]]
         assets["/.well-known/tdflowmcp"] = ("application/json", self._m.setupapi.well_known(self.version))
         return assets
 
@@ -273,7 +279,7 @@ class TDflowMCPExt:
         if d.status != "OVERRIDE":
             self._m.storage.Registry(inp["private_root"]).put(d.project_id, "" if d.status == "UNSAVED" else inp["toe"],
                                                               d.data_dir)
-        return {"verify": v}
+        return {"verify": v, "settings": {"diagnostic_log": st.get_setting("diagnostic_log", "0")}}
 
     def ensure_store(self, start=True, action=None, restart=False):
         """Main thread, never waits. True when the audit store is open and the engine is built; otherwise
@@ -309,6 +315,7 @@ class TDflowMCPExt:
         self.store = self._m.auditworker.StoreProxy(w)
         self.identity = self._m.identity.Identity(self.store, preload=w.identity_rows)
         self.store_error = ""
+        self._diag_on = ((w.open_info or {}).get("settings") or {}).get("diagnostic_log") == "1"
         d = self.storage
         p = self.ownerComp.par
         if d is not None and d.status != "OVERRIDE" and hasattr(p, "Projectid") and p.Projectid.eval() != d.project_id:
@@ -354,6 +361,7 @@ class TDflowMCPExt:
         except ValueError:
             self.engine = None
             return
+        pol.approvals = True                     # Phase 2B: the dashboard is the approval surface
         self.tdops = self._m.tdops.TDAdapter(self.ownerComp, lambda: pol.root, lambda: None)
         self.engine = self._m.engine.Engine(self.store, self.identity, pol, self.registry, self.tdops,
                                             self.active_tools, lambda: self.suspended,
@@ -674,6 +682,8 @@ class TDflowMCPExt:
             self._request_resume()
 
     def _suspend_now(self):
+        with self._switch_lock:
+            self._suspend_gen += 1
         self._resuming = None                         # cancels a resume that is waiting for its record
         if not self.suspended:
             self.suspended = True
@@ -698,11 +708,12 @@ class TDflowMCPExt:
             return self._resume_now()                # no store open, so MCP cannot be on
         token = object()
         self._resuming = token
+        gen = self._suspend_gen
         f = w.submit("append", "kill_switch", outcome="off")
 
         def ok(_):
             if self._resuming is token:
-                self._resume_now()
+                self._resume_now(gen)
 
         def fail(code):
             if self._resuming is token:
@@ -711,9 +722,14 @@ class TDflowMCPExt:
                 self._set_note(f"Agents stay suspended: resuming could not be recorded ({code}).", 30)
         self._after([f], ok, fail)
 
-    def _resume_now(self):
-        self._resuming = None
-        self.suspended = False
+    def _resume_now(self, gen=None):
+        with self._switch_lock:
+            if gen is not None and gen != self._suspend_gen:
+                return                                # a suspend arrived meanwhile: it wins (review 13)
+            if self._dash_switch is True:
+                return
+            self._resuming = None
+            self.suspended = False
         t = self.ctl.transport
         if t is not None:
             t.suspended = False
@@ -879,6 +895,16 @@ class TDflowMCPExt:
             self._project_folder = str(td.project.folder or "")   # Save As moves project-scope Skills targets
             # Mirror the kill switch before dispatching anything this frame: parameter callbacks may be
             # deferred (review 6), and a queued request must never run after the switch was flipped.
+            with self._switch_lock:                  # a dashboard kill-switch request: the parameter follows it
+                sw, self._dash_switch = self._dash_switch, None
+            if sw is not None:
+                if bool(self.ownerComp.par.Suspendagents.eval()) != sw:
+                    self.ownerComp.par.Suspendagents.val = sw
+            loc = self._dash_location                # a data-location request from the dashboard (turns MCP off)
+            if loc is not None:
+                self._dash_location = None
+                if hasattr(self.ownerComp.par, "Datalocation") and str(self.ownerComp.par.Datalocation.eval()) != loc:
+                    self.ownerComp.par.Datalocation.val = loc
             self._apply_switch(bool(self.ownerComp.par.Suspendagents.eval()))
             before = (self.ctl.state, self.ctl.error_code)
             self.ctl.tick(self._dispatch)
@@ -963,8 +989,8 @@ class TDflowMCPExt:
             def list_tools(self_inner):
                 return eng.list_tools(tid)
 
-            def call_tool(self_inner, name, arguments, client_info):
-                return eng.call(tid, name, arguments, client_info, request_id=str(ctx.rid), main=main)
+            def call_tool(self_inner, name, arguments, client_info, meta=None):
+                return eng.call(tid, name, arguments, client_info, request_id=str(ctx.rid), main=main, meta=meta)
         with self._inflight_lock:
             self._inflight += 1
         try:
@@ -1024,6 +1050,8 @@ class TDflowMCPExt:
         AU = self._m.store.AuditUnavailable
         st, idn = self.store, self.identity
         p, m = ctx.path, ctx.method
+        if p.startswith("/api/"):
+            return self._dashboard_api(ctx, st, idn)
         if m == "GET" and p == "/setup/api/skills":
             return self._skills_api(p, m, {}, st)
         if m == "GET" and p == "/setup/api/memory":
@@ -1164,6 +1192,192 @@ class TDflowMCPExt:
                 return R(500, D(dict(res, code="OUTCOME_UNRECORDED", message="The files were written, but the "
                                      "outcome could not be recorded in the audit log.")), "application/json")
         return R(200, D(dict(res, ok=True)), "application/json")
+
+    # -- governance dashboard (Phase 2B, ADR-0005): paired admin session, handler thread --------------------
+    def _dashboard_api(self, ctx, st, idn):
+        """``/api/*``. A view and decision surface only: every rule is enforced by the engine. Nothing here needs
+        TouchDesigner's main thread except the memory view, so the dashboard (and its kill switch) keep working
+        while TouchDesigner runs no frames (a minimized window, spike S9). Searches are POSTs with JSON bodies."""
+        R, E, D = self._m.Response, self._m.error, self._m.setupapi.dumps
+        DB, APR, AU = self._m.dashboard, self._m.approvals, self._m.store.AuditUnavailable
+        J = "application/json"
+        p, m = ctx.path, ctx.method
+
+        def ok(obj, status=200):
+            return R(status, D(obj), J)
+
+        def refuse(code, message, status=409):
+            return R(status, D({"code": code, "message": message}), J)
+        if m == "POST" and p == "/api/kill":           # review 13: suspending never depends on the audit store
+            body = self._admin_body(ctx.body)
+            if body is None:
+                return E(400, "BAD_REQUEST")
+            return ok(self._dash_kill(body.get("suspend") is not False, st))
+        if st is None or idn is None or not st.available:
+            return E(503, "AUDIT_UNAVAILABLE")
+        try:
+            if m == "GET":
+                if p == "/api/overview":
+                    return ok(self._dash_overview(st, idn))
+                if p == "/api/sessions":
+                    return ok({"sessions": st.sessions(limit=50)})
+                if p == "/api/agents":
+                    return ok({"agents": idn.public_list(), "project_root": self._root_text,
+                               "roles": ["observer", "builder", "operator"]})
+                if p == "/api/approvals":
+                    now = time.time()
+                    names = {a.id: a.display_name for a in idn.agents.values()}
+                    rows = [dict(APR.view_for_user(r, now), agent_name=names.get(r["agent_id"]))
+                            for r in st.approvals_list(limit=100)]
+                    return ok({"approvals": rows, "pending": sum(1 for r in rows if r["state"] == "pending"),
+                               "expiry_s": APR.EXPIRY_S})
+                if p == "/api/settings":
+                    return ok(self._dash_settings())
+                if p == "/api/memory":
+                    return self._memory_api(ctx, "status", {}, st)
+                return E(404, "NOT_FOUND")
+            if m != "POST":
+                return E(405, "METHOD_NOT_ALLOWED")
+            body = self._admin_body(ctx.body)
+            if body is None:
+                return E(400, "BAD_REQUEST")
+            if p == "/api/audit/search":
+                return ok(DB.events_page(st, DB.clean_query(body)))
+            if p == "/api/report":
+                rep = DB.build_report(st, DB.clean_query(body), self.version, limit=2000)
+                st.append("admin", tool="report_export", detail={"scope": rep["scope"], "sha256": rep["sha256"],
+                                                                 "covered": rep["verification"]["covered"]})
+                return ok({"report": rep, "markdown": DB.report_markdown(rep)})
+            if p == "/api/approvals/decide":
+                aid, decision = str(body.get("id", ""))[:32], str(body.get("decision", ""))
+                if not APR.ID.match(aid) or decision not in ("approved", "denied"):
+                    return refuse("INVALID_" + "ARGS", "id and decision (approved or denied) are needed", 400)
+                with self._admin_lock:
+                    cur = st.approval_get(aid)
+                    if cur is None:
+                        return refuse("APPROVAL_NOT_FOUND", "no such request", 404)
+                    # The decision is in the audit log before it takes effect, with the digest it applies to.
+                    st.append("admin", tool="approval_decide", approval_id=aid, agent_id=cur["agent_id"],
+                              detail={"decision": decision, "args_sha256": cur["args_sha256"], "tool": cur["tool"]})
+                    r = st.approval_decide(aid, decision, str(body.get("note", ""))[:500])
+                    if not r.get("ok"):
+                        st.append("approval", outcome="decision_refused", approval_id=aid, agent_id=cur["agent_id"],
+                                  error_code=r["code"], tool=cur["tool"])
+                        return refuse(r["code"], r["message"])
+                    st.append("approval", outcome=decision, approval_id=aid, agent_id=cur["agent_id"], tool=cur["tool"],
+                              detail={"args_sha256": cur["args_sha256"]})
+                return ok({"ok": True, "approval": APR.view_for_user(r["approval"], time.time())})
+            if p == "/api/tokens":
+                with self._admin_lock:
+                    return self._create_token(body, st, idn)
+            if p == "/api/tokens/revoke":
+                tid = str(body.get("token_id", ""))[:32]
+                with self._admin_lock:
+                    st.append("admin", tool="revoke_token", detail={"token_id": tid, "via": "dashboard"})   # durable first
+                    done = idn.revoke(tid)
+                return ok({"revoked": done}, 200 if done else 404)
+            if p == "/api/agents/state":
+                aid, enabled = str(body.get("agent_id", ""))[:32], body.get("enabled") is True
+                if aid not in idn.agents:
+                    return refuse("NOT_FOUND", "no such agent", 404)
+                with self._admin_lock:
+                    st.append("admin", tool="agent_enable" if enabled else "agent_disable", agent_id=aid)
+                    idn.set_enabled(aid, enabled)
+                return ok({"agent_id": aid, "enabled": enabled})
+            if p == "/api/settings":
+                return self._dash_settings_set(body, st, ok, refuse)
+            return E(404, "NOT_FOUND")
+        except DB.BadQuery as e:
+            return refuse("BAD_QUERY", "not a valid value for: " + str(e)[:40], 400)
+        except AU:
+            return E(503, "AUDIT_UNAVAILABLE")
+
+    def _dash_overview(self, st, idn):
+        """Handler thread. State published by the main thread (``_publish``) plus live flags and the audit summary."""
+        now, vc = time.monotonic(), self._verify_cache
+        if vc is None or now - vc[0] > 10:
+            vc = self._verify_cache = (now, st.verify())           # full re-verify at most every 10 s
+        t = self.ctl.transport
+        out = dict(self._dash)
+        out.update(suspended=bool(self.suspended), mcp=bool(self.mcp_on), version=self.version, td_build=self.td_build,
+                   cooking=bool(t is not None and not t.not_cooking()), audit=vc[1], last_seq=st.max_seq(),
+                   approvals_pending=st.approvals_pending(), agents=len(idn.agents), storage=self._storage_public(),
+                   admin_sessions=self.admin.active_sessions())
+        return out
+
+    def _dash_kill(self, suspend, st):
+        """Handler thread. Suspending takes effect at once and needs no frames (review 12: the Suspend Agents
+        parameter cannot be flipped while TouchDesigner is minimized). Resuming is only *requested* here: it is
+        done on the main thread, after its record is durable, exactly like the parameter."""
+        if suspend:
+            with self._switch_lock:
+                self._dash_switch = True                # OnFrame sets the parameter to match before mirroring it
+                self._suspend_gen += 1
+                self._resuming = None                   # cancels a resume that is waiting for its record
+                self.suspended = True
+            t = self.ctl.transport
+            if t is not None:
+                t.suspend_now()                         # queued MCP jobs are re-checked at dispatch
+            recorded = False
+            if st is not None and st.available:
+                try:
+                    st.append("kill_switch", outcome="on", detail={"via": "dashboard"})
+                    recorded = True
+                except self._m.store.AuditUnavailable:
+                    pass                                # agents are suspended either way
+            return {"suspended": True, "recorded": recorded}
+        with self._switch_lock:
+            self._dash_switch = False
+        if st is not None and st.available:
+            try:
+                st.append("admin", tool="resume_requested", detail={"via": "dashboard"})
+            except self._m.store.AuditUnavailable:
+                pass
+        return {"suspended": bool(self.suspended), "requested": "resume",
+                "note": "Agents resume once TouchDesigner has recorded it. TouchDesigner must be running frames "
+                        "(its window not minimized)."}
+
+    def _dash_settings(self):
+        d = self.storage
+        return {"security_audit": {"enabled": True, "can_be_disabled": False,
+                                   "why": "Every agent call is recorded before and after it runs, and calls fail closed "
+                                          "when that is not possible. This cannot be turned off while MCP is on."},
+                "diagnostic_log": {"enabled": bool(self._diag_on), "file": "diagnostic.jsonl in the data location",
+                                   "what": "Optional. Component state changes, notes and errors (no tokens, no arguments)."},
+                "data_location": {"choice": self._dash.get("data_location"), "in_use": self._data_display(),
+                                  "status": d.status if d is not None else "not opened",
+                                  "how": "Changing it turns MCP off. Confirm it in TouchDesigner with Confirm Move on the "
+                                         "component's Advanced page (the audit log is copied and verified, never moved)."}}
+
+    def _dash_settings_set(self, body, st, ok, refuse):
+        if any(k in body for k in ("security_audit", "audit", "mandatory_audit")):
+            return refuse("MANDATORY_AUDIT", "The security audit cannot be changed or turned off.", 400)
+        changed = {}
+        if "diagnostic_log" in body:
+            on = body.get("diagnostic_log") is True
+            with self._admin_lock:
+                st.append("admin", tool="setting", detail={"diagnostic_log": on})
+                st.set_setting("diagnostic_log", "1" if on else "0")
+            self._diag_on = on
+            changed["diagnostic_log"] = on
+        if "data_location" in body:
+            loc = str(body.get("data_location"))
+            if loc not in ("project", "private"):
+                return refuse("INVALID_" + "ARGS", "data_location must be project or private", 400)
+            st.append("admin", tool="setting", detail={"data_location": loc, "note": "requested; needs Confirm Move"})
+            self._dash_location = loc                   # applied on the main thread (it turns MCP off)
+            changed["data_location"] = {"requested": loc, "then": "Pulse Confirm Move on the component's Advanced page."}
+        if not changed:
+            return refuse("INVALID_" + "ARGS", "nothing to change", 400)
+        return ok({"ok": True, "changed": changed})
+
+    def _diag(self, kind, **fields):
+        """Optional diagnostic log (owner D14): one line per component event, written by the audit worker thread.
+        Never arguments, tokens or audit content; never a substitute for the security audit."""
+        w = self.worker
+        if self._diag_on and w is not None and w.available:
+            w.submit("diag_append", dict({"ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "kind": kind},
+                                         **{k: str(v)[:300] for k, v in fields.items()}))
 
     # -- project memory: status and mode migration (paired admin session, handler thread) --
     def _memory_api(self, ctx, op, body, st):
@@ -1400,8 +1614,8 @@ class TDflowMCPExt:
         role = str(body.get("role", "builder"))
         scope = str(body.get("scope") or (root + "/**"))
         actions = body.get("actions")
-        if role not in ("observer", "builder"):
-            return E(400, "ROLE_NOT_ALLOWED")               # 'operator' adds only execute, unavailable in 1B
+        if role not in ("observer", "builder", "operator"):
+            return E(400, "ROLE_NOT_ALLOWED")               # operator = builder + execute, always approval-gated (2B)
         if not (scope == root + "/**" or scope.startswith(root + "/")):
             return E(400, "SCOPE_OUTSIDE_PROJECT_ROOT")
         acts = None
@@ -1524,6 +1738,13 @@ class TDflowMCPExt:
             if self._published.get(k) != v and hasattr(p, k):
                 getattr(p, k).val = v
                 self._published[k] = v
+        state = vals["Status"]
+        if self._dash.get("state") != state:
+            self._diag("state", state=state, detail=vals["Statusdetail"])
+        self._dash = {"state": state, "detail": vals["Statusdetail"], "port": ctl.port, "project_root": self._root_text,
+                      "endpoint": f"http://127.0.0.1:{ctl.port}/mcp" if self.mcp_on else "",
+                      "data_location": str(p.Datalocation.eval()) if hasattr(p, "Datalocation") else "project",
+                      "data_status": vals["Datastatus"]}
 
     # ---- lifecycle (main thread) ----------------------------------------------------------------
     def Shutdown(self, reason="exit"):

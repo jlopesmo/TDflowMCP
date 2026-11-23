@@ -144,7 +144,7 @@ class Target:
 @dataclass(frozen=True)
 class Verdict:
     allow: bool
-    code: str = "OK"                 # OK | DENIED | APPROVAL_UNAVAILABLE | INVALID_TARGET
+    code: str = "OK"                 # OK | DENIED | APPROVAL_UNAVAILABLE | APPROVAL_REQUIRED | INVALID_TARGET
     rule_id: str = ""
     reason: str = ""
     target: Optional[str] = None
@@ -158,6 +158,9 @@ class Policy:
             raise ValueError("project root must be an absolute operator path")
         self.root = root.rstrip("/")
         self.max_delete, self.max_ops = max_delete, max_ops
+        # Phase 2B: with an approval surface (the dashboard) the two approval rules answer APPROVAL_REQUIRED;
+        # without one they stay a plain denial (APPROVAL_UNAVAILABLE), exactly as in Phases 1-2A.
+        self.approvals = False
 
     def version(self, agent: Optional[Agent] = None) -> str:
         blob = {"root": self.root, "max_delete": self.max_delete, "max_ops": self.max_ops,
@@ -213,7 +216,9 @@ class Policy:
                 return False, "G3", f"parameter {t.param} is on the deny list"
         return True, "G", ""
 
-    def evaluate(self, agent: Optional[Agent], targets: Sequence[Target]) -> Verdict:
+    def evaluate(self, agent: Optional[Agent], targets: Sequence[Target], approved: bool = False) -> Verdict:
+        """``approved``: the user approved exactly this call (the engine verified the approval). Only the two
+        approval rules (A1, A2) are then skipped; hard denies, role, grants, allowlists and limits all still apply."""
         ver = self.version(agent)
         if agent is None or not agent.enabled:
             return Verdict(False, "DENIED", "A0", "agent unknown or disabled", None, ver)
@@ -232,14 +237,32 @@ class Policy:
             ok, rule, why = self._grant_decision(agent, t)
             if not ok:
                 return Verdict(False, "DENIED", rule, why, t.path, ver)
+        if approved:
+            return Verdict(True, "OK", "GA", "", None, ver)      # allowed by grants plus the user's approval
+        code = "APPROVAL_REQUIRED" if self.approvals else "APPROVAL_UNAVAILABLE"
         for t in targets:
             if t.action == "execute":
-                return Verdict(False, "APPROVAL_UNAVAILABLE", "A1",
-                               "execute needs approval, which is not available in Phase 1", t.path, ver)
+                why = ("this makes TouchDesigner run code, so the user must approve it" if self.approvals else
+                       "execute needs approval, which is not available in Phase 1")
+                return Verdict(False, code, "A1", why, t.path, ver)
             if t.action == "delete" and t.count > self.max_delete:
-                return Verdict(False, "APPROVAL_UNAVAILABLE", "A2",
+                return Verdict(False, code, "A2",
                                f"deleting more than {self.max_delete} operators needs approval", t.path, ver)
         return Verdict(True, "OK", "G", "", None, ver)
+
+    def approval_reasons(self, targets: Sequence[Target]) -> List[str]:
+        """Why this call needs approval, for the user (every matching rule, not only the first)."""
+        out = []
+        for t in targets:
+            if t.action == "execute":
+                what = {"expression": f"sets an expression on parameter {t.param}", "reference": f"sets parameter "
+                        f"{t.param}, which names another operator or a file", "text": "writes text TouchDesigner may run "
+                        "as code", "wire": "wires data into an operator that may evaluate it"}.get(t.change, "runs code")
+                out.append(f"A1: {t.path} {what}. Approved code runs with full access to TouchDesigner (including "
+                           "TDflowMCP itself); scopes do not limit it")
+            if t.action == "delete" and t.count > self.max_delete:
+                out.append(f"A2: deletes {t.count} operators under {t.path} (more than {self.max_delete})")
+        return out[:10]
 
     def filter_readable(self, agent: Optional[Agent], targets: Sequence[Target]) -> Tuple[List[Target], int]:
         """Recursive reads: drop hard-denied and unpermitted entries instead of failing (§3.2.5)."""

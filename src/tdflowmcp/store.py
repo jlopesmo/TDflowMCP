@@ -24,6 +24,8 @@ import sqlite3
 import time
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+from tdflowmcp import approvals as APR
+
 SCHEMA_VERSION = 1
 GENESIS = "0" * 64
 EVENT_FIELDS = ("ts", "kind", "agent_id", "token_id", "session_id", "client_info", "method", "tool",
@@ -94,6 +96,12 @@ CREATE TABLE IF NOT EXISTS tokens (token_id TEXT PRIMARY KEY, agent_id TEXT NOT 
 CREATE TABLE IF NOT EXISTS grants (id INTEGER PRIMARY KEY, agent_id TEXT NOT NULL, scope TEXT NOT NULL,
   actions TEXT NOT NULL, effect TEXT NOT NULL DEFAULT 'allow');
 CREATE TABLE IF NOT EXISTS capabilities (agent_id TEXT NOT NULL, name TEXT NOT NULL, PRIMARY KEY (agent_id, name));
+-- Approvals live with the credentials (private per-user storage), never in the project folder (review 13).
+CREATE TABLE IF NOT EXISTS approvals (id TEXT PRIMARY KEY, created_at TEXT NOT NULL, expires_at REAL NOT NULL,
+  agent_id TEXT NOT NULL, token_id TEXT, tool TEXT NOT NULL, args TEXT NOT NULL, args_sha256 TEXT NOT NULL,
+  targets TEXT NOT NULL, policy_version TEXT, reasons TEXT, state TEXT NOT NULL, decided_at TEXT, note TEXT,
+  mac TEXT, redeemed_at TEXT);
+CREATE INDEX IF NOT EXISTS approvals_lookup ON approvals(agent_id, tool, args_sha256);
 """
 
 
@@ -454,3 +462,162 @@ class Store:
 
     def mark_restored(self, snap_id: int):
         self._c().execute("UPDATE snapshots SET restored_at=? WHERE id=?", (now_iso(), snap_id))
+
+    # ---- settings and the optional diagnostic log (Phase 2B, owner D14) -----------------------------------
+    def get_setting(self, key: str, default: str = "") -> str:
+        r = self._c().execute("SELECT v FROM meta WHERE k=?", ("setting:" + str(key),)).fetchone()
+        return str(r[0]) if r else default
+
+    def set_setting(self, key: str, value: str) -> None:
+        self._c().execute("INSERT OR REPLACE INTO meta(k, v) VALUES(?, ?)", ("setting:" + str(key), str(value)))
+
+    def diag_append(self, obj: Dict[str, Any]) -> None:
+        """One line in ``diagnostic.jsonl`` next to the audit database. Optional, best effort, size-capped; it is
+        not part of the audit log and a failure here never affects it."""
+        path = os.path.join(self.datadir, "diagnostic.jsonl")
+        try:
+            if os.path.exists(path) and os.path.getsize(path) > 1024 * 1024:
+                os.replace(path, path + ".1")
+            with open(path, "a", encoding="utf-8", newline="\n") as f:
+                f.write(_TOKENISH.sub("<redacted>", json.dumps(obj, sort_keys=True, ensure_ascii=True, default=str)) + "\n")
+        except OSError:
+            pass
+
+    # ---- approvals (Phase 2B, security-model §4) ---------------------------------------------------------
+    # The rows live in the private credentials database (review 13: a project-local row could have been edited to
+    # swap the approved digest or to reset a used approval). A decision is also bound to the request by a MAC
+    # with the installation key, and the digest of the stored arguments is recomputed before a decision. Every transition is also an audit event (written by the caller). These methods never raise an
+    # ApprovalError: the audit worker would turn it into "audit unavailable". They return {"ok": False, ...}.
+    _APR_COLS = ("id", "created_at", "expires_at", "agent_id", "token_id", "tool", "args", "args_sha256", "targets",
+                 "policy_version", "reasons", "state", "decided_at", "note", "mac", "redeemed_at")
+
+    def _apr_row(self, r) -> Optional[Dict[str, Any]]:
+        return dict(zip(self._APR_COLS, r)) if r else None
+
+    def _apr_expire(self, c, now: float):
+        c.execute("UPDATE approvals SET state='expired' WHERE state IN ('pending','approved') AND expires_at <= ?", (now,))
+
+    def approval_get(self, approval_id: str) -> Optional[Dict[str, Any]]:
+        r = self._cc().execute(f"SELECT {', '.join(self._APR_COLS)} FROM approvals WHERE id=?", (str(approval_id),)).fetchone()
+        return self._apr_row(r)
+
+    def approval_find(self, agent_id: str, tool: str, args_sha: str) -> Optional[Dict[str, Any]]:
+        """The newest request of this agent for exactly this call (any state)."""
+        r = self._cc().execute(f"SELECT {', '.join(self._APR_COLS)} FROM approvals WHERE agent_id=? AND tool=? AND "
+                              "args_sha256=? ORDER BY rowid DESC LIMIT 1", (agent_id, tool, args_sha)).fetchone()
+        return self._apr_row(r)
+
+    def approval_request(self, agent_id: str, token_id: str, tool: str, args_text: str, args_sha: str, targets: str,
+                         policy_version: str, reasons: List[str], now: Optional[float] = None,
+                         ttl: float = APR.EXPIRY_S) -> Dict[str, Any]:
+        """Create a pending request, or return the open one for the identical call. One transaction."""
+        now = time.time() if now is None else float(now)
+        c = self._cc()
+        c.execute("BEGIN IMMEDIATE")
+        try:
+            self._apr_expire(c, now)
+            r = c.execute(f"SELECT {', '.join(self._APR_COLS)} FROM approvals WHERE agent_id=? AND tool=? AND "
+                          "args_sha256=? AND state IN ('pending','approved') ORDER BY rowid DESC LIMIT 1",
+                          (agent_id, tool, args_sha)).fetchone()
+            if r:
+                c.execute("COMMIT")
+                return {"ok": True, "created": False, "approval": self._apr_row(r)}
+            n = c.execute("SELECT COUNT(*) FROM approvals WHERE agent_id=? AND state='pending'", (agent_id,)).fetchone()[0]
+            if n >= APR.MAX_PENDING_PER_AGENT:
+                c.execute("COMMIT")
+                return {"ok": False, "code": "APPROVAL_QUEUE_FULL",
+                        "message": f"{n} of your requests are already waiting for the user; wait for a decision"}
+            row = (APR.new_id(), now_iso(), now + float(ttl), agent_id, token_id, tool, args_text, args_sha, targets,
+                   policy_version, json.dumps([str(x)[:200] for x in reasons][:10]), "pending", None, None, None, None)
+            c.execute(f"INSERT INTO approvals({', '.join(self._APR_COLS)}) VALUES ({', '.join('?' * len(row))})", row)
+            c.execute("COMMIT")
+            return {"ok": True, "created": True, "approval": dict(zip(self._APR_COLS, row))}
+        except BaseException:
+            c.execute("ROLLBACK")
+            raise
+
+    def approval_decide(self, approval_id: str, decision: str, note: str = "", now: Optional[float] = None) -> Dict[str, Any]:
+        """The user's decision (paired admin session). Only a pending, unexpired request can be decided."""
+        if decision not in ("approved", "denied"):
+            return {"ok": False, "code": "INVALID_ARGS", "message": "decision must be approved or denied"}
+        now = time.time() if now is None else float(now)
+        c = self._cc()
+        c.execute("BEGIN IMMEDIATE")
+        try:
+            self._apr_expire(c, now)
+            a = self._apr_row(c.execute(f"SELECT {', '.join(self._APR_COLS)} FROM approvals WHERE id=?",
+                                        (str(approval_id),)).fetchone())
+            if a is not None and a["state"] == "pending":
+                try:
+                    shown_sha = APR.digest(a["tool"], json.loads(a["args"]))[1]
+                except (ValueError, APR.ApprovalError):
+                    shown_sha = None
+                if shown_sha != a["args_sha256"]:      # what the user saw must be exactly what will run
+                    c.execute("UPDATE approvals SET state='cancelled' WHERE id=?", (a["id"],))
+                    c.execute("COMMIT")
+                    return {"ok": False, "code": "APPROVAL_INVALID", "message": "the stored request does not match its "
+                            "digest; it was cancelled"}
+            if a is None or a["state"] != "pending":
+                c.execute("COMMIT")
+                return {"ok": False, "code": "APPROVAL_NOT_PENDING", "state": a["state"] if a else None,
+                        "message": "that request is not waiting for a decision (decided, used or expired)"}
+            decided_at = now_iso()
+            mac = APR.decision_mac(self._key_for(b"approval"), a, decision, decided_at)
+            c.execute("UPDATE approvals SET state=?, decided_at=?, note=?, mac=? WHERE id=? AND state='pending'",
+                      (decision, decided_at, str(note)[:500], mac, a["id"]))
+            c.execute("COMMIT")
+            return {"ok": True, "approval": dict(a, state=decision, decided_at=decided_at, note=str(note)[:500], mac=mac)}
+        except BaseException:
+            c.execute("ROLLBACK")
+            raise
+
+    def approval_redeem(self, approval_id: str, agent_id: str, tool: str, args_sha: str, targets: List[List[str]],
+                        policy_version: str, given_id: Optional[str] = None, now: Optional[float] = None) -> Dict[str, Any]:
+        """Use an approval once, for exactly this call. Checked and marked in one transaction, so two identical
+        re-calls can never both run."""
+        now = time.time() if now is None else float(now)
+        c = self._cc()
+        c.execute("BEGIN IMMEDIATE")
+        try:
+            a = self._apr_row(c.execute(f"SELECT {', '.join(self._APR_COLS)} FROM approvals WHERE id=?",
+                                        (str(approval_id),)).fetchone())
+            if a is None:
+                c.execute("COMMIT")
+                return {"ok": False, "code": "APPROVAL_NOT_FOUND", "message": "no such approval"}
+            try:
+                APR.check_redemption(a, self._key_for(b"approval"), agent_id, tool, args_sha, targets, now, given_id)
+                if str(a.get("policy_version") or "") != str(policy_version or ""):
+                    raise APR.ApprovalError("APPROVAL_POLICY_CHANGED", "your permissions or the project settings changed "
+                                            "since the request; ask again")
+            except APR.ApprovalError as e:
+                if e.code in ("APPROVAL_TARGETS_CHANGED", "APPROVAL_POLICY_CHANGED", "APPROVAL_INVALID"):
+                    c.execute("UPDATE approvals SET state='cancelled' WHERE id=? AND state='approved'", (a["id"],))
+                c.execute("COMMIT")
+                return {"ok": False, "code": e.code, "message": e.message}
+            # Single use; the complete arguments are no longer kept once used (review 13: retention).
+            cur = c.execute("UPDATE approvals SET state='redeemed', redeemed_at=?, args='' WHERE id=? AND state='approved'",
+                            (now_iso(), a["id"]))
+            c.execute("COMMIT")
+            if cur.rowcount != 1:
+                return {"ok": False, "code": "APPROVAL_REDEEMED", "message": "the approval was already used"}
+            return {"ok": True, "approval": dict(a, state="redeemed")}
+        except BaseException:
+            c.execute("ROLLBACK")
+            raise
+
+    def approval_cancel(self, approval_id: str) -> None:
+        self._cc().execute("UPDATE approvals SET state='cancelled', args='' WHERE id=? AND state IN ('pending','approved')",
+                           (str(approval_id),))
+
+    def approvals_list(self, state: Optional[str] = None, limit: int = 100, now: Optional[float] = None) -> List[Dict[str, Any]]:
+        now = time.time() if now is None else float(now)
+        c = self._cc()
+        self._apr_expire(c, now)
+        q = f"SELECT {', '.join(self._APR_COLS)} FROM approvals " + ("WHERE state=? " if state else "") + \
+            "ORDER BY rowid DESC LIMIT ?"
+        return [self._apr_row(r) for r in c.execute(q, ((state,) if state else ()) + (int(limit),)).fetchall()]
+
+    def approvals_pending(self, now: Optional[float] = None) -> int:
+        now = time.time() if now is None else float(now)
+        return int(self._cc().execute("SELECT COUNT(*) FROM approvals WHERE state='pending' AND expires_at > ?",
+                                     (now,)).fetchone()[0])

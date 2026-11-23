@@ -164,14 +164,14 @@ def read_src(rel):
         return f.read().replace(b"\r\n", b"\n")
 
 
-def headless_dom():
+def headless_dom(path="/setup/"):
     exe = next((b for b in CHROME if os.path.exists(b)), None)
     if not exe:
         return "ERROR no browser"
     prof = os.path.join(H["run_dir"], "browser-profile")      # throwaway; the user's profile is untouched
     args = [exe, "--headless=new", "--disable-gpu", "--no-first-run", "--no-default-browser-check",
             "--disable-extensions", "--disable-sync", "--disable-background-networking", "--disable-component-update",
-            f"--user-data-dir={prof}", "--virtual-time-budget=6000", "--dump-dom", "http://127.0.0.1:9480/setup/"]
+            f"--user-data-dir={prof}", "--virtual-time-budget=6000", "--dump-dom", "http://127.0.0.1:9480" + path]
     try:
         return subprocess.run(args, capture_output=True, text=True, timeout=90).stdout
     except Exception as e:
@@ -227,7 +227,8 @@ def cp_serving(data, pid):
         ("gate.mutation_no_csrf", req("POST", "/setup/api/x", {"Origin": o}, b"{}"), 403, "MISSING_CSRF"),
         ("gate.no_write_endpoints", req("POST", "/setup/api/x", {"Origin": o, "X-TDflow-CSRF": "x"}, b"{}"), 401, "UNAUTHENTICATED"),
         ("gate.admin_api_denied", req("GET", "/api/agents", {"X-TDflow-Request": "1"}), 401, "UNAUTHENTICATED"),
-        ("gate.dashboard_absent", req("GET", "/ui/"), 404, "NOT_FOUND"),
+        ("gate.dashboard_page_served", req("GET", "/ui/"), 200, None),
+        ("gate.dashboard_api_needs_session", req("GET", "/api/overview", {"X-TDflow-Request": "1"}), 401, "UNAUTHENTICATED"),
         ("gate.unknown", req("GET", "/etc/passwd"), 404, "NOT_FOUND"),
         ("gate.body_too_large", raw(b"POST /setup/api/x HTTP/1.1\r\nHost: 127.0.0.1:9480\r\nOrigin: http://127.0.0.1:9480\r\nContent-Length: 9000000\r\n\r\n"), 413, "BODY_TOO_LARGE"),
         ("mcp.disabled", req("POST", "/mcp", mcp, b'{"jsonrpc":"2.0","id":1,"method":"tools/list"}'), 503, "MCP_DISABLED"),
@@ -240,6 +241,9 @@ def cp_serving(data, pid):
     ]
     for name, r, s, c in cases:
         T(name, r.get("status") == s and code(r) == c, status=r.get("status"), code=code(r))
+    ui = headless_dom("/ui/")
+    T("browser.headless_renders_dashboard_unpaired", 'id="pair-box"' in ui and 'id="app" hidden' in ui
+      and "TDflowMCP Dashboard" in ui and "ERROR" not in ui[:20], excerpt=ui[:300])
     dom = headless_dom()
     T("browser.headless_renders_setup", 'data-loaded="true"' in dom and 'data-state="Setup"' in dom
       and dom.count("data-check=") >= 9 and "Tell Your Coding Agent" in dom and 'id="copy"' in dom,

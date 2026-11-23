@@ -381,10 +381,13 @@ class TDAdapter(Adapter):
     # -- mutations --
     def _t_set_parameters(self, args, res, label, readable):
         o, pars = res.context["op"], res.context["pars"]
-        values = args.get("values", {})
+        values, exprs = args.get("values", {}), args.get("expressions", {}) or {}
         prev = {}
         for name, par in pars.items():
-            prev[name] = {"mode": str(par.mode).split(".")[-1], "value": _jsonable(par.eval())}
+            mode = str(par.mode).split(".")[-1]
+            prev[name] = {"mode": mode, "value": _jsonable(par.eval())}
+            if mode == "EXPRESSION":
+                prev[name]["expr"] = str(par.expr)
         def do():
             for name, v in values.items():
                 par = pars[name]
@@ -392,11 +395,21 @@ class TDAdapter(Adapter):
                 if par.mode != const:
                     par.mode = const
                 par.val = v
+            # Phase 2B: expressions run as Python inside TouchDesigner. Policy classified them as execute, and
+            # the engine only gets here after the user approved exactly this text (security-model §4).
+            for name, text in exprs.items():
+                par = pars[name]
+                par.expr = str(text)
+                par.mode = type(par.mode).EXPRESSION
         _, stack = self._mutate(label, do)
         now = {n: _jsonable(pars[n].eval()) for n in values}
-        return {"path": o.path, "previous": {n: prev[n]["value"] for n in values}, "now": now,
-                "_audit": {"kind": "set_params", "path": o.path, "stack": stack, "prev": prev,
-                           "reversible": "td_undo" if stack else "no"}}
+        out = {"path": o.path, "previous": {n: prev[n]["value"] for n in values}, "now": now,
+               "_audit": {"kind": "set_params", "path": o.path, "stack": stack, "prev": prev,
+                          "reversible": "td_undo" if stack else "no"}}
+        if exprs:
+            out["expressions_set"] = {n: str(pars[n].expr) for n in exprs}
+            out["previous_modes"] = {n: prev[n]["mode"] for n in exprs}
+        return out
 
     def _t_create_operator(self, args, res, label, readable):
         parent, cls, path = res.context["parent"], res.context["cls"], res.context["path"]
@@ -508,7 +521,8 @@ class TDAdapter(Adapter):
                 o = td.op(path)
                 return o is not None and all(
                     str(getattr(o.par, n).mode).split(".")[-1] == v["mode"] and
-                    (v["mode"] != "CONSTANT" or _jsonable(getattr(o.par, n).eval()) == v["value"])
+                    (v["mode"] != "CONSTANT" or _jsonable(getattr(o.par, n).eval()) == v["value"]) and
+                    (v["mode"] != "EXPRESSION" or "expr" not in v or str(getattr(o.par, n).expr) == v["expr"])
                     for n, v in d.get("prev", {}).items())
             if kind in ("connect", "disconnect"):
                 src, dst = td.op(d["src"]), td.op(d["dst"])

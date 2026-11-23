@@ -80,16 +80,19 @@
   - TouchDesigner 2025.32440 runs **no frames while its window is minimized** (measured: 0 frames in 4 s, also with independent time).
   - Before: timeouts, then the listener closed after 20 s and MCP turned off. Now: calls that need TouchDesigner are refused at once with `TDFLOW_NOT_COOKING` and the reason, nothing executes, the listener and MCP stay, and work continues when the window is restored. Verified in TD (1B `minimized.*` checks).
   - Windows only; elsewhere the earlier behaviour applies. While minimized, frame-driven checks (bind re-verification, idle stop, the `Suspendagents` parameter) are paused; nothing that touches the project can run. **For the owner:** accept this limit or ask for a background re-verification ([review 12](../research/2026-11-23-s9-minimized-window.md#independent-review-12)).
+- **Phase 2B increment 1: approvals and the governance dashboard** ([record](../research/2026-11-23-phase-2b-increment-1.md), [security model §4](../architecture/security-model.md#4-approvals), owner D19):
+  - **Approvals:** a call that runs code (`tdflow_set_parameters` expressions and reference parameters; **operator** role) or deletes more than 50 operators waits for the user and is executed only by the identical re-call, once, with targets and policy re-checked. Nothing waits on the main thread. Other code-running effects stay denied.
+  - **Dashboard** at `/ui/` (paired admin session): overview, approval queue with complete arguments, live activity and audit search, sessions, agents and tokens, project memory, reports that state whether they verify against the keyed checkpoints, settings (mandatory audit shown as fixed; optional diagnostic log; data-location request). Its kill switch works while TouchDesigner runs no frames.
+  - Skill **1.3**. Tool surface stays `1` (`tdflow_approval_status` is additive).
 
 ## Not implemented (nothing below exists)
 - **Withheld by design:**
-  - approvals and the approval flow (2B);
+  - approval of code-running effects other than parameter expressions and reference parameters (2B, later increment);
   - arbitrary, raw or Code Mode Python execution (3, approval-gated);
   - project save.
 - **Later phases:**
-  - the governance dashboard (2B);
+  - per-grant policy editing and a WebSocket event stream on the dashboard (2B, later increment);
   - task, decision and ICM record types (`tdflow_memory_get/put`), archiving (adding an agent-writable record type reopens owner condition D18);
-  - a dashboard UI for choosing data locations beyond the `Datalocation` parameter (2B).
 - **Not yet:**
   - a 1.0 release (packages are `.dev` development builds);
   - dev-mode file-synced DATs.
@@ -116,7 +119,7 @@
 - `1233815`: **Phase 2A increment 3** (repository-mode memory, link check, migration, the repository-memory capability, friction fixes) and the minimized-window handling (S9), reviews 11 and 12. Pushed to `origin/dev` and observed with `git ls-remote` (`refs/heads/dev` = `1233815…`, `refs/heads/main` = `066dbd0…`, so `main` is unchanged). Verified on candidate `273b185e…` built from the pre-commit tree; a clean build of the commit (tox `a2250474…`, `source_dirty` false) has the same source digest `ffb75892…`. No package was built. This record was added by the follow-up commit. CI: **not observed**.
 
 ## Next (owner direction D19: continue in dependency order)
-1. **Phase 2B governance dashboard** ([ADR-0005](../decisions/0005-dashboard.md)): `/ui`, live events, sessions, audit search, reports, approvals, policy and token management, a kill switch that works without frames. Not started.
+1. **Phase 2B, next increment:** per-grant policy editing (scopes, `allowed_op_types`, `param_denylist`), approval of further code-running effects (each with its own execution path and review), WebSocket events, the 2B tool candidates (`tdflow_describe_network` first).
 2. **Owner confirmations:** the repository-memory capability (D18); whether to add agent-writable task, decision or ICM records.
 3. **ADR-0014 stage 1** (approved, D17): isolated candidate build/test bound to the `.tox` hash, plus a manual promotion recorded by the new A. Not started.
 4. **B3:** an observed CI run.

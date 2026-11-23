@@ -2,9 +2,9 @@
 
 A source-first, AI-powered TouchDesigner development environment: an MCP server packaged as a reusable `.tox`, with server-side permissions, agent identity, audit logging, approvals, a local browser dashboard, safe experimentation and optional Code Mode orchestration.
 
-> **Status: Phase 2A complete except optional record types (2026-11-23), development builds only.**
+> **Status: Phase 2A complete; Phase 2B in progress (2026-11-23), development builds only.**
 > - The source-built `TDflowMCP.tox` (TouchDesigner 2025.32440+) provides the local-only Setup Assistant (1A), a secure MCP core (1B: scoped, audited tools with verified undo, pairing, agent tokens, a kill switch), agent onboarding with Skills (1C), and project memory (2A: task checkpoints, verified handoffs, restart persistence, and records either inside the project file or as files in a folder of the project).
-> - There is no arbitrary code execution, no approval flow and no governance dashboard (2B) yet.
+> - Phase 2B increment 1: a governance dashboard at `/ui/` (activity, approvals, sessions, agents, reports, kill switch). Code-running parameter changes run only after you approve that exact call there. There is no raw Python execution.
 > - Keep the TouchDesigner window open while agents work: TouchDesigner pauses while minimized.
 > - Nothing is released.
 >

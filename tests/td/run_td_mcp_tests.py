@@ -32,7 +32,7 @@ from tdflowmcp.net import oslisteners  # noqa: E402
 
 O = "http://127.0.0.1:9480"
 TOKENS, STATE = {}, {"cookies": {}}
-EXPECTED_TOOLS = sorted(["tdflow_connect", "tdflow_create_operator", "tdflow_delete_operator", "tdflow_disconnect",
+EXPECTED_TOOLS = sorted(["tdflow_approval_status"] + ["tdflow_connect", "tdflow_create_operator", "tdflow_delete_operator", "tdflow_disconnect",
                          "tdflow_get_dat_text", "tdflow_get_errors", "tdflow_get_operator", "tdflow_get_parameters",
                          "tdflow_list_operators", "tdflow_project_info", "tdflow_session_list", "tdflow_session_note",
                          "tdflow_set_dat_text", "tdflow_set_parameters", "tdflow_undo", "tdflow_whoami",
@@ -153,12 +153,13 @@ def cp_pair_approved(data, pid):
     STATE["csrf"] = saved
     T("admin.scope_outside_root_refused", base.code(admin("POST", "/setup/api/tokens", {
         "display_name": "x", "role": "builder", "scope": "/sys/**"})) == "SCOPE_OUTSIDE_PROJECT_ROOT")
-    T("admin.operator_role_refused", base.code(admin("POST", "/setup/api/tokens", {
-        "display_name": "x", "role": "operator", "scope": "/project1/**"})) == "ROLE_NOT_ALLOWED")
+    T("admin.unknown_role_refused", base.code(admin("POST", "/setup/api/tokens", {
+        "display_name": "x", "role": "admin", "scope": "/project1/**"})) == "ROLE_NOT_ALLOWED")
     specs = {"A": ("Agent A (read+update fx)", "builder", "/project1/fx/**", ["read", "update"]),
              "B": ("Agent B (builder fx)", "builder", "/project1/fx/**", None),
              "C": ("Agent C (observer)", "observer", "/project1/**", None),
-             "D": ("Agent D (builder root)", "builder", "/project1/**", None)}
+             "D": ("Agent D (builder root)", "builder", "/project1/**", None),
+             "E": ("Agent E (operator fx)", "operator", "/project1/fx/**", None)}
     for k, (name, role, scope, acts) in specs.items():
         body = {"display_name": name, "role": role, "scope": scope}
         if acts:
@@ -189,7 +190,7 @@ def cp_enabled(data, pid):
     T("proto.notification_202", st == 202 and not r.get("body"))
     st, j, _ = B.rpc("tools/list")
     names = sorted(t["name"] for t in (j or {}).get("result", {}).get("tools", []))
-    T("proto.tools_list_20", names == EXPECTED_TOOLS, names=names)
+    T("proto.tools_list_21", names == EXPECTED_TOOLS, names=names)
     # modern era
     st, j, _ = B.rpc("server/discover", modern=True)
     T("proto.modern_discover", st == 200 and "2026-07-28" in j["result"]["supportedVersions"])
@@ -352,6 +353,53 @@ def cp_suspended(data, pid):
 
 def cp_resumed(data, pid):
     T("kill.resumed", ok(MCP(TOKENS["B"]).call("tdflow_whoami")))
+    approval_flow()
+
+
+def approval_flow():
+    """Phase 2B (ADR-0005 gate): an approval executes only on the identical re-call, with targets and policy
+    re-checked. Driven through the real MCP endpoint and the paired dashboard API."""
+    E = MCP(TOKENS["E"])
+    args = {"path": "/project1/fx/level1", "expressions": {"opacity": "0.25 + 0.5"}}
+    r = E.call("tdflow_set_parameters", args)
+    T("approval.REQUEST_CREATED_NOTHING_EXECUTED", r.get("code") == "APPROVAL_REQUIRED" and r.get("state") == "pending"
+      and r.get("rule_id") == "A1", result=r)
+    aid = r.get("approval_id")
+    p = (E.call("tdflow_get_parameters", {"path": "/project1/fx/level1", "names": ["opacity"]}).get("parameters") or [{}])[0]
+    T("approval.parameter_unchanged_while_pending", p.get("mode") == "CONSTANT", par=p)
+    T("approval.recall_while_pending_refused", E.call("tdflow_set_parameters", args).get("code") == "APPROVAL_PENDING")
+    lst = base.jbody(admin("GET", "/api/approvals")) or {}
+    row = next((a for a in lst.get("approvals", []) if a.get("id") == aid), {})
+    T("approval.dashboard_shows_complete_arguments", json.loads(row.get("args") or "{}") == args
+      and ["execute", "/project1/fx/level1"] in [t[:2] for t in row.get("targets", [])], row=row)
+    T("approval.decide_needs_csrf", admin("POST", "/api/approvals/decide", {"id": aid, "decision": "approved"}, csrf=False)["status"] == 403)
+    d = admin("POST", "/api/approvals/decide", {"id": aid, "decision": "approved"})
+    T("approval.approved_on_dashboard", d["status"] == 200, status=d["status"])
+    other = E.call("tdflow_set_parameters", {"path": "/project1/fx/level1", "expressions": {"opacity": "1"}})
+    T("approval.DIFFERENT_CALL_NOT_COVERED", other.get("code") == "APPROVAL_REQUIRED" and other.get("approval_id") != aid, result=other)
+    ran = E.call("tdflow_set_parameters", args)
+    T("approval.IDENTICAL_RECALL_RUNS", ok(ran) and ran.get("expressions_set") == {"opacity": "0.25 + 0.5"}, result=ran)
+    p = (E.call("tdflow_get_parameters", {"path": "/project1/fx/level1", "names": ["opacity"]}).get("parameters") or [{}])[0]
+    T("approval.expression_set_in_td", p.get("mode") == "EXPRESSION" and p.get("expr") == "0.25 + 0.5"
+      and abs(float(p.get("value") or 0) - 0.75) < 1e-6, par=p)
+    T("approval.SINGLE_USE", E.call("tdflow_set_parameters", args).get("code") == "APPROVAL_REQUIRED")
+    u = E.call("tdflow_undo")
+    p = (E.call("tdflow_get_parameters", {"path": "/project1/fx/level1", "names": ["opacity"]}).get("parameters") or [{}])[0]
+    T("approval.undo_restores_constant", ok(u) and u.get("verified") is True and p.get("mode") == "CONSTANT", undo=u, par=p)
+    T("approval.builder_still_has_no_execute", MCP(TOKENS["B"]).call("tdflow_set_parameters", args).get("rule_id") == "R1")
+    ev = base.jbody(admin("POST", "/api/audit/search", {"tool": "tdflow_set_parameters", "limit": 50})) or {}
+    kinds = {(e["kind"], e.get("approval_id")) for e in ev.get("events", [])}
+    T("approval.execution_audited_with_its_approval", ("intent", aid) in kinds and ("outcome", aid) in kinds, n=len(kinds))
+    # Dashboard: overview, live tail and a verified report.
+    ov = base.jbody(admin("GET", "/api/overview")) or {}
+    T("dashboard.overview", ov.get("mcp") is True and ov.get("cooking") is True and (ov.get("audit") or {}).get("ok") is True, ov=ov)
+    tail = base.jbody(admin("POST", "/api/audit/search", {"after": max(0, int(ov.get("last_seq", 0)) - 3)})) or {}
+    T("dashboard.live_tail", len(tail.get("events", [])) >= 1 and all(e["seq"] > int(ov["last_seq"]) - 3 for e in tail["events"]))
+    T("dashboard.bad_query_refused", admin("POST", "/api/audit/search", {"agent": "x' OR 1=1"})["status"] == 400)
+    rep = base.jbody(admin("POST", "/api/report", {"from_seq": 1, "to_seq": int(ov.get("last_seq", 1))})) or {}
+    T("dashboard.report_built", (rep.get("report") or {}).get("range", {}).get("events", 0) > 10
+      and "verification" in rep.get("report", {}) and "# TDflowMCP audit report" in rep.get("markdown", ""))
+    T("dashboard.mandatory_audit_cannot_be_disabled", admin("POST", "/api/settings", {"security_audit": False})["status"] == 400)
 
 
 def cp_queue_block(data, pid):
