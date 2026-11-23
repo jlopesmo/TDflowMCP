@@ -113,6 +113,7 @@
 - `c888d00`: push evidence for `930154b`. **Post-restart recovery (2026-11-23, owner D19):** nothing was lost; the tree was clean and level with `origin/dev`; a clean build of this commit (tox `e79ed3fe…`) passes every baseline suite ([record](../research/2026-11-23-post-restart-recovery.md)).
 
 - `3a53e72`: post-restart recovery record and D19. Pushed to `origin/dev` and observed with `git ls-remote` (`refs/heads/dev` = `3a53e72…`, `refs/heads/main` = `066dbd0…`, so `main` is unchanged). CI: **not observed**.
+- `1233815`: **Phase 2A increment 3** (repository-mode memory, link check, migration, the repository-memory capability, friction fixes) and the minimized-window handling (S9), reviews 11 and 12. Pushed to `origin/dev` and observed with `git ls-remote` (`refs/heads/dev` = `1233815…`, `refs/heads/main` = `066dbd0…`, so `main` is unchanged). Verified on candidate `273b185e…` built from the pre-commit tree; a clean build of the commit (tox `a2250474…`, `source_dirty` false) has the same source digest `ffb75892…`. No package was built. This record was added by the follow-up commit. CI: **not observed**.
 
 ## Next (owner direction D19: continue in dependency order)
 1. **Phase 2B governance dashboard** ([ADR-0005](../decisions/0005-dashboard.md)): `/ui`, live events, sessions, audit search, reports, approvals, policy and token management, a kill switch that works without frames. Not started.
