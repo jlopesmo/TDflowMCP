@@ -40,6 +40,8 @@ Two pages (owner UX correction, Phase 1C): **TDflowMCP** holds the essential con
 | `Datalocation` | Menu | `project` | 1C (**implemented**) | `project` (`.tdflowmcp/` next to the `.toe`; unsuitable folders fall back to private storage) or `private`. Changing it turns MCP off and needs Confirm Move |
 | `Datastatus` | Str, read-only | `not opened` | 1C (**implemented**) | Storage decision (`New`, `Ok`, `Fallback (<reason>)`, `Unsaved`), audit verification, or what needs confirmation (moved, copied, relocated, older data) |
 | `Confirmmove` / `Claimproject` | Pulse | — | 1C (**implemented**) | Confirm Move: verify and adopt the audit log that moved with the project, or make a verified copy from the previous location (never moves or deletes the source). Claim As New Project: new identity and an empty audit log; existing data untouched; agents need new tokens |
+| `Createprojectmemory` | Pulse | — | 2A (**implemented**) | Create the optional `tdflowProject` Base COMP under Project Root (tagged, read-only `Projectid` `tfp_…`, `Memoryauthority` = embedded, README). Refused if one exists or the audit store is not open; audited (`memory_create`). Save the project to keep it |
+| `Claimprojectmemory` | Pulse | — | 2A (**implemented**) | Accept the `tdflowProject`'s current records as authoritative after edits outside TDflowMCP, an older save, deletions or a copy. Refused while a record-named DAT is not a valid record. Takes effect once the audited `memory_claim` event is durable |
 | `Projectid` | Str, read-only | empty | 1C (**implemented**) | TDflowMCP identity of the project (`prj_` + 16 hex), saved in the `.toe`; not a secret |
 | `Viewinstructions` | Pulse | — | 1C (**implemented**) | Open the full Tell Your Coding Agent text (the `tellagent` DAT) in a TouchDesigner viewer |
 | `Tellagent` | Str, read-only | — | 1A | One-line state of the agent instructions (e.g. `Ready: connect · v0.1`) |
@@ -87,7 +89,7 @@ Generated from current server state — never hand-edited — in four sections:
 1. **Setup**: what TDflowMCP is, the component version, current state and which checks fail.
 2. **Connection** (1C): endpoint URL, a client- and shell-specific command whose `${TDFLOW_TOKEN}` placeholder stays literal (single quotes, user/local scope only; see [security model §10](security-model.md#10-setup-assistant-and-integration-safety)), and the expected Skills version.
 3. **Repair**: for each failing check, the instructions from troubleshooting — addressed to the agent, with the rule "do not install software or change configuration without asking the user".
-4. **Resume** (2A): **reference-only by default**: the latest handoff id, its verification counts and a pointer to call `tdflow_handoff_resume`. Agent-authored summaries are never inlined here.
+4. **Resume earlier work** (2A, **implemented**): fixed text plus the number of tasks and of tasks not marked done, and the instruction to call `tdflow_task_list`, then `tdflow_handoff_resume`, before changing anything. Nothing agent-chosen appears, not even task ids (review 9). The section refreshes when a record is written.
 
 Only allowlisted fields are included. Never included: tokens, environment-derived free text (operator names, probe answers, raw errors), audit contents beyond counts, or expanded user-profile paths.
 

@@ -25,7 +25,7 @@ EXPECTED_PARS = ["Version", "Status", "Statusdetail", "Opensetup", "Setupurl", "
                  "Pairingrequest", "Approvepairing", "Rejectpairing", "Agentsummary", "Tellagent", "Copytellagent",
                  "Viewinstructions", "Stopserver", "Rundiagnostics", "Compatsummary", "Port", "Portstatus",
                  "Projectroot", "Datalocation", "Datadir", "Datastatus", "Confirmmove", "Claimproject",
-                 "Projectid", "Loglevel"]
+                 "Createprojectmemory", "Claimprojectmemory", "Projectid", "Loglevel"]
 
 R = {"mode": MODE, "tests": [], "harness": {}, "frames": [], "errors": []}
 S = {"gen": None, "wait": None, "label": "boot", "done": False}
@@ -89,7 +89,7 @@ def script():
     comp = load()
     yield frames(20)
     ext = comp.ext.TDflowMCPExt
-    if MODE.startswith(("gate", "perf", "onboard", "dogfood")):                 # audit-worker gate + 1B-vs-worker comparison
+    if MODE.startswith(("gate", "perf", "onboard", "dogfood", "memory")):                 # audit-worker gate + 1B-vs-worker comparison
         ext.launcher = lambda url: True
         yield from __import__("td_runner_gate").run(MODE, comp, ext, T, frames, until, checkpoint, R)
         return

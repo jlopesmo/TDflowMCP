@@ -32,6 +32,9 @@
     "tdflowmcp.identity": {
       "path": "src/tdflowmcp/identity.py"
     },
+    "tdflowmcp.memory": {
+      "path": "src/tdflowmcp/memory.py"
+    },
     "tdflowmcp.net": {
       "path": "src/tdflowmcp/net/__init__.py",
       "package": true
@@ -349,6 +352,20 @@
     },
     {
       "page": "Advanced",
+      "name": "Createprojectmemory",
+      "type": "Pulse",
+      "label": "Create Project Memory",
+      "help": "Create the optional tdflowProject component (project memory for task checkpoints and handoffs) under Project Root. Agents change it only through TDflowMCP's memory tools"
+    },
+    {
+      "page": "Advanced",
+      "name": "Claimprojectmemory",
+      "type": "Pulse",
+      "label": "Claim Project Memory",
+      "help": "Accept the tdflowProject's current records as authoritative after a copy, an older save or edits outside TDflowMCP (memory is read-only for agents until you do)"
+    },
+    {
+      "page": "Advanced",
       "name": "Projectid",
       "type": "Str",
       "label": "Project ID",
@@ -380,12 +397,16 @@
     "tdflow_get_errors",
     "tdflow_get_operator",
     "tdflow_get_parameters",
+    "tdflow_handoff_create",
+    "tdflow_handoff_resume",
     "tdflow_list_operators",
     "tdflow_project_info",
     "tdflow_session_list",
     "tdflow_session_note",
     "tdflow_set_dat_text",
     "tdflow_set_parameters",
+    "tdflow_task_checkpoint",
+    "tdflow_task_list",
     "tdflow_undo",
     "tdflow_whoami"
   ]

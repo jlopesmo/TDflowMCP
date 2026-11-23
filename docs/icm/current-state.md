@@ -1,6 +1,6 @@
 # TDflowMCP — Current state
 
-**Observed 2026-11-22, branch `dev`. Phase 1C (agent onboarding) is complete in the development build, together with the ADR-0006 audit worker and project-local storage** (owner D13). A live Claude Code session connected using only the generated instructions, and the packaged component passes its in-TouchDesigner acceptance suites on **2025.32440**. Phases 1A and 1B are re-verified on the same build. This file records evidence only. Plans live in the [roadmap](roadmap.md).
+**Observed 2026-11-22, branch `dev`. Phase 1C (agent onboarding) is complete in the development build, together with the ADR-0006 audit worker and project-local storage** (owner D13). **Phase 2A increment 1 (project memory, checkpoints, verified handoffs) is implemented and verified in TD** (owner D17). A live Claude Code session connected using only the generated instructions, and the packaged component passes its in-TouchDesigner acceptance suites on **2025.32440**. Phases 1A and 1B are re-verified on the same build. This file records evidence only. Plans live in the [roadmap](roadmap.md).
 
 ## Verified
 - **Repository:** private `jlopesmo/TDflowMCP`. `main` = `066dbd0` (Phase 0 foundation), **unchanged**. Development continues on `dev`.
@@ -8,7 +8,8 @@
   - 0002, 0003, 0006, 0007, 0009, 0010, 0012 and 0013: Conditionally Accepted, with their gates recorded.
   - **0011: Conditionally Accepted** (owner D13); its 1C gates passed.
   - **ADR-0006, revised:** the latency question is closed (owner B6). The audit worker with `synchronous=FULL` is the baseline. The main-thread-continuation experiment was rejected (−0.2 % median), [spike B6](../../spikes/b6/README.md).
-  - **0014 (Candidate Development Mode, A/B self-development): Proposed**, not implemented ([design](../architecture/self-development.md)).
+  - **0014 (Candidate Development Mode, A/B self-development): Conditionally Accepted** (owner D17): stage 1 (isolated candidate build/test, manual owner promotion and rollback) approved; stage 2 (same-project candidate editing) is research only, gated by S8. Not implemented ([design](../architecture/self-development.md)).
+  - **Audit performance investigation: closed** (owner D17). The verified worker is the baseline.
 - **Phase 1A and 1B:** as recorded in the [1A record](../research/2026-11-22-phase-1a-component.md) and the [1B record](../research/2026-11-22-phase-1b-mcp-core.md). Re-verified on the 1C build after [review 7](../research/2026-11-22-phase-1c-review.md): **1A 49/49 + 69/69; 1B 43/43 + 110/110**.
 - **Audit worker** ([record](../research/2026-11-22-audit-worker-and-phase-1c.md)):
   - One SQLite worker thread, FIFO; `synchronous=FULL` + WAL kept.
@@ -45,6 +46,20 @@
   - Doc checker and secret scan pass.
   - **Packaged component** (`2a7e72f`, tox `9a063083…`): 1A, 1B, gate and live onboarding suites all pass ([validation index](validation-index.md)).
 
+- **Phase 2A increment 1: project memory** ([record](../research/2026-11-22-phase-2a-memory.md), [continuity §7](../architecture/continuity-and-memory.md#7-phase-2a-increment-1-what-is-implemented-2026-11-22), [review 9](../research/2026-11-22-phase-2a-review.md)):
+  - **Create Project Memory** makes an optional, user-created `tdflowProject` COMP (embedded authority, `tfp_` id). **Claim Project Memory** accepts its current records after an edit, an older save or a copy.
+  - Four tools: `tdflow_task_list`, `tdflow_task_checkpoint`, `tdflow_handoff_create`, `tdflow_handoff_resume` (tool surface stays 1; Skill **1.1**).
+  - The audit log is the ledger. Edited, missing, foreign or invalid records make memory read-only for agents until the user claims. Two authorities are refused.
+  - Checkpoints and handoffs carry server-verified facts (audited changes, a scope fingerprint).
+  - Claims are tagged against the caller's audited changes and the live project; the new `input` kind came from dogfooding.
+  - Resume reports out-of-band edits by operator path.
+  - Tell Your Coding Agent has a Resume section (counts only).
+  - **Verified in TD** on candidate `d2a9e077…`:
+    - memory suite 14/14 + 55/55 (ADR-0012 gates and the ADR-0013 stale-write gate);
+    - a real two-agent Claude Code handoff with an out-of-band edit detected (7/7 + 32/32).
+  - **Access deviation for owner review:** memory access derives from operator scopes and role, not from separate `memory:*` grants (security model §11).
+  - **Not verified:** records surviving a TouchDesigner restart; repo mode.
+
 ## Not implemented (nothing below exists)
 - **Withheld by design:**
   - approvals and the approval flow (2B);
@@ -52,10 +67,10 @@
   - project save.
 - **Later phases:**
   - the governance dashboard (2B);
-  - checkpoints, handoffs and memory tools (2A);
+  - repo-mode project memory, `tdflow-project.json`, the `Projectid` link check and mode migration (later 2A increments);
+  - task, decision and ICM record types (`tdflow_memory_get/put`), archiving;
   - a dashboard UI for choosing data locations beyond the `Datalocation` parameter (2B).
 - **Not yet:**
-  - the main-thread continuation that would cut MCP latency (proposed);
   - a 1.0 release (packages are `.dev` development builds);
   - dev-mode file-synced DATs.
 
@@ -74,7 +89,11 @@
 - `99a10f4`: B6 decided (continuation rejected, preserved as a spike), dogfood round 1 with fixes, review 8, ADR-0014 proposed. Pushed to `origin/dev` and observed with `git ls-remote` (`refs/heads/dev` = `99a10f4…`, `refs/heads/main` = `066dbd0…`, so `main` is unchanged). Verified on candidate builds from the pre-commit tree (`2dac3a27…`); no package was built for this commit. This record was added by the follow-up commit. CI: **not observed**.
 
 ## Next (owner decisions first)
-1. **Phase 2A** (owner D15: after dogfooding): checkpoints, verified handoffs, the optional `tdflowProject` COMP, context-aware Tell Your Coding Agent; single-authority memory. A pure-Python draft of records/claims exists outside the repository (not committed).
-2. **ADR-0014:** accept, revise or defer Candidate Development Mode. Its smallest PoC needs no in-project workspace (see the ADR).
-3. **B3:** an observed CI run.
-4. **Remaining review-6 follow-ups:** bind/export propagation; pairing DoS mitigation. Checkpoints are now anchored in private storage outside the project.
+1. **Owner review:** the memory-access deviation (operator scopes + role instead of `memory:*` grants).
+2. **Phase 2A increment 2:**
+   - repo mode with `tdflow-project.json`, the `Projectid` link check and migration (the remaining ADR-0013 gates);
+   - a TD restart persistence test;
+   - the dogfood friction: default operator placement, handoff status, per-parameter drift.
+3. **ADR-0014 stage 1** (approved, D17): isolated candidate build/test bound to the `.tox` hash, plus a manual promotion recorded by the new A. Not started.
+4. **B3:** an observed CI run.
+5. **Remaining review-6 follow-ups:** bind/export propagation; pairing DoS mitigation. Checkpoints are now anchored in private storage outside the project.

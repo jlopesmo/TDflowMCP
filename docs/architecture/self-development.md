@@ -1,6 +1,6 @@
 # Self-development: Candidate Development Mode (A/B cycle)
 
-**Status: Proposed design** (owner direction, 2026-11-22; [ADR-0014](../decisions/0014-candidate-development-mode.md)). Not implemented. Not scheduled ahead of the current dogfooding and Phase 2A work.
+**Status: Conditionally Accepted** (owner D17, 2026-11-22; [ADR-0014](../decisions/0014-candidate-development-mode.md)). **Stage 1** (isolated candidate build and test, manual owner promotion and rollback) is approved as the first implementation stage. **Stage 2** (same-project candidate workspace) is a future research milestone that needs a passed S8 spike and a new owner decision. Stage 3 is not approved. Nothing here is implemented yet; Phase 2A comes first.
 
 ## 1. Goal
 Use TDflowMCP itself for meaningful development of TDflowMCP, inside a disposable TouchDesigner project:

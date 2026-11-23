@@ -1,6 +1,6 @@
 # Continuity and shared project memory
 
-**Status: Proposed design** for owner-approved requirements P15–P17 ([ADR-0012](../decisions/0012-session-continuity.md), [ADR-0013](../decisions/0013-project-memory-model.md)). Not implemented.
+**Status:** design for owner-approved requirements P15–P17 ([ADR-0012](../decisions/0012-session-continuity.md), [ADR-0013](../decisions/0013-project-memory-model.md), both Conditionally Accepted). Session logs (§4) are implemented since 1B. **Phase 2A increment 1 is implemented: embedded-mode project memory, task checkpoints, verified handoffs and resume ([§7](#7-phase-2a-increment-1-what-is-implemented-2026-11-22)).** Where §7 differs from §2–§6, §7 describes what exists; repo mode and migration remain design.
 
 ## 1. Three kinds of state — and where each lives
 
@@ -45,3 +45,51 @@ A session (see [security model §2.3](security-model.md#23-sessions)) is a group
 - **Agent claims:** each claim is tagged `verified` (matched to evidence, with the evidence reference), `contradicted`, or `unverified`.
 
 `tdflow_handoff_resume(task_id)` returns the latest handoff, audit activity since it, and whether the scope fingerprint changed (i.e. edits made outside TDflowMCP since the handoff). "Verified" never means "the agent's prose is true" — only that listed claims matched recorded evidence.
+
+## 7. Phase 2A increment 1: what is implemented (2026-11-22)
+
+**Implemented and tested** in [`src/tdflowmcp/memory.py`](../../src/tdflowmcp/memory.py), the engine's memory path ([`engine.py`](../../src/tdflowmcp/engine.py)) and the TD adapter ([`tdops.py`](../../src/td_adapter/tdops.py)), with evidence in the [validation index](../icm/validation-index.md). **Embedded mode only**: repo mode, `tdflow-project.json`, the `Projectid` link check and mode migration are later 2A increments.
+
+**`tdflowProject` COMP.** The user creates it with **Create Project Memory** (TDflowMCP Advanced page; refused if one exists; audited `memory_create`). It is a Base COMP under Project Root with the `tdflowProject` tag, a read-only `Projectid` (`tfp_` + 16 hex, distinct from TDflowMCP's storage `Projectid`), `Memoryauthority` = `embedded`, and a README DAT. Raw operator tools stay H4-denied on it. Two tagged COMPs under the root are refused (`MEMORY_UNAVAILABLE`, single authority).
+
+**Records.** One Text DAT per record, named `<type>_<task_id>_r<rev>`, holding canonical JSON `{record_id, type, task_id, rev, based_on_rev, author, created_at, body, sha256}`. One revision counter per task, shared by checkpoints and handoffs. A write must name the latest revision (`based_on_rev`), otherwise `MEMORY_CONFLICT`. The write re-checks on the main thread that the record set is unchanged since planning. Token-shaped strings in agent text are removed before storing (records are saved in the `.toe`).
+
+**Fork, rewind and outside edits: the audit log is the ledger** (this replaces the `Datadir` authority registry of §2):
+- Every record TDflowMCP writes is announced first in a durable `intent` (record id and text hash), then confirmed by an `ok` outcome.
+- **Claim Project Memory** (TDflowMCP Advanced page) is an audited `admin` event listing the record hashes the user accepts.
+- Each memory call compares the COMP's records with this ledger. *changed outside* = a known record with different text; *missing* = a written record that is gone (an older save was opened, the project was not saved, or the DAT was deleted); *foreign* = a record this project's audit never wrote (a copied component, or a project copy claimed as new); *invalid* = not a record.
+- Any of these makes memory **read-only for agents** (`MEMORY_READ_ONLY`, rule M5) until the user claims. Reads keep working and report the state.
+- Because a copied project gets a new audit log (storage `COPIED` → Claim As New Project), its embedded memory is *foreign* there until the user claims it, so two copies never silently share one authority.
+
+**Checkpoints** (`tdflow_task_checkpoint`): the server attaches the audit range since the task's previous record (or since the caller's first audited event in this session; with none yet, the window starts now), the successful audited changes in the task's scopes that the caller can read, the TD build, the server version, and a **fingerprint**. The fingerprint is one 16-hex digest per operator: type; constant values and expression/bind text of non-read-only parameters; inputs; bypass/display/render; and the text of input-less Text and Table DATs. Nothing is evaluated or cooked, and positions are excluded. The main-thread walk visits at most 2000 operators, and the cap is 300 fingerprinted operators (`truncated` beyond). At most 5000 audited mutations are read per window; a larger window sets `window_complete: false`, and audit-based claims are then `unverified`.
+
+**Handoffs** (`tdflow_handoff_create`): the summary plus up to 50 claims, each tagged by the server:
+- `changed`, `created`, `deleted`, `unchanged` (path): checked against **the caller's own** audited changes since the task's previous handoff (`changed`/`unchanged` include paths below). `unchanged` means "not changed by you through TDflowMCP", not "unchanged by anyone";
+- `exists`, `absent` (path) and `value` (path, param, value): checked against the live project. Paths the caller cannot read are `unverified`, without revealing anything;
+- `note`: `unverified`.
+
+**Resume** (`tdflow_handoff_resume`): the latest handoff and checkpoint, audited changes since the latest record, and a fingerprint comparison.
+- Records are author-labelled, with `agent_text_untrusted: true`, and carry their `ledger` status: `accepted`, `changed_outside` or `foreign`. Only `accepted` records are known to the audit log. The `sha256` seal is unkeyed: it detects careless edits, not forgery.
+- Claim paths and their evidence are filtered to what the caller can read. The fingerprint map stays server-side.
+- `changed_outside_tdflowmcp` is true when an operator's digest changed (or it was added or removed) and no audited change at that path or an ancestor explains it. `reliable` is false when either fingerprint was capped or the audit window was not read whole.
+- Known false positive: an operator whose input source was deleted, or changed by a path outside the explanation rule.
+
+**Access (deviation from the proposed security model §11, recorded for owner review):** memory access derives from operator scopes instead of separate `memory:*` grants.
+- Any agent with grants can list and resume tasks whose scopes it can fully read. Other tasks are hidden: they are counted in `hidden_tasks`, and resuming one answers like a missing task (M6). Writing to one is refused (M4). Read-only reasons list record names only for visible tasks, with counts for the rest.
+- Writing needs a role with `update` (builder; observers get M1) and read access to the task's scopes.
+- Separate memory grants are deferred to token management in the 2B dashboard.
+- There is no delete tool.
+
+**Tell Your Coding Agent** gains a **Resume earlier work** section: fixed text plus two numbers (tasks, tasks not marked done), and the instruction to call `tdflow_task_list` and then `tdflow_handoff_resume` before changing anything. Task ids are chosen by agents, so they are not shown there (review 9): the agent gets them, scope-filtered and ledger-checked, from the tools.
+
+**Main-thread work per call:** one snapshot step (records, bounded walk, fingerprint) and, for writes, one write step. The write step compares the record set by name and text hash without parsing JSON. Parsed records are cached by text hash.
+
+**Measured** on 2025.32440: memory calls ≈ 100–210 ms. A 300-operator fingerprint costs one main-thread step of ≈ 28 ms (one frame hitch per checkpoint or resume of a large scope); small scopes cost ≈ 0.1 ms per operator.
+
+**Not yet:**
+- repo mode, `tdflow-project.json` and the `Projectid` link check;
+- migration between modes;
+- tasks, decisions and ICM record types (`tdflow_memory_get/put`);
+- record archiving;
+- splitting large fingerprints across frames;
+- TouchDesigner restart persistence of records. Records are ordinary DATs saved with the `.toe`, but this is not yet tested.

@@ -51,6 +51,7 @@ class TDflowMCPExt:
         self.manifest = ownerComp.op("loader").module.install_from_comp(ownerComp)
         from tdflowmcp import SKILL_VERSION, __version__, admin, auditworker, compat, controller, engine, identity, \
             policy, protocol, setupapi, skills, storage, store, tellagent, tools
+        from tdflowmcp import memory
         from tdflowmcp.net import bindverify, evidence, oslisteners
         from tdflowmcp.net.pyhttp import EmbeddedHTTPTransport, MainStepError, Response, error
         from tdflowmcp_td import tdops
@@ -59,7 +60,8 @@ class TDflowMCPExt:
                                         Transport=EmbeddedHTTPTransport, Response=Response, error=error, admin=admin,
                                         engine=engine, identity=identity, policy=policy, protocol=protocol,
                                         store=store, tools=tools, tdops=tdops, auditworker=auditworker,
-                                        storage=storage, MainStepError=MainStepError, skills=skills)
+                                        storage=storage, MainStepError=MainStepError, skills=skills,
+                                        memory=memory)
         self.skill_version = SKILL_VERSION
         self.version = __version__
         old = _REGISTRY.instances.get(ownerComp.id)
@@ -445,10 +447,22 @@ class TDflowMCPExt:
         self._publish()
         return self.checks
 
+    def _memory_ops(self):
+        return self.tdops or self._m.tdops.TDAdapter(self.ownerComp, lambda: self._root_text, lambda: None)
+
+    def _memory_lines(self):
+        """Phase 2A: resume lines from project memory (main thread, no disk I/O; validated fields only)."""
+        try:
+            status, _, _, entries = self._memory_ops().memory_entries()
+        except Exception:
+            return []
+        return self._m.memory.tell_section(self._m.memory.tasks(entries)) if status == "ready" else []
+
     def _refresh_tell(self):
         ctl = self.ctl
         self.tell_text = self._m.tellagent.build(self._state_value(), ctl.error_code, ctl.port, self.td_build,
-                                                 self.checks, self.troubleshooting, self.version, self.clients)
+                                                 self.checks, self.troubleshooting, self.version, self.clients,
+                                                 memory_lines=self._memory_lines())
         dat = self.ownerComp.op("tellagent")
         if dat is not None and dat.text != self.tell_text:
             dat.text = self.tell_text
@@ -484,6 +498,10 @@ class TDflowMCPExt:
             self._pairing_decision(n == "Approvepairing")
         elif n in ("Confirmmove", "Claimproject"):
             self._storage_choice("confirm" if n == "Confirmmove" else "claim")
+        elif n == "Createprojectmemory":
+            self._create_memory()
+        elif n == "Claimprojectmemory":
+            self._claim_memory()
         self._refresh_tell()
         self._publish()
 
@@ -524,6 +542,41 @@ class TDflowMCPExt:
         self._reset_store()
         self.ensure_store(action=action)
         self._set_note("Verifying project data…" if action == "confirm" else "Creating a new project identity…", 20)
+
+    # -- project memory (Phase 2A): user actions, audited through the worker (no disk I/O here) --
+    def _create_memory(self):
+        w = self.worker
+        if w is None or not w.available:
+            self._set_note("Pulse Open Setup first: creating project memory is recorded in the audit log.", 20)
+            return
+        try:
+            path, mid = self._memory_ops().create_memory(near=self.ownerComp)
+        except ValueError as e:
+            self._set_note(str(e)[:200], 20)
+            return
+        self._audit_async("admin", tool="memory_create", outcome="ok", detail={"memory_id": mid, "component": path})
+        self._set_note(f"Project memory created at {path}. Save the project to keep it.", 30)
+
+    def _claim_memory(self):
+        """The user accepts the tdflowProject's current records as authoritative (after a copy, an older save,
+        or edits outside TDflowMCP). Takes effect only once the claim event is durable."""
+        w = self.worker
+        if w is None or not w.available:
+            self._set_note("Pulse Open Setup first: claiming project memory is recorded in the audit log.", 20)
+            return
+        status, path, mid, entries = self._memory_ops().memory_entries()
+        if status != "ready":
+            self._set_note("No usable project memory to claim (" + status + ").", 20)
+            return
+        try:
+            recs = self._m.memory.claim_records(entries)
+        except self._m.memory.MemoryError as e:
+            self._set_note(e.message[:200], 30)
+            return
+        f = w.submit("append", "admin", tool="memory_claim", outcome="accepted",
+                     detail={"memory_id": mid, "component": path, "records": recs})
+        self._after([f], lambda _: self._set_note(f"Project memory claimed: {len(recs)} record(s) accepted.", 30),
+                    lambda code: self._set_note(f"The claim could not be recorded ({code}); memory stays read-only.", 30))
 
     def _pairing_decision(self, approve):
         pend = self.admin.pending_view()
@@ -778,6 +831,9 @@ class TDflowMCPExt:
                 if self.checks and self.ctl.state.value in ("Setup", "Error", "Off"):
                     self.RunDiagnostics(full=False)
                 self._refresh_tell()
+            if self.tdops is not None and self.tdops.memory_changed:
+                self.tdops.memory_changed = False
+                self._refresh_tell()                   # Phase 2A: resume section follows new records
             self._aggregate_auth_failures()
             self._publish()
         except Exception as e:  # never break TouchDesigner's frame

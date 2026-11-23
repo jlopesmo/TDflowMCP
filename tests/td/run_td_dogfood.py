@@ -38,7 +38,8 @@ ROOT = base.ROOT
 TOOLS = ["tdflow_connect", "tdflow_create_operator", "tdflow_delete_operator", "tdflow_disconnect",
          "tdflow_get_dat_text", "tdflow_get_errors", "tdflow_get_operator", "tdflow_get_parameters",
          "tdflow_list_operators", "tdflow_project_info", "tdflow_session_list", "tdflow_session_note",
-         "tdflow_set_dat_text", "tdflow_set_parameters", "tdflow_undo", "tdflow_whoami"]
+         "tdflow_set_dat_text", "tdflow_set_parameters", "tdflow_undo", "tdflow_whoami",
+         "tdflow_task_list", "tdflow_task_checkpoint", "tdflow_handoff_create", "tdflow_handoff_resume"]
 ALLOWED = [f"mcp__tdflow__{t}" for t in TOOLS] + ["Skill"]
 SESSION_S = 420                                   # per session; the launch and in-TD budgets cover 5 of these
 TASKS = {
@@ -56,12 +57,25 @@ TASKS = {
                   "opacity parameter of /project1/fx/level1, (c) create an Execute DAT named exec2 in /project1/fx. "
                   "Do not try workarounds.",
 }
+# Phase 2A dogfood: two separate sessions (different agents) share one task through project memory. The
+# resume prompt is the "Resume earlier work" section of Tell Your Coding Agent plus one sentence.
+TASKS.update({
+    "handoff_start": "In /project1/fx, work on a task with task_id blur_chain: add a Blur TOP named blur1 between "
+                     "level1 and out (noise1 -> level1 -> blur1 -> out). Record a task checkpoint when you start, make "
+                     "and verify the change, then create a handoff for the next agent with claims the server can "
+                     "check. Then stop and report what the server said about your claims.",
+    "handoff_resume": "A previous agent worked in this TouchDesigner project. Resume its open task through TDflowMCP, "
+                      "find out what changed since its handoff (including anything changed outside TDflowMCP), then "
+                      "finish the task by setting the size of blur1 to 10, verify it, and record a final checkpoint "
+                      "with status done. Report what you found.",
+})
+MEMORY_TASKS = ("handoff_start", "handoff_resume")
 STATE = {}
 
 
-def run_session(name, prompt, cfg, work, secret):
+def run_session(name, prompt, cfg, work, secret, token=None):
     exe = shutil.which("claude")
-    env = dict(os.environ, TDFLOW_TOKEN=TOKENS["B"])
+    env = dict(os.environ, TDFLOW_TOKEN=token or TOKENS["B"])
     t0 = time.time()
     rc, raw, err = ob.run_claude(exe, ["-p", prompt, "--mcp-config", cfg, "--strict-mcp-config", "--allowedTools",
                                        *ALLOWED, *ob.ISOLATION, "--output-format", "stream-json", "--verbose"],
@@ -121,7 +135,8 @@ def cp_dogfood(data, pid):
     T("dogfood.skill_installed_by_consent_flow", inst["status"] == 200)
     secret = TOKENS["B"].split(".", 1)[1]
     sessions = []
-    for name in STATE["tasks"]:
+    STATE.update(cfg=cfg, work=work, secret=secret)
+    for name in [t for t in STATE["tasks"] if t != "handoff_resume"]:
         s = run_session(name, TASKS[name], cfg, work, secret)
         sessions.append(s)
         T(f"dogfood.{name}.session_completed", s["rc"] == 0 and not s.get("is_error"), rc=s["rc"])
@@ -130,11 +145,27 @@ def cp_dogfood(data, pid):
     return {"sessions": len(sessions)}
 
 
+def cp_dogfood_resume(data, pid):
+    """The second agent gets only the Resume section the user would paste from Tell Your Coding Agent."""
+    tell = data.get("tell", "")
+    sec = tell[tell.find("## Resume earlier work"):] if "## Resume earlier work" in tell else ""
+    sec = sec.split("\n## ", 1)[0] if "\n## " in sec[3:] else sec
+    T("dogfood.tell_has_resume_section", "tdflow_task_list" in sec and "1 task(s)" in sec, section=sec[:600])
+    STATE["resume_section"] = sec
+    prompt = sec.strip() + "\n\n" + TASKS["handoff_resume"]
+    tok = TOKENS["A"]                                 # a different agent continues the task
+    s = run_session("handoff_resume", prompt, STATE["cfg"], STATE["work"], tok.split(".", 1)[1], token=tok)
+    STATE["sessions"].append(s)
+    T("dogfood.handoff_resume.session_completed", s["rc"] == 0 and not s.get("is_error"), rc=s["rc"])
+    T("dogfood.handoff_resume.no_token_leak", not s["secret_leak"])
+    return {}
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--tox", default=os.path.join(ROOT, "build", "TDflowMCP.tox"))
     ap.add_argument("--out", default=os.path.join(ROOT, "build", "td-dogfood-results.json"))
-    ap.add_argument("--tasks", default=",".join(TASKS))
+    ap.add_argument("--tasks", default=",".join(t for t in TASKS if t not in MEMORY_TASKS))
     a = ap.parse_args()
     top = base.safe_dir(os.path.join(ROOT, ".tmp", "td-dogfood"), ROOT)
     if os.path.exists(top):
@@ -144,16 +175,19 @@ def main():
     proj = tempfile.mkdtemp(prefix="tdflow-dogfood-project-")      # outside the repository (review 8, M3)
     run_dir = os.path.join(top, "run")
     os.makedirs(run_dir)
-    res = g.launch("dogfood", os.path.abspath(a.tox), run_dir, proj,
-                   {"TDFLOW_PRIVATE_ROOT": os.path.join(top, "private"),
-                    "TDFLOW_SKILLS_HOME": os.path.join(top, "home")},
-                   {"setup_ready": mt.cp_setup_ready, "pair_approved": mt.cp_pair_approved, "dogfood": cp_dogfood},
+    env = {"TDFLOW_PRIVATE_ROOT": os.path.join(top, "private"), "TDFLOW_SKILLS_HOME": os.path.join(top, "home")}
+    if any(t in MEMORY_TASKS for t in STATE["tasks"]):
+        env["TDFLOW_DOGFOOD_MEMORY"] = "1"
+    res = g.launch("dogfood", os.path.abspath(a.tox), run_dir, proj, env,
+                   {"setup_ready": mt.cp_setup_ready, "pair_approved": mt.cp_pair_approved, "dogfood": cp_dogfood,
+                    "dogfood_resume": cp_dogfood_resume},
                    deadline_s=600 + SESSION_S * len(STATE["tasks"]))
     shutil.rmtree(proj, ignore_errors=True)
     in_td = res.get("tests") or []
     out = {"td_build": res.get("td_build"), "claude_version": subprocess.run(
                [shutil.which("claude"), "--version"], capture_output=True, text=True).stdout.strip(),
            "sessions": STATE.get("sessions", []), "state": res.get("dogfood_state"), "audit": res.get("dogfood_audit"),
+           "memory": res.get("dogfood_memory"), "resume_section": STATE.get("resume_section"),
            "onframe": res.get("frame_stats_onframe"),
            "in_td": {"passed": sum(t["ok"] for t in in_td), "total": len(in_td), "tests": in_td,
                      "errors": res.get("errors") or []},

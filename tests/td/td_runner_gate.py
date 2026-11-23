@@ -68,6 +68,8 @@ def run(mode, comp, ext, T, frames, until, checkpoint, R):
         yield from restart(comp, ext, T, frames, until, checkpoint, R)
     elif mode == "onboard":
         yield from onboard(comp, ext, T, frames, until, checkpoint, R)
+    elif mode == "memory":
+        yield from memory(comp, ext, T, frames, until, checkpoint, R)
     elif mode == "dogfood":
         yield from dogfood(comp, ext, T, frames, until, checkpoint, R)
     elif mode == "gate_bench":
@@ -483,7 +485,26 @@ def dogfood(comp, ext, T, frames, until, checkpoint, R):
     yield from open_and_pair(comp, ext, T, frames, until, checkpoint)
     yield from enable(comp, until, "dogfood_enable")
     T("dogfood.enabled", comp.par.Status.eval() == "Enabled", detail=comp.par.Statusdetail.eval())
+    memory_pass = bool(os.environ.get("TDFLOW_DOGFOOD_MEMORY"))
+    if memory_pass:                                # Phase 2A: the user creates project memory first
+        td.op("/project1/mem").destroy()
+        comp.par.Createprojectmemory.pulse()
+        yield until(lambda: td.op("/project1/tdflowProject") is not None, 10, "dogfood_memory")
+        T("dogfood.memory_created", td.op("/project1/tdflowProject") is not None)
+        yield frames(10)
     g = yield checkpoint("dogfood", {"project_folder": str(td.project.folder)}, seconds=2700)
+    if memory_pass:
+        # Between the two agents' sessions the user edits a parameter in TouchDesigner (no audit event).
+        fx.op("noise1").par.amp = 0.33
+        yield frames(5)
+        g = yield checkpoint("dogfood_resume", {"tell": comp.op("tellagent").text}, seconds=900)
+        mc = td.op("/project1/tdflowProject")
+        MEM = sys.modules["tdflowmcp.memory"]
+        ents = MEM.read_records([(d.name, d.text) for d in mc.children if d.OPType == "textDAT"])
+        R["dogfood_memory"] = [{"record": e["name"], "author": e["rec"]["author"] if e["rec"] else None,
+                                "status": (e["rec"] or {}).get("body", {}).get("status"),
+                                "claim_summary": (e["rec"] or {}).get("body", {}).get("claim_summary"),
+                                "sealed": e["sealed"]} for e in ents]
     level, blur = fx.op("level1"), fx.op("blur1")
     R["dogfood_state"] = {
         "brightness_before": before["brightness"], "brightness_after": level.par.brightness1.eval(),
@@ -510,6 +531,111 @@ def dogfood(comp, ext, T, frames, until, checkpoint, R):
     T("dogfood.no_expression_set", "EXPRESSION" not in R["dogfood_state"]["level_opacity_mode"])
     T("dogfood.no_execute_dat_created", not R["dogfood_state"]["exec_created"])
     R["dogfood_harness"] = g
+    R["frame_stats_onframe"] = ext.FrameStats()
+    comp.par.Enablemcp = False
+    yield frames(5)
+
+
+# ---- Phase 2A: project memory, checkpoints, verified handoffs (ADR-0012/0013) ---------------------------
+def _memory_comps():
+    return [c for c in td.op("/project1").findChildren(tags=["tdflowProject"]) if c.isCOMP]
+
+
+def _claim(comp, ext, until):
+    """User action: Claim Project Memory, then wait until the claim event is durable."""
+    n0 = len([e for e in (yield from store_op(ext, until, "memory_events")) if e["tool"] == "memory_claim"])
+    comp.par.Claimprojectmemory.pulse()
+    for _ in range(100):
+        evs = yield from store_op(ext, until, "memory_events")
+        if len([e for e in evs if e["tool"] == "memory_claim"]) > n0:
+            return True
+    return False
+
+
+def memory(comp, ext, T, frames, until, checkpoint, R):
+    M.fixtures()                                   # includes /project1/mem: tagged tdflowProject, no Projectid
+    yield frames(5)
+    internals = _comp_digest(comp)
+    yield from open_and_pair(comp, ext, T, frames, until, checkpoint)
+    yield from enable(comp, until, "memory_enable")
+    T("memory.enabled", comp.par.Status.eval() == "Enabled", detail=comp.par.Statusdetail.eval())
+    yield checkpoint("mem_uninitialized", {})      # harness: tools refuse an uninitialised tdflowProject
+    comp.par.Createprojectmemory.pulse()           # refused: a tdflowProject already exists
+    yield frames(5)
+    T("memory.create_refused_when_one_exists", len(_memory_comps()) == 1 and "already exists" in comp.par.Statusdetail.eval(),
+      detail=comp.par.Statusdetail.eval())
+    td.op("/project1/mem").destroy()               # the user removes the old one
+    yield frames(3)
+    yield checkpoint("mem_none", {})
+    comp.par.Createprojectmemory.pulse()
+    yield until(lambda: len(_memory_comps()) == 1, 10, "memory_created")
+    mc = _memory_comps()[0]
+    pid = str(mc.par.Projectid.eval())
+    T("memory.created", mc.path == "/project1/tdflowProject" and pid.startswith("tfp_") and len(pid) == 20
+      and mc.par.Projectid.readOnly and str(mc.par.Memoryauthority.eval()) == "embedded", path=mc.path, pid=pid)
+    yield frames(10)
+    evs = yield from store_op(ext, until, "events", "kind='admin' AND tool='memory_create'", (), 5)
+    T("memory.create_audited", len(evs) == 1 and pid in (evs[0]["detail"] or ""))
+    g = yield checkpoint("mem_ready", {"memory_id": pid})
+    yield frames(10)
+    tell = comp.op("tellagent").text
+    T("memory.tell_has_resume_section", "## Resume earlier work" in tell and "1 task(s)" in tell
+      and "tdflow_task_list" in tell, tell=tell[-600:])
+    T("memory.tell_has_no_task_ids", "blur" not in tell)            # agent-chosen ids stay out (review 9)
+    T("memory.tell_has_no_agent_text", "UNTRUSTED_MARKER" not in tell)
+    T("memory.records_are_text_dats", sorted(d.name for d in mc.children if d.name != "README")
+      == ["checkpoint_blur_r1", "handoff_blur_r2"], names=sorted(d.name for d in mc.children))
+    # The user edits a parameter outside TDflowMCP (no audit event).
+    td.op("/project1/fx/noise1").par.amp = 0.7
+    yield frames(3)
+    yield checkpoint("mem_out_of_band", {})
+    # The user edits a record by hand: memory becomes read-only until Claim Project Memory.
+    d = mc.op("checkpoint_blur_r1")
+    d.text = d.text.replace("in_progress", "blocked")
+    yield frames(3)
+    yield checkpoint("mem_record_edited", {})
+    T("memory.claim_after_edit_durable", (yield from _claim(comp, ext, until)))
+    yield checkpoint("mem_claimed", {})
+    # An older save / unsaved write: a record the audit log knows about disappears.
+    newest = sorted(x.name for x in mc.children if x.name.startswith(("checkpoint_", "handoff_")))[-1]
+    mc.op(newest).destroy()
+    yield frames(3)
+    yield checkpoint("mem_rewound", {"removed": newest})
+    T("memory.claim_after_rewind_durable", (yield from _claim(comp, ext, until)))
+    # A record copied from another project's memory: never accepted without a claim.
+    MEM = sys.modules["tdflowmcp.memory"]
+    rec = MEM.new_record("checkpoint", "copied", [], {"title": "x", "scopes": ["/project1/fx"]}, "agt_other", 0)
+    f = mc.create(td.textDAT, rec["record_id"])
+    f.text = MEM.record_text(rec)
+    yield frames(3)
+    yield checkpoint("mem_foreign", {})
+    f.destroy()
+    # Two tdflowProject components: single authority refused.
+    extra = td.op("/project1").create(td.baseCOMP, "mem2")
+    extra.tags.add("tdflowProject")
+    yield frames(3)
+    yield checkpoint("mem_ambiguous", {})
+    extra.destroy()
+    # Main-thread cost of a fingerprint over a larger scope (300 operators).
+    big = td.op("/project1").create(td.baseCOMP, "load")
+    for i in range(300):
+        big.create(td.noiseTOP, f"n{i}")
+    yield frames(10)
+    ext.FrameStats(reset=True)
+    g = yield checkpoint("mem_load", {})
+    R["memory_load_onframe"] = ext.FrameStats()
+    big.destroy()
+    yield frames(5)
+    evs = yield from store_op(ext, until, "events", limit=5000)
+    v = yield from store_op(ext, until, "verify")
+    T("memory.audit_verifies", v["ok"], verify=v)
+    T("memory.no_unaccounted_executions", len(unmatched_intents(evs)) == 0)
+    T("memory.tdflowmcp_internals_untouched", _comp_digest(comp) == internals)
+    diag = ext.Diagnostics()
+    T("memory.frame_no_errors", diag["frame_errors"] == 0, last=diag["last_frame_error"])
+    mem_out = [e for e in evs if e["kind"] == "outcome" and e["tool"] in ("tdflow_task_checkpoint", "tdflow_handoff_create")]
+    R["memory_audit"] = {"events": len(evs), "memory_write_outcomes": len(mem_out),
+                         "ok": sum(1 for e in mem_out if e["outcome"] == "ok")}
     R["frame_stats_onframe"] = ext.FrameStats()
     comp.par.Enablemcp = False
     yield frames(5)

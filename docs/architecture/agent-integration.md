@@ -46,6 +46,7 @@ Hard rules:
 ## 4. Version management
 
 - `tdflow_whoami` returns `server_version`, `tool_surface_version`, `expected_skill_version`.
+- **Skill 1.1 (Phase 2A):** adds the project-memory workflow (resume before changing, checkpoint, handoff with checkable claims, the memory error codes). The tool surface stays `1` because the change is additive.
 - Skills declare their version and instruct the agent to compare it and tell the user on mismatch. **Verified in 1C:** Claude Code ignores unknown frontmatter fields and documents `metadata`, so the version is `metadata.tdflow-skill-version`, repeated in the skill body and recorded in the install manifest. The live test showed the agent reading both the project Skill's version and `expected_skill_version`.
 - The Setup Assistant compares installed manifests with the bundled version and offers update (same consent flow).
 - **Coexistence with TDMCP:** TDMCP defaults to port 13316, and a Claude account plugin may already connect there. TDflowMCP uses 9480 and the server name `tdflow`, so both can be registered in the same client without colliding. Running both against the same project is allowed but not recommended, and the Setup Assistant warns about it if it detects another MCP component.

@@ -24,7 +24,8 @@ Adopt [continuity-and-memory.md §1–3](../architecture/continuity-and-memory.m
 Phase 1B (passed 2026-11-22): raw operator tools are denied on a tagged `tdflowProject` COMP, for reads and writes (rule H4), in the in-TD suite.
 
 Phase 2A:
-- A stale write is rejected.
-- A mismatched `Projectid` blocks linking.
-- A migration in both directions preserves records and hashes.
-- Raw operator tools are denied on `tdflowProject` (already verified in Phase 1B).
+- A stale write is rejected. **Passed 2026-11-22** (in TD, `MEMORY_CONFLICT`; also a write between plan and execute, unit-tested).
+- A mismatched `Projectid` blocks linking. **Not yet:** repo mode is a later 2A increment.
+- A migration in both directions preserves records and hashes. **Not yet:** migration is a later 2A increment.
+- Raw operator tools are denied on `tdflowProject` (verified in Phase 1B; re-verified on record DATs in 2A).
+- Additional checks in increment 1 (passed): a single authority (two `tdflowProject` components are refused), and edited, missing or foreign records make memory read-only until the user's Claim Project Memory. Fork and rewind detection uses the audit log as ledger instead of a `Datadir` registry ([continuity §7](../architecture/continuity-and-memory.md#7-phase-2a-increment-1-what-is-implemented-2026-11-22)).

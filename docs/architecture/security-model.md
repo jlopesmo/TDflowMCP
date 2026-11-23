@@ -230,7 +230,17 @@ TD steps of all calls are serialized on TD's main thread (audit writes on the au
 ## 11. Project memory and continuity safety
 
 - Exactly one authoritative memory home ([ADR-0013](../decisions/0013-project-memory-model.md)). Writes carry `based_on_rev`, and stale writes return `MEMORY_CONFLICT`. A `Projectid` mismatch blocks linking.
-- Memory tools act on dedicated pseudo-scopes `memory:<record-type>` (e.g. `memory:handoff`) with actions `read`, `create`, `update` and `delete`. Memory access is therefore granted separately from operator scopes. `delete` is denied by default; records are archived instead.
-- **Fork and rollback detection:** Save As, incremental saves or copying the COMP can clone an embedded authority, and a repo checkout can move `rev` backwards. `Datadir` keeps, per `Projectid`, the registered authority instance (COMP `op.id` + `.toe` identity) and each record's highest seen `rev`. A mismatch puts memory into `FORKED` or `REWOUND` read-only state until the user performs an explicit **Claim authority** (audited) ([continuity §2](continuity-and-memory.md#2-authority-model-avoids-conflicting-authoritative-records)).
-- Memory and handoffs never contain tokens, raw audit arguments or user-profile paths. They reference audit by sequence number and hash.
+- **Access, as implemented in 2A increment 1** (a deviation from the earlier proposal of separate `memory:<record-type>` pseudo-scopes, recorded for owner review): memory access derives from operator scopes and role.
+  - A task is visible only to agents that can read all of its scopes. Resuming a hidden task answers like a missing one (M6), and writing to it is refused (M4). Paths inside records (changes, claim paths and claim evidence) are filtered again to what the caller can read, and the fingerprint map is never returned.
+  - The token and the scope grants are re-checked on the main thread right before a record is written.
+  - Writing needs a role with `update` (M1) and read access to the scopes.
+  - Record DATs are never operator targets: raw tools stay H4-denied on `tdflowProject`, and only the memory path in the engine writes there. Each write follows the intent → main-thread write (re-checking the kill switch, token and unchanged record set) → outcome order.
+  - There is no delete tool. Separate memory grants are deferred to token management (2B).
+- **Fork, rewind and outside edits (implemented):** the audit log is the ledger.
+  - Every record is announced in a durable intent (record id and text hash) before it is written.
+  - The user's **Claim Project Memory** is an audited event listing the accepted hashes.
+  - Records that are edited outside TDflowMCP, missing (an older save, or never saved), foreign (copied from another project or component) or invalid make memory read-only for agents (`MEMORY_READ_ONLY`, M5) until the user claims. More than one `tdflowProject` under the root is refused.
+  - This replaces the proposed `Datadir` authority registry ([continuity §7](continuity-and-memory.md#7-phase-2a-increment-1-what-is-implemented-2026-11-22)).
+- **Live-state claims** (`exists`, `absent`, `value`) are checked only on operators the caller can read; others are `unverified` with no detail. Only constant, non-read-only parameter values are compared (nothing is evaluated).
+- Memory and handoffs never contain tokens, raw audit arguments or user-profile paths. They reference audit by sequence number and hash. **Implemented:** token-shaped strings in agent text are replaced with `<redacted>` before a record is stored.
 - Agent-authored content is returned labelled `author: agent:<id>` and is never presented as an instruction from the user or the server. Only server-derived facts are labelled `verified`.

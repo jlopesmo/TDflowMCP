@@ -16,6 +16,7 @@ import json
 
 import td
 
+from tdflowmcp import memory as MEM
 from tdflowmcp.engine import Adapter, Resolution, ToolFailure
 from tdflowmcp.policy import EXECUTABLE_TYPES, Target
 
@@ -25,6 +26,7 @@ DATA_TAG = "tdflowdata"
 REFERENCE_STYLES = {"OP", "COMP", "OBJ", "Object", "PanelCOMP", "TOP", "CHOP", "SOP", "DAT", "MAT", "POP", "File",
                     "Folder", "FileSave", "Python"}
 MAX_TEXT = 200000
+MAX_WALK = 2000                    # operators visited per memory fingerprint (main-thread bound)
 MAX_LIST = 200
 
 
@@ -64,6 +66,8 @@ class TDAdapter(Adapter):
         self.root_fn = root_fn                   # current Projectroot (main thread)
         self.store_fn = store_fn                 # current Store (for DAT snapshots)
         self.protected = {}                      # op path -> "instance" | "tdflowproject"
+        self.memory_changed = False              # Phase 2A: a record was written (Tell Your Coding Agent refresh)
+        self._mem_cache = {}                     # (record name, text sha) -> parsed entry (review 9, F5b)
         self.refresh_protected()
 
     # ---- protection registry (§3.4: registration, tags for discovery only) --------------------
@@ -92,7 +96,8 @@ class TDAdapter(Adapter):
         self.protected = prot
 
     def _facts(self, o, action, **kw):
-        p = o.path if o is not None else kw.pop("path")
+        given = kw.pop("path", None)
+        p = o.path if o is not None else given
         protected = next((kind for pp, kind in self.protected.items() if p == pp or p.startswith(pp + "/")), "")
         ancestor = next((kind for pp, kind in self.protected.items() if pp.startswith(p.rstrip("/") + "/")), "")
         return Target(action=action, path=p, exists=o is not None, op_type=kw.pop("op_type", o.OPType if o else ""),
@@ -496,3 +501,199 @@ class TDAdapter(Adapter):
         o.text = snap["before_text"]
         ok = _sha(o.text) == snap["before_sha"]
         return {"undone": ok, "verified": ok, "code": None if ok else "UNDO_FAILED"}
+
+    # ---- project memory (Phase 2A, ADR-0012/0013) ----------------------------------------------
+    def _memory_comps(self):
+        root = td.op(self.root_fn())
+        if root is None or not root.isCOMP:
+            return []
+        try:
+            return [c for c in root.findChildren(tags=[MEM.MEMORY_TAG]) if c.isCOMP]
+        except Exception:
+            return []
+
+    def memory_component(self):
+        """(status, reason, comp). ``status``: ready | none | ambiguous | uninitialized | repo."""
+        comps = self._memory_comps()
+        if not comps:
+            return "none", ("This project has no project memory yet. Ask the user to pulse Create Project Memory "
+                            "on the TDflowMCP component's Advanced page."), None
+        if len(comps) > 1:
+            return "ambiguous", (f"There are {len(comps)} tdflowProject components; project memory needs exactly "
+                                 "one (single authority). Ask the user to keep only one."), None
+        c = comps[0]
+        pid = getattr(c.par, "Projectid", None)
+        if pid is None or not MEM.MEMORY_ID.match(str(pid.eval())):
+            return "uninitialized", ("The tdflowProject component has no valid Projectid. Ask the user to create "
+                                     "project memory with Create Project Memory."), c
+        auth = getattr(c.par, "Memoryauthority", None)
+        if auth is not None and str(auth.eval()) == "repo":
+            return "repo", "Repository-mode project memory is not available in this version.", c
+        return "ready", "", c
+
+    @staticmethod
+    def _record_dats(c):
+        return [(d.name, d.text) for d in c.children if d.OPType == "textDAT" and MEM.RECORD_NAME.match(d.name)]
+
+    def memory_entries(self):
+        """Main thread: (status, comp_path, memory_id, entries) for the Setup page and Tell Your Coding Agent."""
+        status, _, c = self.memory_component()
+        if status != "ready":
+            return status, (c.path if c is not None else None), None, []
+        return status, c.path, str(c.par.Projectid.eval()), MEM.read_records(self._record_dats(c), self._mem_cache)
+
+    @staticmethod
+    def _op_digest(o):
+        """Type, parameters (constant values, expression/bind text), inputs, flags and authored DAT text.
+        Nothing is evaluated (no cooking); node position is not included."""
+        parts = [o.OPType]
+        try:
+            pars = sorted(o.pars(), key=lambda p: p.name)
+        except Exception:
+            pars = []
+        for p in pars:
+            try:
+                if p.readOnly or p.isPulse or getattr(p, "isMomentary", False):
+                    continue
+                mode = str(p.mode).split(".")[-1]
+                if mode == "EXPRESSION":
+                    v = "e:" + str(p.expr)
+                elif mode == "BIND":
+                    v = "b:" + str(p.bindExpr)
+                elif mode == "EXPORT":
+                    v = "x"
+                else:
+                    v = "c:" + repr(_jsonable(p.val))
+            except Exception:
+                v = "?"
+            parts.append(p.name + "=" + v)
+        try:
+            ins = [x.path for x in o.inputs if x is not None]
+        except Exception:
+            ins = []
+        parts.append("in=" + ",".join(ins))
+        for f in ("bypass", "display", "render"):
+            try:
+                parts.append(f + "=" + str(bool(getattr(o, f))))
+            except Exception:
+                pass
+        if o.OPType in ("textDAT", "tableDAT") and not ins:        # authored text only (cooked DATs change alone)
+            parts.append("t=" + _sha(o.text))
+        return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()[:16]
+
+    def memory_snapshot(self, task_id, scopes, claims, fingerprint, readable):
+        self._fresh()
+        out = {"status": "", "reason": "", "comp": None, "memory_id": None, "dats": [], "scopes": None,
+               "scope_targets": [], "fingerprint": None, "fp_total": 0, "live": {},
+               "protected": dict(self.protected), "td_build": str(td.app.build)}
+        status, reason, c = self.memory_component()
+        out.update(status=status, reason=reason)
+        if status != "ready":
+            return out
+        out.update(comp=c.path, memory_id=str(c.par.Projectid.eval()), dats=self._record_dats(c))
+        if scopes is None and task_id:
+            last = MEM.latest(MEM.task_records(MEM.read_records(out["dats"], self._mem_cache), task_id))
+            scopes = list(last["body"].get("scopes") or []) if last else None
+        out["scopes"] = list(scopes) if scopes else None
+        if not fingerprint or not scopes:
+            return out
+        found = []
+        for s in scopes:
+            o = td.op(s)
+            o = o if o is not None and o.path == s else None
+            found.append(o)
+            out["scope_targets"].append(self._facts(o, "read", path=s))
+        # Bounded breadth-first walk (review 9, F5): never more than MAX_WALK operators on the main thread.
+        seen, ops, queue = set(), [], [o for o in found if o is not None]
+        while queue and len(ops) < MAX_WALK:
+            x = queue.pop(0)
+            if x.path in seen:
+                continue
+            seen.add(x.path)
+            ops.append(x)
+            if x.isCOMP:
+                queue.extend(x.children[:MAX_WALK])
+        vis = {t.path for t in readable([self._facts(x, "read") for x in ops])}
+        shown = sorted((x for x in ops if x.path in vis), key=lambda x: x.path)
+        out["fp_total"] = len(shown)
+        out["fingerprint"] = {x.path: self._op_digest(x) for x in shown[:MEM.MAX_FP_OPS]}
+        claims = list(claims)[:50]
+        for cl in claims:
+            p = cl.get("path")
+            if cl.get("kind") not in MEM.LIVE_CLAIMS or not isinstance(p, str) or p in out["live"]:
+                continue
+            o = td.op(p)
+            o = o if o is not None and o.path == p else None
+            ok = bool(readable([self._facts(o, "read", path=p)]))
+            f = {"readable": ok, "exists": (o is not None) if ok else None, "values": {}}
+            if ok and o is not None and any(c2.get("path") == p and c2.get("kind") == "input" for c2 in claims):
+                ins = [x for x in o.inputs if x is not None]
+                vis = {t.path for t in readable([self._facts(x, "read") for x in ins])}
+                f["inputs"] = [x.path for x in ins if x.path in vis]
+                srcs = [c2.get("value") for c2 in claims if c2.get("path") == p and c2.get("kind") == "input"
+                        and isinstance(c2.get("value"), str)]
+                f["sources"] = {sp: bool(readable([self._facts(None, "read", path=sp)])) for sp in srcs[:20]}
+            if ok and o is not None:
+                for c2 in claims:
+                    if c2.get("path") == p and c2.get("kind") == "value" and c2.get("param"):
+                        par = getattr(o.par, str(c2["param"]), None)
+                        try:
+                            if par is not None and str(par.mode).split(".")[-1] == "CONSTANT" and not par.readOnly:
+                                f["values"][str(c2["param"])] = _jsonable(par.eval())
+                        except Exception:
+                            pass
+            out["live"][p] = f
+        return out
+
+    def memory_write(self, comp, memory_id, name, text, expect_digest):
+        status, _, c = self.memory_component()
+        if status != "ready" or c.path != comp or str(c.par.Projectid.eval()) != memory_id:
+            raise ToolFailure("MEMORY_CONFLICT", "project memory changed since the request was checked; nothing "
+                              "was recorded. Retry.")
+        if MEM.dats_digest(self._record_dats(c)) != expect_digest or c.op(name) is not None:
+            raise ToolFailure("MEMORY_CONFLICT", "another record was written since the request was checked; nothing "
+                              "was recorded. Resume the task and retry with its latest revision.")
+        n = len(c.children)
+        d = c.create(td.textDAT, name)
+        d.nodeX, d.nodeY = (n % 8) * 160, -160 - (n // 8) * 130
+        d.text = text
+        if MEM.text_sha(d.text) != MEM.text_sha(text):
+            d.destroy()
+            raise ToolFailure("EXECUTION_FAILED", "the record DAT did not accept the text; nothing was recorded")
+        self.memory_changed = True
+        return {"written": True, "path": d.path}
+
+    def create_memory(self, near=None):
+        """User action (Create Project Memory pulse): a tagged Base COMP with a new Projectid."""
+        root = td.op(self.root_fn())
+        if root is None or not root.isCOMP:
+            raise ValueError("Project Root is not an existing component.")
+        existing = self._memory_comps()
+        if existing:
+            raise ValueError("Project memory already exists: " + existing[0].path + ".")
+        name, i = "tdflowProject", 1
+        while root.op(name) is not None:
+            name, i = f"tdflowProject{i}", i + 1
+        c = root.create(td.baseCOMP, name)
+        c.tags.add(MEM.MEMORY_TAG)
+        pg = c.appendCustomPage("Project")
+        pid = pg.appendStr("Projectid", label="Project ID")[0]
+        pid.val = MEM.new_memory_id()
+        pid.readOnly = True
+        auth = pg.appendMenu("Memoryauthority", label="Memory Authority")[0]
+        auth.menuNames = ["embedded", "repo"]
+        auth.menuLabels = ["Embedded (this component)", "Repository (not available yet)"]
+        auth.val = "embedded"
+        auth.readOnly = True
+        readme = c.create(td.textDAT, "README")
+        readme.text = ("Project memory for this TouchDesigner project (TDflowMCP, embedded authority).\n"
+                       "Agents add task checkpoints and handoffs here through TDflowMCP's memory tools only.\n"
+                       "Each record is one Text DAT; its hash is in the TDflowMCP audit log. If you edit, delete or\n"
+                       "copy records, TDflowMCP makes memory read-only until you pulse Claim Project Memory.\n"
+                       "Save the project to keep new records.\n")
+        readme.nodeX, readme.nodeY = 0, 0
+        if near is not None:
+            c.nodeX, c.nodeY = near.nodeX, near.nodeY - 200
+        self.refresh_protected()
+        self.memory_changed = True
+        return c.path, str(pid.eval())

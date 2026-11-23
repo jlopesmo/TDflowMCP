@@ -35,7 +35,10 @@ TOKENS, STATE = {}, {"cookies": {}}
 EXPECTED_TOOLS = sorted(["tdflow_connect", "tdflow_create_operator", "tdflow_delete_operator", "tdflow_disconnect",
                          "tdflow_get_dat_text", "tdflow_get_errors", "tdflow_get_operator", "tdflow_get_parameters",
                          "tdflow_list_operators", "tdflow_project_info", "tdflow_session_list", "tdflow_session_note",
-                         "tdflow_set_dat_text", "tdflow_set_parameters", "tdflow_undo", "tdflow_whoami"])
+                         "tdflow_set_dat_text", "tdflow_set_parameters", "tdflow_undo", "tdflow_whoami",
+                         # Phase 2A memory tools (additive; tested in run_td_memory_tests.py)
+                         "tdflow_handoff_create", "tdflow_handoff_resume", "tdflow_task_checkpoint",
+                         "tdflow_task_list"])
 SECRET_BODIES = []          # responses that legitimately contain a token (token creation): excluded from scans
 
 
@@ -186,12 +189,12 @@ def cp_enabled(data, pid):
     T("proto.notification_202", st == 202 and not r.get("body"))
     st, j, _ = B.rpc("tools/list")
     names = sorted(t["name"] for t in (j or {}).get("result", {}).get("tools", []))
-    T("proto.tools_list_16", names == EXPECTED_TOOLS, names=names)
+    T("proto.tools_list_20", names == EXPECTED_TOOLS, names=names)
     # modern era
     st, j, _ = B.rpc("server/discover", modern=True)
     T("proto.modern_discover", st == 200 and "2026-07-28" in j["result"]["supportedVersions"])
     st, j, _ = B.rpc("tools/list", modern=True)
-    T("proto.modern_tools_list", st == 200 and j["result"]["resultType"] == "complete" and len(j["result"]["tools"]) == 16
+    T("proto.modern_tools_list", st == 200 and j["result"]["resultType"] == "complete" and len(j["result"]["tools"]) == len(EXPECTED_TOOLS)
       and j["result"].get("ttlMs") == 0 and j["result"].get("cacheScope") == "private")
     st, j, _ = B.rpc("tools/list", modern=True, extra={"Mcp-Method": "tools/call"})
     T("proto.modern_header_mismatch", st == 400 and j["error"]["code"] == -32020)
@@ -379,8 +382,11 @@ def cp_audit_down(data, pid):
     T("audit.fail_closed_mutation", B.call("tdflow_set_parameters", {"path": "/project1/fx/level1",
                                                                      "values": {"opacity": 0.11}}).get("code") == "AUDIT_UNAVAILABLE")
     r = B.call("tdflow_get_operator", {"path": "/project1/fx/level1"})
-    # Fail closed either way: the call itself fails, or TDflowMCP already turned MCP off (worker failed).
-    T("audit.fail_closed_read", r.get("code") == "AUDIT_UNAVAILABLE" or r.get("_code") == "MCP_DISABLED", result=r)
+    # Fail closed either way: the call itself fails, TDflowMCP already turned MCP off (worker failed), or MCP was
+    # being turned off while the call waited, so TouchDesigner refused the main-thread step (nothing ran, no audit
+    # event; observed once, 2026-11-22).
+    T("audit.fail_closed_read", r.get("code") in ("AUDIT_UNAVAILABLE", "MAIN_UNAVAILABLE") or r.get("_code") == "MCP_DISABLED",
+      result=r)
 
 
 def cp_audit_up(data, pid):

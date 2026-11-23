@@ -78,6 +78,7 @@ CREATE TRIGGER IF NOT EXISTS events_no_delete BEFORE DELETE ON events
   BEGIN SELECT RAISE(ABORT, 'audit events are append-only'); END;
 CREATE INDEX IF NOT EXISTS events_session ON events(session_id);
 CREATE INDEX IF NOT EXISTS events_agent ON events(agent_id);
+CREATE INDEX IF NOT EXISTS events_tool ON events(tool);
 CREATE TABLE IF NOT EXISTS snapshots (id INTEGER PRIMARY KEY, created_at TEXT NOT NULL, path TEXT NOT NULL,
   op_id INTEGER, before_text TEXT NOT NULL, before_sha TEXT NOT NULL, after_sha TEXT NOT NULL,
   audit_seq INTEGER, restored_at TEXT);
@@ -338,6 +339,28 @@ class Store:
         cols = ["seq", *EVENT_FIELDS]
         q = f"SELECT {', '.join(cols)} FROM events {('WHERE ' + where) if where else ''} ORDER BY seq DESC LIMIT ?"
         return [dict(zip(cols, r)) for r in self._c().execute(q, (*params, int(limit)))]
+
+    # ---- project-memory queries (Phase 2A; the audit log is the memory ledger) -------------------
+    def max_seq(self) -> int:
+        row = self._c().execute("SELECT MAX(seq) FROM events").fetchone()
+        return int(row[0] or 0)
+
+    def first_seq(self, session_id: str) -> int:
+        row = self._c().execute("SELECT MIN(seq) FROM events WHERE session_id=?", (session_id,)).fetchone()
+        return int(row[0] or 0)
+
+    def memory_events(self, limit: int = 20000) -> List[Dict[str, Any]]:
+        """Memory writes (intents, outcomes) and the user's memory claims, oldest first."""
+        cols = ["seq", *EVENT_FIELDS]
+        q = (f"SELECT {', '.join(cols)} FROM events WHERE (kind IN ('intent','outcome') AND tool IN "
+             "('tdflow_task_checkpoint','tdflow_handoff_create')) OR (kind='admin' AND tool='memory_claim') "
+             "ORDER BY seq DESC LIMIT ?")
+        return [dict(zip(cols, r)) for r in reversed(self._c().execute(q, (int(limit),)).fetchall())]
+
+    def mutations_between(self, start_seq: int, end_seq: int, limit: int = 5000) -> List[Dict[str, Any]]:
+        """Successful outcomes with start_seq < seq <= end_seq (the newest ``limit``), oldest first."""
+        return list(reversed(self.events("seq>? AND seq<=? AND kind='outcome' AND outcome='ok' AND targets IS NOT NULL",
+                                         (int(start_seq), int(end_seq)), limit)))
 
     def sessions(self, agent_id: Optional[str] = None, limit: int = 20) -> List[Dict[str, Any]]:
         q = ("SELECT session_id, agent_id, MIN(ts), MAX(ts), COUNT(*), "

@@ -39,8 +39,12 @@ python -I tests/td/run_td_tests.py --mode real_browser   # opens your default br
 python -I tests/td/run_td_mcp_tests.py                   # Phase 1B MCP acceptance -> build/td-mcp-test-results.json
 python -I tests/td/run_td_gate_tests.py                  # audit-worker gate, storage, perf -> build/td-gate-test-results.json
 python -I tests/td/run_td_onboard_tests.py               # 1C: live Claude Code + Skills -> build/td-onboard-test-results.json
+python -I tests/td/run_td_memory_tests.py                # 2A project memory, checkpoints, handoffs -> build/td-memory-test-results.json
 python -I tests/td/run_td_dogfood.py [--tasks inspect,…]  # real Claude Code development sessions -> build/td-dogfood-results.json
+python -I tests/td/run_td_dogfood.py --tasks handoff_start,handoff_resume   # 2A: two agents share a task
 ```
+- **Memory suite** (`run_td_memory_tests.py`, one launch, disposable project in the system temp folder, data under `.tmp/td-memory-tests/`): Create/Claim Project Memory, checkpoint facts, stale writes, observer denial, claim tagging against audit and live state, H4 on record DATs, out-of-band detection, edited/missing/foreign records, two-authority refusal, the Resume section of Tell Your Coding Agent, and the main-thread cost of a 300-operator fingerprint.
+- **Dogfood handoff pass** (`--tasks handoff_start,handoff_resume`): agent B works and hands off; the user edits a parameter in TouchDesigner; agent A resumes from the Tell Your Coding Agent Resume section alone.
 - **Dogfood** (`run_td_dogfood.py`): five Claude Code sessions (inspect, edit/verify/undo, build and wire, DAT + session notes, boundaries) in a disposable project. The safety rules are the same as for onboarding. Token-redacted transcripts go to `.tmp/td-dogfood/`, and per-call tools, errors, turns and costs go to the results file. In-TD checks: final state, audit verification, no unaccounted executions, TDflowMCP internals untouched.
 - **Gate suite** (`run_td_gate_tests.py`, five TouchDesigner launches, all under `.tmp/td-gate-tests/`):
   - `gate`: project-local storage decision; idle, load and simulated slow-disk frame impact (OnFrame cost and frame intervals) with MCP latency measured separately; the kill switch flipped while an intent is being written; queue overflow; an injected outcome-write failure.

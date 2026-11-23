@@ -82,7 +82,8 @@ def connect_section(port: int, clients: Mapping) -> list:
 
 
 def build(state: str, error_code: str, port: int, td_build: str, checks: Sequence[CheckResult],
-          troubleshooting: Mapping, version: str = __version__, clients: Mapping = None) -> str:
+          troubleshooting: Mapping, version: str = __version__, clients: Mapping = None,
+          memory_lines: Sequence[str] = ()) -> str:
     entries = troubleshooting.get("entries", {}) if isinstance(troubleshooting, Mapping) else {}
     problems = [c for c in checks if c.result in ("fail", "warn")]
     lines = [
@@ -103,6 +104,8 @@ def build(state: str, error_code: str, port: int, td_build: str, checks: Sequenc
     ]
     if clients and state in ("Setup", "Enabled", "Suspended"):
         lines += connect_section(port, clients)
+    if memory_lines:                               # Phase 2A: built from validated memory fields only
+        lines += [""] + list(memory_lines)
     lines += [
         "",
         "## Repair",

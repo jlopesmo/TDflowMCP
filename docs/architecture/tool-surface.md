@@ -1,6 +1,6 @@
 # MCP tool surface
 
-**Status:** the 14 core tools plus `tdflow_session_note` and `tdflow_session_list` are **implemented in Phase 1B** (tool-surface version `1`). They are registered in [`src/tdflowmcp/tools.py`](../../src/tdflowmcp/tools.py), executed by [`src/td_adapter/tdops.py`](../../src/td_adapter/tdops.py), and verified in TouchDesigner 2025.32440 by the Phase 1B acceptance suite. They follow the Conditionally Accepted [ADR-0009](../decisions/0009-permission-model.md). Later-phase tools remain proposals. Names use the `tdflow_` prefix so they don't collide with other TD MCP servers a client may have loaded. Every tool declares its required actions and target resolver, using the [action classification](security-model.md#33-action-classification-of-tool-effects-security-critical).
+**Status:** the 14 core tools plus `tdflow_session_note` and `tdflow_session_list` are **implemented in Phase 1B** (tool-surface version `1`). They are registered in [`src/tdflowmcp/tools.py`](../../src/tdflowmcp/tools.py), executed by [`src/td_adapter/tdops.py`](../../src/td_adapter/tdops.py), and verified in TouchDesigner 2025.32440 by the Phase 1B acceptance suite. They follow the Conditionally Accepted [ADR-0009](../decisions/0009-permission-model.md). **Phase 2A increment 1 adds four memory tools** (`tdflow_task_list`, `tdflow_task_checkpoint`, `tdflow_handoff_create`, `tdflow_handoff_resume`; additive, so the version stays `1`), verified by the in-TD memory suite. Other later-phase tools remain proposals. Names use the `tdflow_` prefix so they don't collide with other TD MCP servers a client may have loaded. Every tool declares its required actions and target resolver, using the [action classification](security-model.md#33-action-classification-of-tool-effects-security-critical).
 
 ## Phase 1B core tools (14)
 
@@ -29,11 +29,13 @@
 |---|---|---|---|
 | `tdflow_session_note` | 1B | none (own session) | Append an agent note to the current session log |
 | `tdflow_session_list` | 1B | none (own sessions) | The agent's recent sessions; admins see all in the dashboard |
-| `tdflow_task_checkpoint` | 2A | update `memory:checkpoint` | Record a checkpoint with server-attached facts |
-| `tdflow_handoff_create` | 2A | update `memory:handoff` | Create a verified handoff (facts and tagged claims) |
-| `tdflow_handoff_resume` | 2A | read `memory:handoff` | Latest handoff, activity since it, fingerprint drift |
-| `tdflow_memory_get` / `tdflow_memory_list` | 2A | read `memory:<type>` | Read project ICM, decisions, tasks |
-| `tdflow_memory_put` | 2A | update `memory:<type>` | Write a record with `based_on_rev` (`MEMORY_CONFLICT` if stale) |
+| `tdflow_task_list` | **2A, implemented** | read; tasks whose scopes you can read | Tasks in the `tdflowProject` (latest revision, record type, status, author) and whether memory is writable (`memory.state`: `ok` / `needs_claim` with the reasons) |
+| `tdflow_task_checkpoint` | **2A, implemented** | role with update + read on `scopes` | `task_id`, `title`, `status` (`in_progress`/`blocked`/`done`), `summary`, `next_steps`, `scopes` (1–10 paths), `based_on_rev`. The server attaches the audited changes since the task's previous record and a fingerprint of the scopes |
+| `tdflow_handoff_create` | **2A, implemented** | role with update + read on `scopes` | `task_id`, `summary`, `claims` (≤ 50: `changed`/`created`/`deleted`/`unchanged`/`exists`/`absent`/`value`/`note`), optional `scopes` (default: the task's), `based_on_rev`. Each claim comes back `verified`, `contradicted` or `unverified`, with evidence |
+| `tdflow_handoff_resume` | **2A, implemented** | read; the task's scopes | Latest handoff and checkpoint (author-labelled, untrusted text), audited changes since, fingerprint comparison (`changed_outside_tdflowmcp`, `unexplained`), the revision to continue from |
+| `tdflow_memory_get` / `tdflow_memory_list` / `tdflow_memory_put` | 2A, later increment | (proposed) | Project ICM, decisions and tasks as records with `based_on_rev` |
+
+Errors added in 2A: `MEMORY_UNAVAILABLE` (no, an uninitialised, or more than one `tdflowProject`; M2), `MEMORY_MODE_UNSUPPORTED` (repo mode), `MEMORY_READ_ONLY` (records do not match the audit ledger; the user must Claim Project Memory; M5), `MEMORY_CONFLICT` (stale `based_on_rev`, or a write between plan and execute), `MEMORY_NOT_FOUND`, `MEMORY_FULL`. Memory writes are not undoable (records are append-only). The four tools are additive, so `tool_surface_version` stays `1` (Skill 1.1 describes them).
 
 ## Later phases (candidates)
 

@@ -130,8 +130,8 @@ class ProtocolTests(unittest.TestCase):
 
 
 class RegistryTests(unittest.TestCase):
-    def test_sixteen_tools_with_classification(self):
-        self.assertEqual(len(ALL), 16)
+    def test_twenty_tools_with_classification(self):
+        self.assertEqual(len(ALL), 20)               # 16 Phase 1B tools + 4 Phase 2A memory tools
         reg = core_registry()
         for t in reg.all():
             d = t.describe()

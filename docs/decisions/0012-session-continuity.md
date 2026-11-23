@@ -18,6 +18,7 @@ Adopt [continuity-and-memory.md §4–6](../architecture/continuity-and-memory.m
 - **Phase 1B (passed 2026-11-22, [Phase 1B record](../research/2026-11-22-phase-1b-mcp-core.md)):**
   - Session logs are views over the audit store: sessions are grouped from audit events, agent notes are audited events, and nothing is a second log of truth.
   - Sessions persist across a TouchDesigner restart.
-- **Phase 2A:**
+- **Phase 2A (both passed 2026-11-22 in TD 2025.32440, `run_td_memory_tests.py`; see the [validation index](../icm/validation-index.md)):**
 - A handoff's false claim (an edit that never happened) is tagged `contradicted`.
 - Resume detects an out-of-band edit through a fingerprint change.
+- Implementation note: checkpoints and handoffs are embedded-mode records; the audit log is their ledger ([continuity §7](../architecture/continuity-and-memory.md#7-phase-2a-increment-1-what-is-implemented-2026-11-22)).

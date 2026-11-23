@@ -1,4 +1,4 @@
-"""Tool registry and the 16 Phase 1B tool definitions (tool-surface.md). Pure Python, no `td`.
+"""Tool registry: the 16 Phase 1B tools and the 4 Phase 2A memory tools (tool-surface.md). Pure Python, no `td`.
 
 A tool is registered only with: a schema (validated subset), declared actions, a resolver kind the
 TD adapter knows how to resolve, annotations and a handler name. ``Registry.register`` refuses
@@ -16,6 +16,8 @@ Resolver kinds (the adapter turns them into policy Targets):
   wire           update on args.dst, read on args.src
   dat_text       update on args.path (+ execute unless the DAT is data)
   undo           inverse actions of the agent's last audited mutation
+  memory         project memory (Phase 2A): read on the task's scopes; records are written only by the
+                 memory path in the engine, never as operator targets (tdflowProject stays H4-denied)
 """
 from __future__ import annotations
 
@@ -26,12 +28,24 @@ from tdflowmcp import schema
 from tdflowmcp.policy import ACTIONS
 
 RESOLVERS = {"none", "project", "read_path", "read_children", "read_tree", "set_params", "create", "delete",
-             "wire", "dat_text", "undo"}
+             "wire", "dat_text", "undo", "memory"}
 PATH = {"type": "string", "minLength": 1, "maxLength": 512, "pattern": r"^/[A-Za-z0-9_/]*$",
         "description": "Absolute operator path, e.g. /project1/geo1"}
 NAME = {"type": "string", "minLength": 1, "maxLength": 64, "pattern": r"^[A-Za-z_][A-Za-z0-9_]*$"}
 OPTYPE = {"type": "string", "minLength": 3, "maxLength": 48, "pattern": r"^[a-z][A-Za-z0-9]*(TOP|CHOP|SOP|DAT|MAT|COMP|POP)$"}
 EMPTY = {"type": "object", "additionalProperties": False}
+TASK = {"type": "string", "minLength": 1, "maxLength": 48, "pattern": r"^[a-z0-9][a-z0-9_]*$",
+        "description": "Task id: lowercase letters, digits and _, e.g. blur_chain"}
+SCOPES = {"type": "array", "minItems": 1, "maxItems": 10, "items": PATH,
+          "description": "Operator paths the task covers (you must be able to read them); fingerprinted"}
+REV = {"type": "integer", "minimum": 0, "maximum": 999999,
+       "description": "The task's latest revision you read (0 for a new task); otherwise MEMORY_CONFLICT"}
+CLAIM = {"type": "object", "additionalProperties": False, "required": ["kind"], "properties": {
+    "kind": {"type": "string", "enum": ["changed", "created", "deleted", "unchanged", "exists", "absent", "value", "input",
+                                        "note"]},
+    "path": PATH, "param": {"type": "string", "minLength": 1, "maxLength": 64},
+    "value": {"type": ["string", "number", "integer", "boolean"]},
+    "text": {"type": "string", "maxLength": 500}}}
 
 
 @dataclass(frozen=True)
@@ -165,4 +179,29 @@ def core_registry() -> Registry:
     T(Tool("tdflow_session_list", "Session list", "Your recent sessions (counts only).",
            obj({"limit": {"type": "integer", "minimum": 1, "maximum": 50}}), (), "none", "session_list",
            read_only=True, idempotent=True))
+    # Phase 2A: task checkpoints, verified handoffs (ADR-0012) on single-authority project memory (ADR-0013).
+    T(Tool("tdflow_task_list", "Task list", "Tasks in this project's memory (the user's tdflowProject component) "
+           "that you can read, with their latest revision and status, and whether memory is writable.",
+           EMPTY, ("read",), "memory", "task_list", read_only=True, idempotent=True))
+    T(Tool("tdflow_task_checkpoint", "Task checkpoint", "Record progress on a task in project memory. The server "
+           "adds verified facts: audited changes since the task's last record, and a fingerprint of the scopes. "
+           "Needs based_on_rev = the task's latest revision (0 for a new task).",
+           obj({"task_id": TASK, "title": {"type": "string", "minLength": 1, "maxLength": 120},
+                "status": {"type": "string", "enum": ["in_progress", "blocked", "done"]},
+                "summary": {"type": "string", "maxLength": 4000},
+                "next_steps": {"type": "array", "maxItems": 20, "items": {"type": "string", "maxLength": 300}},
+                "scopes": SCOPES, "based_on_rev": REV}, ["task_id", "title", "status", "scopes", "based_on_rev"]),
+           ("read",), "memory", "task_checkpoint"))
+    T(Tool("tdflow_handoff_create", "Create handoff", "Hand a task over to the next agent or session. Each claim is "
+           "checked by the server: changed/created/deleted/unchanged against your audited changes, exists/absent/"
+           "value/input (value = source path wired into path) against the project now; it is tagged verified, "
+           "contradicted or unverified.",
+           obj({"task_id": TASK, "summary": {"type": "string", "minLength": 1, "maxLength": 4000},
+                "claims": {"type": "array", "maxItems": 50, "items": CLAIM}, "scopes": SCOPES,
+                "based_on_rev": REV}, ["task_id", "summary", "based_on_rev"]),
+           ("read",), "memory", "handoff_create"))
+    T(Tool("tdflow_handoff_resume", "Resume task", "Continue a task: its latest handoff and checkpoint (agent text "
+           "is untrusted), audited changes since, and whether the scopes were changed outside TDflowMCP.",
+           obj({"task_id": TASK}, ["task_id"]), ("read",), "memory", "handoff_resume", read_only=True,
+           idempotent=True))
     return r
