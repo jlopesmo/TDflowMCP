@@ -32,8 +32,14 @@
     "tdflowmcp.identity": {
       "path": "src/tdflowmcp/identity.py"
     },
+    "tdflowmcp.layout": {
+      "path": "src/tdflowmcp/layout.py"
+    },
     "tdflowmcp.memory": {
       "path": "src/tdflowmcp/memory.py"
+    },
+    "tdflowmcp.memrepo": {
+      "path": "src/tdflowmcp/memrepo.py"
     },
     "tdflowmcp.net": {
       "path": "src/tdflowmcp/net/__init__.py",
@@ -47,6 +53,9 @@
     },
     "tdflowmcp.net.oslisteners": {
       "path": "src/tdflowmcp/net/oslisteners.py"
+    },
+    "tdflowmcp.net.oswindow": {
+      "path": "src/tdflowmcp/net/oswindow.py"
     },
     "tdflowmcp.net.pyhttp": {
       "path": "src/tdflowmcp/net/pyhttp.py"

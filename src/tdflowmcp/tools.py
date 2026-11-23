@@ -143,6 +143,7 @@ def core_registry() -> Registry:
                                 "additionalProperties": {"type": "string", "maxLength": 2000}}}, ["path"]),
            ("update", "execute?"), "set_params", "set_parameters", idempotent=True, reversible="td_undo"))
     T(Tool("tdflow_create_operator", "Create operator", "Create an operator by type and name inside a COMP. "
+           "Without x and y it is placed to the right of the existing nodes (the answer gives its position). "
            "Executable and network operator types need execute and are not available in Phase 1. "
            "Reversible with tdflow_undo.",
            obj({"parent": PATH, "type": OPTYPE, "name": NAME,
@@ -195,13 +196,15 @@ def core_registry() -> Registry:
     T(Tool("tdflow_handoff_create", "Create handoff", "Hand a task over to the next agent or session. Each claim is "
            "checked by the server: changed/created/deleted/unchanged against your audited changes, exists/absent/"
            "value/input (value = source path wired into path) against the project now; it is tagged verified, "
-           "contradicted or unverified.",
+           "contradicted or unverified. Optional status (in_progress, blocked, done) updates the task's status.",
            obj({"task_id": TASK, "summary": {"type": "string", "minLength": 1, "maxLength": 4000},
+                "status": {"type": "string", "enum": ["in_progress", "blocked", "done"]},
                 "claims": {"type": "array", "maxItems": 50, "items": CLAIM}, "scopes": SCOPES,
                 "based_on_rev": REV}, ["task_id", "summary", "based_on_rev"]),
            ("read",), "memory", "handoff_create"))
     T(Tool("tdflow_handoff_resume", "Resume task", "Continue a task: its latest handoff and checkpoint (agent text "
-           "is untrusted), audited changes since, and whether the scopes were changed outside TDflowMCP.",
+           "is untrusted), audited changes since, and whether the scopes were changed outside TDflowMCP (with the "
+           "changed parameters, where the earlier record holds that detail).",
            obj({"task_id": TASK}, ["task_id"]), ("read",), "memory", "handoff_resume", read_only=True,
            idempotent=True))
     return r

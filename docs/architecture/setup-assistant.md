@@ -80,7 +80,7 @@ Each check yields `{id, result: pass|warn|fail|unknown, evidence, remediation_id
 
 ## 5. Guided troubleshooting
 
-`src/setup/troubleshooting.json` maps each check failure to: cause, how to confirm, step-by-step fix, and links to TouchDesigner documentation. Allowed automatic actions are limited to TDflowMCP-internal, reversible ones: re-run checks, and propose a different `Port` for the user to confirm. The listener is **never restarted automatically**, least of all after a failed bind verification; only the user's own `Opensetup` pulse may try again. TDflowMCP **never** installs or upgrades packages, changes TouchDesigner preferences or search paths, edits firewall/OS settings, writes coding-agent configuration of any kind, or kills processes. The only file writes are Skills files, and they require an explicit, paired, previewed confirmation ([agent integration §3](agent-integration.md#3-client-aware-installation-consent-first)).
+`src/setup/troubleshooting.json` maps each check failure to: cause, how to confirm, step-by-step fix, and links to TouchDesigner documentation. Allowed automatic actions are limited to TDflowMCP-internal, reversible ones: re-run checks, and propose a different `Port` for the user to confirm. The listener is **never restarted automatically**, least of all after a failed bind verification; only the user's own `Opensetup` pulse may try again. TDflowMCP **never** installs or upgrades packages, changes TouchDesigner preferences or search paths, edits firewall/OS settings, writes coding-agent configuration of any kind, or kills processes. The only file writes are Skills files and, after the user migrated project memory to a folder of the project, its record files. Both require an explicit, paired, previewed confirmation ([agent integration §3](agent-integration.md#3-client-aware-installation-consent-first), [continuity §8](continuity-and-memory.md#8-phase-2a-increment-3-repository-mode-2026-11-23)).
 
 ## 6. "Tell Your Coding Agent"
 
@@ -109,5 +109,12 @@ Only allowlisted fields are included. Never included: tokens, environment-derive
   - `POST /setup/api/tokens/revoke` and `POST /setup/api/logout`.
   - Enabling MCP stays a TouchDesigner parameter (`Enablemcp`); it is not a web action.
 - 1C: client selection, connection instructions, Skills preview/install/update.
+- 2A increment 3 (**implemented**; paired admin session):
+  - **Project memory:** `GET /setup/api/memory` (where memory lives, record and task counts, the ledger state, the link state; an admin read that also needs the CSRF token), `POST /setup/api/memory/plan` (a preview with a digest; writes nothing) and `POST /setup/api/memory/migrate` (runs only for that exact digest). Three moves: `repo`, `embedded`, and `relink` for repository mode whose folder link was lost. The page shows the plan, including the other files written, and a Confirm button, as for Skills. The memory status refreshes about every 10 s.
+  - **Token form:** a checkbox issues the capability `memory:repo:write` (builder role only, and refused when the token's actions exclude `update`); the agent list shows it.
+
+**Paused state (S9, 2026-11-23).** While TouchDesigner runs no frames (a minimized window), `GET /setup/api/status` answers `503 TDFLOW_NOT_COOKING` at once; the page then says that TouchDesigner is not running frames and asks the user to restore the window. The static page itself is still served.
+
+`Claimprojectmemory` in repository mode reads the record files on a background thread and refuses a folder whose `tdflow-project.json` names another `Projectid`. The `tdflowProject` component (not the TDflowMCP component) carries the read-only `Memoryauthority` and `Repopath` parameters; only a migration changes them.
 
 It is deliberately separate from the Phase 2B Governance Dashboard (`/ui/`), sharing only the gate, admin session and static-file serving.

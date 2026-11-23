@@ -440,8 +440,50 @@ def cp_restart_enabled(data, pid):
     T("restart.undo_across_restart_refused", u.get("code") == "UNDO_CONFLICT", undo=u)
 
 
+def cp_minimized(data, pid):
+    """Spike S9: a minimized TouchDesigner runs no frames. Calls must fail fast with a clear, retryable error,
+    nothing may execute, the listener must survive the 20 s orphan watchdog, and everything must work again
+    after the restore without re-enabling MCP. Only this harness's own TouchDesigner window is touched."""
+    import tdrun
+    td = tdrun.PROCS.get(pid)
+    B = MCP(TOKENS["B"])
+    T("minimized.works_before", td is not None and ok(B.call("tdflow_set_parameters", {
+        "path": "/project1/fx/level1", "values": {"opacity": 0.10}})))
+    if td is None:
+        return
+    td.keep_running = False                         # the tender thread must not restore the window now
+    try:
+        T("minimized.window_minimized", td.set_minimized(True))
+        time.sleep(2.8)                             # beyond not_cooking_after (2 s)
+        t0 = time.perf_counter()
+        r = B.call("tdflow_set_parameters", {"path": "/project1/fx/level1", "values": {"opacity": 0.11}})
+        ms = (time.perf_counter() - t0) * 1000
+        T("minimized.MUTATION_REFUSED_FAST_WITH_A_CLEAR_REASON", r.get("_isError") is True
+          and r.get("code") == "TDFLOW_NOT_COOKING" and "minimized" in r.get("message", "") and ms < 3000,
+          result=r, ms=round(ms))
+        rd = B.call("tdflow_get_operator", {"path": "/project1/fx/level1"})
+        T("minimized.read_refused_the_same_way", rd.get("_isError") is True and rd.get("code") == "TDFLOW_NOT_COOKING", result=rd)
+        st, j, _ = B.rpc("tools/list")
+        T("minimized.tools_list_still_answers", st == 200 and len(((j or {}).get("result") or {}).get("tools", [])) >= 16, status=st)
+        s = http("GET", "/setup/api/status", {"X-TDflow-Request": "1"})
+        T("minimized.status_api_says_not_cooking", s["status"] == 503 and base.code(s) == "TDFLOW_NOT_COOKING", status=s["status"])
+        T("minimized.static_setup_page_still_served", http("GET", "/setup/")["status"] == 200)
+        time.sleep(23.0)                            # beyond the 20 s orphan watchdog
+        T("minimized.LISTENER_SURVIVES_THE_ORPHAN_WATCHDOG", bool(oslisteners.other_listeners(9480, 0)))
+        late = B.call("tdflow_get_operator", {"path": "/project1/fx/level1"})
+        T("minimized.still_a_clear_refusal_after_25_s", late.get("code") == "TDFLOW_NOT_COOKING", result=late)
+    finally:
+        restored = td.set_minimized(False)
+        td.keep_running = True
+    T("minimized.window_restored", restored)
+    time.sleep(1.5)
+    r = B.call("tdflow_set_parameters", {"path": "/project1/fx/level1", "values": {"opacity": 0.12}})
+    T("minimized.WORKS_AGAIN_AFTER_RESTORE_WITHOUT_REENABLING", ok(r)
+      and abs((r.get("previous") or {}).get("opacity", -1) - 0.10) < 1e-6, result=r)   # 0.11 never landed
+
+
 HANDLERS = {"setup_ready": cp_setup_ready, "pair_approved": cp_pair_approved, "enabled": cp_enabled,
-            "human_edited": cp_human_edited, "suspended": cp_suspended, "resumed": cp_resumed,
+            "human_edited": cp_human_edited, "suspended": cp_suspended, "resumed": cp_resumed, "minimized": cp_minimized,
             "queue_block": cp_queue_block, "queue_checked": cp_queue_checked, "audit_down": cp_audit_down,
             "audit_up": cp_audit_up, "scan": cp_scan, "revoked": cp_revoked, "disabled": cp_disabled,
             "restart_enabled": cp_restart_enabled}

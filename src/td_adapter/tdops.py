@@ -13,9 +13,11 @@ Implements ``tdflowmcp.engine.Adapter``:
 """
 import hashlib
 import json
+import os
 
 import td
 
+from tdflowmcp import layout as LAYOUT
 from tdflowmcp import memory as MEM
 from tdflowmcp.engine import Adapter, Resolution, ToolFailure
 from tdflowmcp.policy import EXECUTABLE_TYPES, Target
@@ -28,6 +30,17 @@ REFERENCE_STYLES = {"OP", "COMP", "OBJ", "Object", "PanelCOMP", "TOP", "CHOP", "
 MAX_TEXT = 200000
 MAX_WALK = 1000                    # operators visited per memory fingerprint (main-thread bound; review 10)
 MAX_LIST = 200
+README_EMBEDDED = ("Project memory for this TouchDesigner project (TDflowMCP, embedded authority).\n"
+                   "Agents add task checkpoints and handoffs here through TDflowMCP's memory tools only.\n"
+                   "Each record is one Text DAT; its hash is in the TDflowMCP audit log. If you edit, delete or\n"
+                   "copy records, TDflowMCP makes memory read-only until you pulse Claim Project Memory.\n"
+                   "Save the project to keep new records.\n")
+README_REPO = ("Project memory for this TouchDesigner project (TDflowMCP, repository authority).\n"
+               "The records are files in the linked folder (Repository Folder parameter), under tdflow/memory/.\n"
+               "This component holds only the link, the Project ID and 'derived_index', a DERIVED cache with\n"
+               "counts. Nothing here is authoritative. If the files are edited, removed or replaced (for example\n"
+               "by a Git checkout or pull), TDflowMCP makes memory read-only until you pulse Claim Project Memory.\n"
+               "To move memory back into this component, use Project memory on the TDflowMCP Setup page.\n")
 
 
 def _norm(text):
@@ -389,15 +402,34 @@ class TDAdapter(Adapter):
         parent, cls, path = res.context["parent"], res.context["cls"], res.context["path"]
         if parent.op(args["name"]) is not None:
             raise ToolFailure("INVALID_ARGS", "the operator already exists")
+        # Dogfood finding (2A): without a position the node used to land at 0,0 on top of the network. Now it
+        # goes to the right of the rightmost node (bounded read of the siblings' boxes; nothing is cooked).
+        auto = None
+        if "x" not in args and "y" not in args:
+            boxes, kids = [], list(parent.children[:500])
+            # Only siblings the caller can read: the answer returns the position, which must not reveal where
+            # a hidden or protected node (the TDflowMCP component, for example) sits (review 11).
+            vis = {t.path for t in readable([self._facts(c, "read") for c in kids])}
+            for c in kids:
+                if c.path not in vis:
+                    continue
+                try:
+                    boxes.append((int(c.nodeX), int(c.nodeY), int(c.nodeWidth), int(c.nodeHeight)))
+                except Exception:
+                    pass
+            auto = LAYOUT.default_position(boxes)
+
         def do():
             n = parent.create(cls, args["name"])
+            if auto is not None:
+                n.nodeX, n.nodeY = auto
             if "x" in args:
                 n.nodeX = int(args["x"])
             if "y" in args:
                 n.nodeY = int(args["y"])
             return n
         n, stack = self._mutate(label, do)
-        return {"path": n.path, "type": n.OPType, "family": n.family,
+        return {"path": n.path, "type": n.OPType, "family": n.family, "x": _pos(n, "nodeX"), "y": _pos(n, "nodeY"),
                 "_audit": {"kind": "create", "path": n.path, "type": n.OPType, "stack": stack,
                            "reversible": "td_undo" if stack else "no"}}
 
@@ -526,27 +558,59 @@ class TDAdapter(Adapter):
         if pid is None or not MEM.MEMORY_ID.match(str(pid.eval())):
             return "uninitialized", ("The tdflowProject component has no valid Projectid. Ask the user to create "
                                      "project memory with Create Project Memory."), c
-        auth = getattr(c.par, "Memoryauthority", None)
-        if auth is not None and str(auth.eval()) == "repo":
-            return "repo", "Repository-mode project memory is not available in this version.", c
+        if self._authority(c) == "repo" and not self._repopath(c):
+            return "uninitialized", ("Project memory is in repository mode but no folder is linked. Ask the user to "
+                                     "link one on the TDflowMCP Setup page (Project memory)."), c
         return "ready", "", c
+
+    @staticmethod
+    def _authority(c):
+        auth = getattr(c.par, "Memoryauthority", None)
+        return "repo" if auth is not None and str(auth.eval()) == "repo" else "embedded"
+
+    @staticmethod
+    def _repopath(c):
+        rp = getattr(c.par, "Repopath", None)
+        return str(rp.eval()).strip() if rp is not None else ""
 
     @staticmethod
     def _record_dats(c):
         return [(d.name, d.text) for d in c.children if d.OPType == "textDAT" and MEM.RECORD_NAME.match(d.name)]
 
     def memory_entries(self):
-        """Main thread: (status, comp_path, memory_id, entries) for the Setup page and Tell Your Coding Agent."""
+        """Main thread: (status, comp_path, memory_id, entries) for the Setup page and Tell Your Coding Agent.
+        In repository mode the entries are empty here (the records are files; see ``memory_info``)."""
         status, _, c = self.memory_component()
         if status != "ready":
             return status, (c.path if c is not None else None), None, []
+        if self._authority(c) == "repo":
+            return status, c.path, str(c.par.Projectid.eval()), []
         return status, c.path, str(c.par.Projectid.eval()), MEM.read_records(self._record_dats(c), self._mem_cache)
 
+    def memory_info(self, with_dats=True):
+        """Main thread, no disk I/O: where project memory lives. Plain data for other threads."""
+        status, reason, c = self.memory_component()
+        out = {"status": status, "reason": reason, "comp": c.path if c is not None else None, "memory_id": None,
+               "authority": "embedded", "repopath": "", "project_folder": str(td.project.folder or ""), "dats": [],
+               "derived": "",
+               # A never-saved project still reports a folder; "saved" means this file exists (checked off the
+               # main thread by the caller; review 11).
+               "project_file": os.path.join(str(td.project.folder or ""), str(td.project.name or ""))}
+        if c is None or status not in ("ready", "uninitialized"):
+            return out
+        pid = getattr(c.par, "Projectid", None)
+        out.update(memory_id=str(pid.eval()) if pid is not None else None, authority=self._authority(c),
+                   repopath=self._repopath(c), dats=self._record_dats(c) if with_dats else [])
+        d = c.op(MEM.DERIVED_NAME)
+        out["derived"] = d.text if d is not None and d.isDAT else ""
+        return out
+
     @staticmethod
-    def _op_digest(o):
+    def _op_digest(o, detail=False):
         """Type, parameters (constant values, expression/bind text), inputs, flags and authored DAT text.
-        Nothing is evaluated (no cooking); node position is not included."""
-        parts = [o.OPType]
+        Nothing is evaluated (no cooking); node position is not included. ``detail``: also a short digest per
+        parameter that is not at its default (increment 3: resume can say which parameter changed)."""
+        parts, away = [o.OPType], {}
         try:
             pars = sorted(o.pars(), key=lambda p: p.name)
         except Exception:
@@ -567,6 +631,13 @@ class TDAdapter(Adapter):
             except Exception:
                 v = "?"
             parts.append(p.name + "=" + v)
+            if detail:
+                try:
+                    default = v.startswith("c:") and p.val == p.default
+                except Exception:
+                    default = False
+                if not default:
+                    away[p.name] = hashlib.sha256(v.encode("utf-8")).hexdigest()[:6]
         try:
             ins = [x.path for x in o.inputs if x is not None]
         except Exception:
@@ -579,18 +650,27 @@ class TDAdapter(Adapter):
                 pass
         if o.OPType in ("textDAT", "tableDAT") and not ins:        # authored text only (cooked DATs change alone)
             parts.append("t=" + _sha(o.text))
-        return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()[:16]
+        digest = hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()[:16]
+        return [digest, away] if detail else digest
 
     def memory_snapshot(self, task_id, scopes, claims, fingerprint, readable):
         self._fresh()
         out = {"status": "", "reason": "", "comp": None, "memory_id": None, "dats": [], "scopes": None,
                "scope_targets": [], "fingerprint": None, "fp_paths": [], "fp_total": 0, "live": {},
-               "protected": dict(self.protected), "td_build": str(td.app.build)}
+               "protected": dict(self.protected), "td_build": str(td.app.build), "authority": "embedded",
+               "repopath": "", "project_folder": str(td.project.folder or ""), "needs_scopes": False}
         status, reason, c = self.memory_component()
         out.update(status=status, reason=reason)
         if status != "ready":
             return out
-        out.update(comp=c.path, memory_id=str(c.par.Projectid.eval()), dats=self._record_dats(c))
+        repo = self._authority(c) == "repo"
+        out.update(comp=c.path, memory_id=str(c.par.Projectid.eval()), authority="repo" if repo else "embedded",
+                   repopath=self._repopath(c), dats=[] if repo else self._record_dats(c))
+        if scopes is None and task_id and repo:
+            # The task's recorded scopes are in the record files, which are never read on the main thread: the
+            # engine reads them on its handler thread and asks again with the scopes.
+            out["needs_scopes"] = bool(fingerprint)
+            return out
         if scopes is None and task_id:
             last = MEM.latest(MEM.task_records(MEM.read_records(out["dats"], self._mem_cache), task_id))
             scopes = list(last["body"].get("scopes") or []) if last else None
@@ -650,12 +730,137 @@ class TDAdapter(Adapter):
         for p in list(paths)[:MEM.MAX_FP_OPS]:
             o = td.op(p)
             if o is not None and o.path == p:
-                out[p] = self._op_digest(o)
+                out[p] = self._op_digest(o, True)          # [digest, {parameter: digest}]
         return out
+
+    # -- repository mode (increment 3): the component holds only the pointer and a derived index --
+    def memory_check(self, comp, memory_id, authority, repopath):
+        status, _, c = self.memory_component()
+        if (status != "ready" or c.path != comp or str(c.par.Projectid.eval()) != memory_id
+                or self._authority(c) != authority or self._repopath(c) != repopath):
+            raise ToolFailure("MEMORY_CONFLICT", "project memory changed since the request was checked; nothing "
+                              "was recorded. Retry.")
+        return {"ok": True}
+
+    def memory_derived(self, comp, memory_id, text):
+        status, _, c = self.memory_component()
+        if status != "ready" or c.path != comp or str(c.par.Projectid.eval()) != memory_id or self._authority(c) != "repo":
+            return {"written": False}
+        d = c.op(MEM.DERIVED_NAME)
+        if d is None:
+            d = c.create(td.textDAT, MEM.DERIVED_NAME)
+            d.nodeX, d.nodeY = 200, 0
+        if d.text != text:
+            d.text = text
+        self.memory_changed = True
+        return {"written": True}
+
+    @staticmethod
+    def _set_ro(par, value):
+        par.readOnly = False
+        par.val = value
+        par.readOnly = True
+
+    def _memory_pars(self, c):
+        """The Project page's parameters, added to components created before repository mode existed."""
+        auth = c.par.Memoryauthority
+        auth.menuLabels = ["Embedded (this component)", "Repository folder (linked on the Setup page)"]
+        if getattr(c.par, "Repopath", None) is None:
+            pg = next((p for p in c.customPages if p.name == "Project"), None) or c.appendCustomPage("Project")
+            rp = pg.appendStr("Repopath", label="Repository Folder")[0]
+            rp.val = ""
+            rp.readOnly = True
+        return auth, c.par.Repopath
+
+    def memory_to_repo(self, comp, memory_id, repopath, index_text, expect_digest, stamp):
+        """User-confirmed migration, last step (main thread): the folder already holds verified copies of
+        exactly these records. The component becomes a pointer: record DATs are removed, the derived index and
+        a migration note stay. Refused if the records changed since they were copied."""
+        status, _, c = self.memory_component()
+        if status != "ready" or c.path != comp or str(c.par.Projectid.eval()) != memory_id or self._authority(c) != "embedded":
+            raise ValueError("project memory changed during the migration; nothing was switched")
+        if MEM.dats_digest(self._record_dats(c)) != expect_digest:
+            raise ValueError("a record changed during the migration; nothing was switched")
+        # Nothing was changed up to here (a ValueError above means "refused, nothing changed"). From here on the
+        # link is set first and the record DATs go last: if anything fails in between, the component already
+        # points at the verified files and merely keeps stale copies, which repository mode never reads.
+        auth, rp = self._memory_pars(c)
+        self._set_ro(rp, repopath)
+        self._set_ro(auth, "repo")
+        self._note(c, MEM.DERIVED_NAME, index_text, 200, 0)
+        self._note(c, "MIGRATIONS", ((c.op("MIGRATIONS").text.rstrip("\n") + "\n") if c.op("MIGRATIONS") else "") + stamp + "\n",
+                   400, 0)
+        self._note(c, "README", README_REPO, 0, 0)
+        for d in [x for x in c.children if x.OPType == "textDAT" and MEM.RECORD_NAME.match(x.name)]:
+            d.destroy()
+        self._mem_cache.clear()
+        self.memory_changed = True
+        return {"switched": True, "authority": "repo"}
+
+    def memory_relink(self, comp, memory_id, repopath, index_text, stamp):
+        """User-confirmed re-link (main thread): a component already in repository mode points at ``repopath``
+        again (the .toe was not saved after a migration, the project was saved elsewhere, or the folder's
+        project file was lost). Only the link and the derived index change; the records stay subject to the
+        audit ledger."""
+        comps = self._memory_comps()
+        c = comps[0] if len(comps) == 1 else None
+        pid = getattr(c.par, "Projectid", None) if c is not None else None
+        if c is None or c.path != comp or pid is None or str(pid.eval()) != memory_id or self._authority(c) != "repo":
+            raise ValueError("project memory changed during the request; nothing was re-linked")
+        auth, rp = self._memory_pars(c)
+        self._set_ro(rp, repopath)
+        self._note(c, MEM.DERIVED_NAME, index_text, 200, 0)
+        self._note(c, "MIGRATIONS", ((c.op("MIGRATIONS").text.rstrip("\n") + "\n") if c.op("MIGRATIONS") else "") + stamp + "\n",
+                   400, 0)
+        self._note(c, "README", README_REPO, 0, 0)
+        self._mem_cache.clear()
+        self.memory_changed = True
+        return {"relinked": True, "authority": "repo"}
+
+    def memory_to_embedded(self, comp, memory_id, records, stamp):
+        """User-confirmed migration back (main thread): the component's record DATs become exactly ``records``
+        ((name, text) read and link-checked from the folder)."""
+        status, _, c = self.memory_component()
+        if status != "ready" or c.path != comp or str(c.par.Projectid.eval()) != memory_id or self._authority(c) != "repo":
+            raise ValueError("project memory changed during the migration; nothing was switched")
+        want = dict(records)
+        for d in [x for x in c.children if x.OPType == "textDAT" and MEM.RECORD_NAME.match(x.name)]:
+            if d.name not in want or MEM.text_sha(d.text) != MEM.text_sha(want[d.name]):
+                d.destroy()
+        for i, (name, text) in enumerate(sorted(want.items())):
+            if c.op(name) is None:
+                d = c.create(td.textDAT, name)
+                d.nodeX, d.nodeY = (i % 8) * 160, -160 - (i // 8) * 130
+                d.text = text
+        if MEM.dats_digest(self._record_dats(c)) != MEM.dats_digest(list(want.items())):
+            # Not a ValueError: record DATs were already changed, so this is not "refused, nothing changed".
+            raise RuntimeError("the component did not accept the records; the authority was not switched")
+        auth, rp = self._memory_pars(c)
+        self._set_ro(auth, "embedded")
+        self._set_ro(rp, "")
+        idx = c.op(MEM.DERIVED_NAME)
+        if idx is not None:
+            idx.destroy()
+        self._note(c, "MIGRATIONS", ((c.op("MIGRATIONS").text.rstrip("\n") + "\n") if c.op("MIGRATIONS") else "") + stamp + "\n",
+                   400, 0)
+        self._note(c, "README", README_EMBEDDED, 0, 0)
+        self._mem_cache.clear()
+        self.memory_changed = True
+        return {"switched": True, "authority": "embedded", "records": len(want)}
+
+    @staticmethod
+    def _note(c, name, text, x, y):
+        d = c.op(name)
+        if d is None:
+            d = c.create(td.textDAT, name)
+            d.nodeX, d.nodeY = x, y
+        d.text = text
+        return d
 
     def memory_write(self, comp, memory_id, name, text, expect_digest):
         status, _, c = self.memory_component()
-        if status != "ready" or c.path != comp or str(c.par.Projectid.eval()) != memory_id:
+        if (status != "ready" or c.path != comp or str(c.par.Projectid.eval()) != memory_id
+                or self._authority(c) != "embedded"):
             raise ToolFailure("MEMORY_CONFLICT", "project memory changed since the request was checked; nothing "
                               "was recorded. Retry.")
         if MEM.dats_digest(self._record_dats(c)) != expect_digest or c.op(name) is not None:
@@ -690,15 +895,14 @@ class TDAdapter(Adapter):
         pid.readOnly = True
         auth = pg.appendMenu("Memoryauthority", label="Memory Authority")[0]
         auth.menuNames = ["embedded", "repo"]
-        auth.menuLabels = ["Embedded (this component)", "Repository (not available yet)"]
+        auth.menuLabels = ["Embedded (this component)", "Repository folder (linked on the Setup page)"]
         auth.val = "embedded"
         auth.readOnly = True
+        rp = pg.appendStr("Repopath", label="Repository Folder")[0]
+        rp.val = ""
+        rp.readOnly = True
         readme = c.create(td.textDAT, "README")
-        readme.text = ("Project memory for this TouchDesigner project (TDflowMCP, embedded authority).\n"
-                       "Agents add task checkpoints and handoffs here through TDflowMCP's memory tools only.\n"
-                       "Each record is one Text DAT; its hash is in the TDflowMCP audit log. If you edit, delete or\n"
-                       "copy records, TDflowMCP makes memory read-only until you pulse Claim Project Memory.\n"
-                       "Save the project to keep new records.\n")
+        readme.text = README_EMBEDDED
         readme.nodeX, readme.nodeY = 0, 0
         if near is not None:
             c.nodeX, c.nodeY = near.nodeX, near.nodeY - 200

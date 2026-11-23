@@ -6,13 +6,13 @@
 
 | Tool | Actions | Annotations | Purpose |
 |---|---|---|---|
-| `tdflow_whoami` | none | readOnly | Agent identity, role, effective scopes, `server_version`, `tool_surface_version`, `expected_skill_version` (`1.0` since 1C; the bundled Skills compare it), limits |
+| `tdflow_whoami` | none | readOnly | Agent identity, role, effective scopes, `server_version`, `tool_surface_version`, `expected_skill_version` (`1.0` since 1C, `1.2` since 2A increment 3; the bundled Skills compare it), limits, `memory.repository_write` (increment 3) |
 | `tdflow_project_info` | none (fixed summary) | readOnly | TD build, project name, top-level COMP names under the host root **filtered to those the agent can read**, FPS, cook state |
 | `tdflow_list_operators` | read `path/*` | readOnly | Children with type, family, readable `inputs` and node position `x`/`y` (dogfood 1), paginated; protected subtrees filtered |
 | `tdflow_get_operator` | read `path` | readOnly | Type, flags, inputs/outputs, errors/warnings, `x`/`y`, `cook_count` (errors exist only after a cook) |
 | `tdflow_get_parameters` | read `path` | readOnly | Values, modes, expressions, defaults; optional `page` and `names` (≤ 50) filters; paginated. **Note (review 8):** values are read with `eval()`, so expression and bind parameters are evaluated (the user's own expressions; agents cannot set them). That may cook upstream operators, which is a hypothesis to verify; an `evaluate: false` option is a candidate |
 | `tdflow_set_parameters` | update `path`; **+ execute** for `expressions` and Python-style parameters (denied in Phase 1) | idempotent | Set constant values; returns previous values. Parameter denylist (extensions, callbacks, external tox, scripts…). Pulses not supported |
-| `tdflow_create_operator` | create `parent/*`; **+ execute** for executable/network op types | | Create by type and name; optional position |
+| `tdflow_create_operator` | create `parent/*`; **+ execute** for executable/network op types | | Create by type and name; optional position. Without `x` and `y` the operator is placed to the right of the rightmost node (2A increment 3); the answer returns `x` and `y` |
 | `tdflow_delete_operator` | delete `path/**` | destructive | Delete. Global rules may require approval, which means deny in Phase 1 |
 | `tdflow_connect` | update `dst`, read `src` | | Wire operators by connector index |
 | `tdflow_disconnect` | update `dst`, read `src` | | Remove a wire |
@@ -29,13 +29,15 @@
 |---|---|---|---|
 | `tdflow_session_note` | 1B | none (own session) | Append an agent note to the current session log |
 | `tdflow_session_list` | 1B | none (own sessions) | The agent's recent sessions; admins see all in the dashboard |
-| `tdflow_task_list` | **2A, implemented** | read; tasks whose scopes you can read | Tasks in the `tdflowProject` (latest revision, record type, status, author) and whether memory is writable (`memory.state`: `ok` / `needs_claim` with the reasons) |
+| `tdflow_task_list` | **2A, implemented** | read; tasks whose scopes you can read | Tasks in the `tdflowProject` (latest revision, record type, status, author, and `ledger`: only `accepted` rows are known to the audit log) and whether memory is writable (`memory.state`: `ok` / `needs_claim` with the reasons) |
 | `tdflow_task_checkpoint` | **2A, implemented** | role with update + read on `scopes` | `task_id`, `title`, `status` (`in_progress`/`blocked`/`done`), `summary`, `next_steps`, `scopes` (1–10 paths), `based_on_rev`. The server attaches the audited changes since the task's previous record and a fingerprint of the scopes |
-| `tdflow_handoff_create` | **2A, implemented** | role with update + read on `scopes` | `task_id`, `summary`, `claims` (≤ 50: `changed`/`created`/`deleted`/`unchanged`/`exists`/`absent`/`value`/`note`), optional `scopes` (default: the task's), `based_on_rev`. Each claim comes back `verified`, `contradicted` or `unverified`, with evidence |
-| `tdflow_handoff_resume` | **2A, implemented** | read; the task's scopes | Latest handoff and checkpoint (author-labelled, untrusted text), audited changes since, fingerprint comparison (`changed_outside_tdflowmcp`, `unexplained`), the revision to continue from |
+| `tdflow_handoff_create` | **2A, implemented** | role with update + read on `scopes` | `task_id`, `summary`, `claims` (≤ 50: `changed`/`created`/`deleted`/`unchanged`/`exists`/`absent`/`value`/`input`/`note`), optional `scopes` (default: the task's), optional `status` (increment 3: updates the task's agent-reported status), `based_on_rev`. Each claim comes back `verified`, `contradicted` or `unverified`, with evidence |
+| `tdflow_handoff_resume` | **2A, implemented** | read; the task's scopes | Latest handoff and checkpoint (author-labelled, untrusted text), audited changes since, fingerprint comparison (`changed_outside_tdflowmcp`, `unexplained`), the revision to continue from. Increment 3: `fingerprint.parameter_changes` names the parameters that differ per changed operator (`known: false` when the earlier record holds no detail; `other_change` for wiring, flags or DAT text). When the task's latest record is not `accepted` by the audit log, nothing is compared (`fingerprint.comparison: "unavailable"`) |
 | `tdflow_memory_get` / `tdflow_memory_list` / `tdflow_memory_put` | 2A, later increment | (proposed) | Project ICM, decisions and tasks as records with `based_on_rev` |
 
-Errors added in 2A: `MEMORY_UNAVAILABLE` (no, an uninitialised, or more than one `tdflowProject`; M2), `MEMORY_MODE_UNSUPPORTED` (repo mode), `MEMORY_READ_ONLY` (records do not match the audit ledger; the user must Claim Project Memory; M5), `MEMORY_CONFLICT` (stale `based_on_rev`, or a write between plan and execute), `MEMORY_NOT_FOUND`, `MEMORY_FULL`. Memory writes are not undoable (records are append-only). The four tools are additive, so `tool_surface_version` stays `1` (Skill 1.1 describes them).
+**Repository mode (2A increment 3).** The four memory tools work unchanged when the user moved project memory to a folder of the project; answers carry `memory.authority` (`embedded` or `repo`) and, for `repo`, `memory.folder` (relative, never an absolute path). Writing then needs the capability `memory:repo:write` (`DENIED`, rule `M8` without it); `tdflow_whoami` reports `memory.repository_write`. New error: `MEMORY_LINK_MISMATCH` (the linked folder belongs to another project; rule `M7`). An unlinked, missing or stale folder answers `MEMORY_UNAVAILABLE` (rule `M7`) with the precise reason in the message. `MEMORY_MODE_UNSUPPORTED` is no longer returned.
+
+Errors added in 2A: `MEMORY_UNAVAILABLE` (no, an uninitialised, or more than one `tdflowProject`; M2), `MEMORY_READ_ONLY` (records do not match the audit ledger; the user must Claim Project Memory; M5), `MEMORY_CONFLICT` (stale `based_on_rev`, or a write between plan and execute), `MEMORY_NOT_FOUND`, `MEMORY_FULL`. Memory writes are not undoable (records are append-only). The four tools are additive, so `tool_surface_version` stays `1` (Skill 1.1 describes them).
 
 ## Later phases (candidates)
 
@@ -49,5 +51,6 @@ Errors added in 2A: `MEMORY_UNAVAILABLE` (no, an uninitialised, or more than one
 
 - Results return both human-readable `content` and machine-readable `structuredContent` with an `outputSchema`.
 - Errors are tool results with `isError: true` and a stable `code` (`DENIED`, `NOT_FOUND`, `INVALID_ARGS`, `BUDGET_EXCEEDED`, `APPROVAL_UNAVAILABLE`, `UNDO_CONFLICT`, `AUDIT_UNAVAILABLE`, `SUSPENDED`, `MCP_DISABLED`, `MEMORY_CONFLICT`, …). Protocol errors use JSON-RPC errors.
+- `TDFLOW_NOT_COOKING` (2026-11-23, [S9](../research/2026-11-23-s9-minimized-window.md)): TouchDesigner is not running frames, usually because its window is minimized. Any tool that needs TouchDesigner's main thread answers with it at once; nothing ran, and the call may be retried after the user restores the window. `tdflow_whoami`, `tdflow_session_note` and `tdflow_session_list` need no frames.
 - Every mutating result includes `audit_seq` and `undo_label`.
 - `tools/list` returns only the tools the calling agent has *some* grant for (progressive disclosure, fewer tokens). Policy is still enforced at call time.

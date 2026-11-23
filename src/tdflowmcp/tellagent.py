@@ -101,6 +101,9 @@ def build(state: str, error_code: str, port: int, td_build: str, checks: Sequenc
          "- MCP access is not enabled. The user turns it on with the component's Enable MCP toggle after creating "
          "an agent token on the Setup page. Do not write MCP or agent configuration for TDflowMCP yourself."),
         f"- Compatibility checks: {summary(checks) if checks else 'not run yet (pulse Run Diagnostics)'}.",
+        # Spike S9: TouchDesigner runs no frames while its window is minimized.
+        "- The TouchDesigner window must stay open (it may be behind other windows, but not minimized): "
+        "TouchDesigner pauses while minimized, and calls then fail with TDFLOW_NOT_COOKING until the user restores it.",
     ]
     if clients and state in ("Setup", "Enabled", "Suspended"):
         lines += connect_section(port, clients)

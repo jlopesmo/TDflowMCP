@@ -51,8 +51,8 @@ class TDflowMCPExt:
         self.manifest = ownerComp.op("loader").module.install_from_comp(ownerComp)
         from tdflowmcp import SKILL_VERSION, __version__, admin, auditworker, compat, controller, engine, identity, \
             policy, protocol, setupapi, skills, storage, store, tellagent, tools
-        from tdflowmcp import memory
-        from tdflowmcp.net import bindverify, evidence, oslisteners
+        from tdflowmcp import memory, memrepo
+        from tdflowmcp.net import bindverify, evidence, oslisteners, oswindow
         from tdflowmcp.net.pyhttp import EmbeddedHTTPTransport, MainStepError, Response, error
         from tdflowmcp_td import tdops
         self._m = types.SimpleNamespace(compat=compat, controller=controller, setupapi=setupapi, tellagent=tellagent,
@@ -61,7 +61,7 @@ class TDflowMCPExt:
                                         engine=engine, identity=identity, policy=policy, protocol=protocol,
                                         store=store, tools=tools, tdops=tdops, auditworker=auditworker,
                                         storage=storage, MainStepError=MainStepError, skills=skills,
-                                        memory=memory)
+                                        memory=memory, memrepo=memrepo, oswindow=oswindow)
         self.skill_version = SKILL_VERSION
         self.version = __version__
         old = _REGISTRY.instances.get(ownerComp.id)
@@ -136,8 +136,20 @@ class TDflowMCPExt:
 
     # ---- dependencies (main thread) ------------------------------------------------------------
     def _make_transport(self, port, state_fn):
+        # Spike S9: TouchDesigner runs no frames while its window is minimized. Requests that need the main
+        # thread are then refused at once (TDFLOW_NOT_COOKING), and the orphan watchdog keeps the listener
+        # while this process's own window is minimized (a TD-free OS query on the serve thread).
+        pid, cid = os.getpid(), self.ownerComp.id
+
+        def paused():
+            # Review 12: "paused" is only an excuse for a LIVE owner. An instance that was shut down or replaced
+            # (reinit) is an orphan whatever the window does, and closes after the heartbeat as before.
+            if self._shut or _REGISTRY.instances.get(cid) is not self:
+                return False
+            return self._m.oswindow.minimized(pid)
         t = self._m.Transport("127.0.0.1", port, state_fn=state_fn, authenticator=self._auth, mcp_enabled=False,
                               heartbeat_timeout=20.0, job_timeout=5.0, dispatch_grace=5.0,
+                              not_cooking_after=2.0, paused_fn=paused,
                               route_handlers={"mcp": self._route_mcp, "api": self._route_api})
         t.set_static(self._static_assets())
         t.suspended = self.suspended
@@ -451,12 +463,33 @@ class TDflowMCPExt:
         return self.tdops or self._m.tdops.TDAdapter(self.ownerComp, lambda: self._root_text, lambda: None)
 
     def _memory_lines(self):
-        """Phase 2A: resume lines from project memory (main thread, no disk I/O; validated fields only)."""
+        """Phase 2A: resume lines from project memory (main thread, no disk I/O; validated fields only). In
+        repository mode the counts come from the component's derived index, never from the files."""
+        M = self._m.memory
         try:
-            status, _, _, entries = self._memory_ops().memory_entries()
+            ops = self._memory_ops()
+            info = ops.memory_info(with_dats=False)
+            if info["status"] != "ready":
+                return []
+            if info["authority"] == "repo":
+                return M.tell_counts(*M.derived_counts(info["derived"]))
+            status, _, _, entries = ops.memory_entries()
         except Exception:
             return []
-        return self._m.memory.tell_section(self._m.memory.tasks(entries)) if status == "ready" else []
+        return M.tell_section(M.tasks(entries)) if status == "ready" else []
+
+    def _bg(self, fn):
+        """Run TD-free file I/O on a short-lived thread; the Future is polled in OnFrame (``_after``). The main
+        thread never waits for the disk."""
+        f = self._m.auditworker.Future()
+
+        def run():
+            try:
+                f.set(fn())
+            except Exception as e:
+                f.fail(e)
+        threading.Thread(target=run, name="tdflowmcp-io", daemon=True).start()
+        return f
 
     def _refresh_tell(self):
         ctl = self.ctl
@@ -564,17 +597,45 @@ class TDflowMCPExt:
         if w is None or not w.available:
             self._set_note("Pulse Open Setup first: claiming project memory is recorded in the audit log.", 20)
             return
+        M, R = self._m.memory, self._m.memrepo
+        info = self._memory_ops().memory_info(with_dats=False)
+        if info["status"] == "ready" and info["authority"] == "repo":
+            # Repository mode: the records are files. They are read on a background thread; the folder must be
+            # linked to this project's memory (a Projectid mismatch is never claimable).
+            path, mid = info["comp"], info["memory_id"]
+
+            def read():
+                repo = R.resolve(info["project_folder"], info["repopath"])
+                R.check_link(repo, mid)
+                ents = M.read_records(R.read_records(repo))
+                return M.claim_records(ents), M.derived_index(ents)
+
+            def got(res):
+                recs, idx = res[0]
+                self._record_claim(w, mid, path, recs, "repo")
+                try:
+                    self._memory_ops().memory_derived(path, mid, idx)
+                except Exception:
+                    pass
+            self._after([self._bg(read)], got,
+                        lambda code: self._set_note(f"Project memory was not claimed ({code}). Check the linked "
+                                                    "folder on the Setup page.", 30), timeout=10.0)
+            self._set_note("Reading the project-memory folder…", 10)
+            return
         status, path, mid, entries = self._memory_ops().memory_entries()
         if status != "ready":
             self._set_note("No usable project memory to claim (" + status + ").", 20)
             return
         try:
-            recs = self._m.memory.claim_records(entries)
-        except self._m.memory.MemoryError as e:
+            recs = M.claim_records(entries)
+        except M.MemoryError as e:
             self._set_note(e.message[:200], 30)
             return
+        self._record_claim(w, mid, path, recs, "embedded")
+
+    def _record_claim(self, w, mid, path, recs, authority):
         f = w.submit("append", "admin", tool="memory_claim", outcome="accepted",
-                     detail={"memory_id": mid, "component": path, "records": recs})
+                     detail={"memory_id": mid, "component": path, "records": recs, "authority": authority})
         self._after([f], lambda _: self._set_note(f"Project memory claimed: {len(recs)} record(s) accepted.", 30),
                     lambda code: self._set_note(f"The claim could not be recorded ({code}); memory stays read-only.", 30))
 
@@ -965,6 +1026,8 @@ class TDflowMCPExt:
         p, m = ctx.path, ctx.method
         if m == "GET" and p == "/setup/api/skills":
             return self._skills_api(p, m, {}, st)
+        if m == "GET" and p == "/setup/api/memory":
+            return self._memory_api(ctx, "status", {}, st)
         if m == "GET" and p == "/setup/api/agents":
             if st is None or idn is None or not st.available:
                 return E(503, "AUDIT_UNAVAILABLE")
@@ -994,6 +1057,8 @@ class TDflowMCPExt:
                      (self._m.admin.clear_cookie(self._m.admin.SESSION_COOKIE, "/"),))
         if p.startswith("/setup/api/skills/"):
             return self._skills_api(p, m, body, st)
+        if p in ("/setup/api/memory/plan", "/setup/api/memory/migrate"):
+            return self._memory_api(ctx, p.rsplit("/", 1)[-1], body, st)
         if st is None or idn is None or not st.available:
             return E(503, "AUDIT_UNAVAILABLE")
         with self._admin_lock:
@@ -1100,6 +1165,234 @@ class TDflowMCPExt:
                                      "outcome could not be recorded in the audit log.")), "application/json")
         return R(200, D(dict(res, ok=True)), "application/json")
 
+    # -- project memory: status and mode migration (paired admin session, handler thread) --
+    def _memory_api(self, ctx, op, body, st):
+        """GET status; POST plan (a preview with a digest, nothing written); POST migrate (the exact previewed
+        digest must be confirmed; audited before and after). File I/O runs here on the handler thread; each
+        TouchDesigner step runs on the main thread through ``ctx.call_main``. Three moves: ``repo`` (embedded →
+        folder), ``embedded`` (folder → component) and ``relink`` (repository mode whose link was lost)."""
+        R, E, D = self._m.Response, self._m.error, self._m.setupapi.dumps
+        M, RP, ME = self._m.memory, self._m.memrepo, self._m.MainStepError
+        AU = self._m.store.AuditUnavailable
+        J = "application/json"
+
+        def refuse(code, message, status=409):
+            return R(status, D({"code": code, "message": message}), J)
+        if st is None or not st.available:
+            return E(503, "AUDIT_UNAVAILABLE")
+        try:
+            info = ctx.call_main(lambda: self._memory_ops().memory_info())
+        except ME:
+            return E(503, "TD_BUSY")
+        # "Saved" means the .toe file exists (a never-saved project still reports a folder; review 11).
+        saved = os.path.isfile(info.get("project_file") or "")
+        pf = info["project_folder"] if saved else ""
+        mid, comp = info["memory_id"], info["comp"]
+        repo_mode = info["authority"] == "repo"
+        # Repository mode without a usable link is still a memory the user can re-link.
+        unlinked = info["status"] == "uninitialized" and repo_mode and bool(M.MEMORY_ID.match(str(mid or "")))
+        if info["status"] != "ready" and not unlinked:
+            if op == "status":
+                return R(200, D({"status": info["status"], "reason": info["reason"], "project_saved": saved}), J)
+            return refuse("MEMORY_UNAVAILABLE", info["reason"] or "There is no usable project memory.")
+
+        def state_of(dats):
+            entries = M.read_records(dats)
+            return entries, M.assess(entries, M.ledger(st.memory_events(), mid))
+
+        def stamp(src, dst, n, digest, folder):
+            return {"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "from": src, "to": dst,
+                    "memory_id": mid, "records": n, "records_digest": digest, "folder": folder,
+                    "tdflowmcp": self.version}
+
+        def failed(note, e):
+            """Disk work failed before the component was touched: the trail is closed with an error event."""
+            code = e.code if isinstance(e, RP.RepoError) else "WRITE_FAILED"
+            try:
+                st.append("admin", tool="memory_migrate", outcome="error", error_code=code, detail=note)
+            except AU:
+                pass
+
+        def switch(note, fn, undo_repo):
+            """The main-thread step. None on success, else the refusal (already audited)."""
+            try:
+                ctx.call_main(fn)
+            except Exception as e:
+                return self._migrate_failed(st, RP, undo_repo, mid, note, e, refuse)
+            return None
+
+        def done(note, repo):
+            try:
+                RP.log_migration(repo, note)              # informational copy in the folder
+            except (RP.RepoError, OSError):
+                note = dict(note, folder_log="not written")
+            try:
+                st.append("admin", tool="memory_migrate", outcome="ok", detail=note)
+            except AU:
+                return refuse("OUTCOME_UNRECORDED", "Project memory was moved, but the audit log could not record "
+                              "it. Check the audit store before agents continue.", 500)
+            return None
+        files_note = (" Anyone who can read these files (for example a coding agent with file access) can read "
+                      "every task record in them, whatever its TDflowMCP scopes.")
+        try:
+            if op == "status":
+                out = {"status": "ready", "component": comp, "memory_id": mid, "authority": info["authority"],
+                       "folder": RP.display(pf, info["repopath"]) if repo_mode else "", "project_saved": saved,
+                       "where": RP.WHERE}
+                try:
+                    dats = info["dats"]
+                    if repo_mode:
+                        repo = RP.resolve(pf, info["repopath"])
+                        RP.check_link(repo, mid)
+                        dats = RP.read_records(repo)
+                    entries, state = state_of(dats)
+                    out.update(records=len(entries), tasks=len(M.tasks(entries)), state=state["state"], link="ok")
+                    if state["state"] != "ok":
+                        out["read_only_reason"] = M.read_only_reason(state)
+                except RP.RepoError as e:
+                    out.update(link=e.code, link_message=e.message, state="unavailable")
+                return R(200, D(out), J)
+            to = str(body.get("to", ""))
+            confirm = str(body.get("digest", ""))
+            if to == "repo":
+                if repo_mode:
+                    return refuse("ALREADY_REPOSITORY", "Project memory is already in repository mode.")
+                rel = RP.to_repopath(pf, str(body.get("folder", ""))[:1024])
+                repo, shown = RP.resolve(pf, rel), RP.display(pf, rel)
+                entries, state = state_of(info["dats"])
+                if state["state"] != "ok":
+                    return refuse("MEMORY_NEEDS_CLAIM", M.read_only_reason(state))
+                plan = RP.plan_to_repo(repo, mid, info["dats"], shown)
+                plan["then"] = ("The component then holds only the link and a derived index: its record DATs are "
+                                "removed after the files were verified. Agents need the repository-memory "
+                                "permission on their token to add records. Files changed outside TDflowMCP (for "
+                                "example by Git) make memory read-only until Claim Project Memory." + files_note)
+                if plan.get("already_in_folder"):
+                    plan["then"] += (" Records already in the folder are left as they are; any that this project's "
+                                     "audit log does not know make memory read-only until Claim Project Memory.")
+                if op == "plan":
+                    return R(200, D(plan), J)
+                if plan["digest"] != confirm:
+                    return refuse("PREVIEW_CHANGED", "The folder or the records changed since the preview. Review "
+                                  "it again.")
+                if plan["conflicts"]:
+                    return refuse("CONFLICT", "The folder already holds different records: " +
+                                  ", ".join(plan["conflicts"][:5]))
+                with RP.LOCK:                             # no agent record can be written in between (review 11)
+                    note = stamp("embedded", "repo", plan["records"], plan["records_digest"], rel)
+                    st.append("admin", tool="memory_migrate", outcome="started", detail=note)
+                    try:
+                        RP.to_repo(repo, mid, info["dats"], plan["digest"])
+                        ents = M.read_records(RP.read_records(repo))
+                    except (RP.RepoError, OSError) as e:
+                        failed(note, e)
+                        raise
+                    line = json.dumps(note, sort_keys=True)
+                    bad = switch(note, lambda: self._memory_ops().memory_to_repo(
+                        comp, mid, rel, M.derived_index(ents), plan["records_digest"], line), repo)
+                    bad = bad or done(note, repo)
+                    if bad:
+                        return bad
+                return R(200, D({"ok": True, "authority": "repo", "records": len(ents), "folder": shown}), J)
+            if to == "embedded":
+                if not repo_mode:
+                    return refuse("ALREADY_EMBEDDED", "Project memory is already embedded in the component.")
+                repo, shown = RP.resolve(pf, info["repopath"]), RP.display(pf, info["repopath"])
+                plan = RP.plan_to_embedded(repo, mid, info["dats"], shown)      # includes the link check
+                files = sorted((n, t) for n, t in RP.read_records(repo) if M.RECORD_NAME.match(n))
+                entries, state = state_of(files)
+                if state["state"] != "ok":
+                    return refuse("MEMORY_NEEDS_CLAIM", M.read_only_reason(state))
+                plan["then"] = ("The component's record DATs become exactly these records and it is the authority "
+                                "again. The files stay in the folder, marked as a derived export that TDflowMCP no "
+                                "longer reads. Save the project to keep the records.")
+                if op == "plan":
+                    return R(200, D(plan), J)
+                with RP.LOCK:
+                    # Read once more inside the lock: these exact texts are ledger-checked and written.
+                    files = sorted((n, t) for n, t in RP.read_records(repo) if M.RECORD_NAME.match(n))
+                    entries, state = state_of(files)
+                    if plan["digest"] != confirm or M.dats_digest(files) != plan["records_digest"] or state["state"] != "ok":
+                        return refuse("PREVIEW_CHANGED", "The folder or the component changed since the preview. "
+                                      "Review it again.")
+                    note = stamp("repo", "embedded", len(files), plan["records_digest"], info["repopath"])
+                    st.append("admin", tool="memory_migrate", outcome="started", detail=note)
+                    line = json.dumps(note, sort_keys=True)
+                    bad = switch(note, lambda: self._memory_ops().memory_to_embedded(comp, mid, files, line), None)
+                    if bad:
+                        return bad
+                    try:
+                        RP.mark_derived(repo, mid, f"{len(files)} record(s)")
+                        note["folder_marked"] = True
+                    except (RP.RepoError, OSError):
+                        note["folder_marked"] = False    # the component is the authority now; recorded, not hidden
+                    bad = done(note, repo)
+                    if bad:
+                        return bad
+                return R(200, D({"ok": True, "authority": "embedded", "records": len(files)}), J)
+            if to == "relink":
+                if not repo_mode:
+                    return refuse("NOT_REPOSITORY", "Project memory is embedded in the component; there is no "
+                                  "folder link to repair.")
+                rel = RP.to_repopath(pf, str(body.get("folder") or info["repopath"] or "")[:1024])
+                repo, shown = RP.resolve(pf, rel), RP.display(pf, rel)
+                plan = RP.plan_relink(repo, mid, shown)
+                plan["then"] = ("The component points at this folder again and the folder is marked as this "
+                                "project's memory. No record is changed. Records this project's audit log does not "
+                                "know stay unusable until you pulse Claim Project Memory." + files_note)
+                if op == "plan":
+                    return R(200, D(plan), J)
+                if plan["digest"] != confirm:
+                    return refuse("PREVIEW_CHANGED", "The folder changed since the preview. Review it again.")
+                with RP.LOCK:
+                    note = dict(stamp("repo", "repo", plan["records"], plan["records_digest"], rel), relink=True)
+                    st.append("admin", tool="memory_migrate", outcome="started", detail=note)
+                    try:
+                        RP.relink(repo, mid, plan["digest"])
+                        ents = M.read_records(RP.read_records(repo))
+                    except (RP.RepoError, OSError) as e:
+                        failed(note, e)
+                        raise
+                    line = json.dumps(note, sort_keys=True)
+                    bad = switch(note, lambda: self._memory_ops().memory_relink(
+                        comp, mid, rel, M.derived_index(ents), line), None)
+                    bad = bad or done(note, repo)
+                    if bad:
+                        return bad
+                return R(200, D({"ok": True, "authority": "repo", "records": len(ents), "folder": shown}), J)
+            return refuse("INVALID_" + "ARGS", "Choose a target: repo, embedded or relink.", 400)
+        except RP.RepoError as e:
+            return refuse(e.code, e.message)
+        except AU:
+            return E(503, "AUDIT_UNAVAILABLE")
+        except OSError as e:
+            return refuse("WRITE_FAILED", type(e).__name__, 500)
+
+    def _migrate_failed(self, st, RP, repo, mid, note, err, refuse):
+        """The component step did not confirm. If it certainly did not run, a folder that was just filled must
+        not look like an authority. If it may have run, nothing more is changed and the user is told to check."""
+        ME = self._m.MainStepError
+        # A refusal (ValueError: raised before any change) or a step that never ran changed nothing. Anything
+        # else may have changed the component part-way, so it is reported as unknown.
+        unknown = (isinstance(err, ME) and err.ran is None) or not isinstance(err, (ME, ValueError))
+        note = dict(note)
+        if repo is not None and not unknown:
+            try:
+                RP.mark_derived(repo, mid, "a migration into this folder was not completed")
+                note["folder_marked"] = True
+            except (RP.RepoError, OSError):
+                note["folder_marked"] = False
+        try:
+            st.append("admin", tool="memory_migrate", outcome="unknown" if unknown else "error",
+                      error_code="OUTCOME_UNKNOWN" if unknown else "NOT_SWITCHED", detail=note)
+        except self._m.store.AuditUnavailable:
+            pass
+        if unknown:
+            return refuse("OUTCOME_UNKNOWN", "TouchDesigner did not confirm the switch in time. Check the Memory "
+                          "Authority parameter of the tdflowProject component, then reload this page.", 503)
+        msg = str(err) if isinstance(err, ValueError) else "TouchDesigner did not process the request."
+        return refuse("NOT_SWITCHED", msg[:200] + " Project memory was left as it was.")
+
     def _create_token(self, body, st, idn):
         R, E, D = self._m.Response, self._m.error, self._m.setupapi.dumps
         root = self._root_text
@@ -1116,11 +1409,18 @@ class TDflowMCPExt:
             acts = sorted(set(str(a) for a in actions) & set(self._m.policy.ROLES[role]))
             if not acts:
                 return E(400, "INVALID_" + "ARGS")            # validated before any credential exists
+        # Dedicated, owner-issued capabilities (ADR-0013, D18): never implied by a role or a scope.
+        caps = body.get("capabilities")
+        caps = sorted(set(str(c) for c in caps)) if isinstance(caps, list) else []
+        if caps and (not set(caps) <= self._m.policy.CAPABILITIES or "update" not in self._m.policy.ROLES[role]
+                     or (acts is not None and "update" not in acts)):
+            # Review 11: a token whose actions were narrowed to exclude update never gets a write capability.
+            return E(400, "CAPABILITY_NOT_ALLOWED")
         st.append("admin", tool="create_token", detail={"display_name": name, "role": role, "scope": scope,
-                                                         "actions": actions})          # durable before it exists
+                                                         "actions": actions, "capabilities": caps})  # durable first
         agent = None
         try:
-            agent, token = idn.create_agent(name, role, [scope])
+            agent, token = idn.create_agent(name, role, [scope], caps)
             if acts:
                 st.set_grant_actions(agent.id, ",".join(acts))
                 idn.reload()
@@ -1135,7 +1435,8 @@ class TDflowMCPExt:
                 return E(400, "INVALID_" + "ARGS")
             raise
         return R(200, D({"agent": {"id": agent.id, "display_name": agent.display_name, "role": agent.role,
-                                   "scopes": [{"scope": g.scope, "actions": sorted(g.actions)} for g in agent.grants]},
+                                   "scopes": [{"scope": g.scope, "actions": sorted(g.actions)} for g in agent.grants],
+                                   "capabilities": sorted(agent.capabilities)},
                          "token": token, "shown_once": True,
                          "env_hint": "Store it as the TDFLOW_TOKEN environment variable. It is shown only once."}),
                  "application/json")

@@ -64,6 +64,10 @@ PROTECTED_ROOTS = ("/sys", "/local", "/ui")
 ANCESTOR_FORBIDDEN_CHANGES = frozenset({"delete", "rename", "flags", "extension"})
 MAX_DELETE_WITHOUT_APPROVAL = 50
 MAX_OPS_PER_CALL = 50
+# Capabilities: dedicated, owner-issued permissions that are not operator scopes (ADR-0013, owner D18). An
+# agent has none unless the user ticks them when creating its token. Enforced server-side by the engine.
+CAP_MEMORY_REPO_WRITE = "memory:repo:write"   # write task records into the repository-backed memory folder
+CAPABILITIES = frozenset({CAP_MEMORY_REPO_WRITE})
 
 
 def _glob_regex(scope: str) -> "re.Pattern":
@@ -115,10 +119,13 @@ class Agent:
     role: str
     enabled: bool = True
     grants: Tuple[Grant, ...] = ()
+    capabilities: frozenset = frozenset()
 
     def __post_init__(self):
         if self.role not in ROLES:
             raise ValueError(f"unknown role {self.role!r}")
+        if not set(self.capabilities) <= CAPABILITIES:
+            raise ValueError("unknown capability")
 
 
 @dataclass(frozen=True)
@@ -159,6 +166,8 @@ class Policy:
             blob["agent"] = [agent.id, agent.role, agent.enabled,
                              [(g.scope, sorted(g.actions), g.effect, sorted(g.allowed_op_types or []),
                                list(g.param_denylist)) for g in agent.grants]]
+            if agent.capabilities:                 # absent when empty, so existing policy versions are unchanged
+                blob["capabilities"] = sorted(agent.capabilities)
         return hashlib.sha256(json.dumps(blob, sort_keys=True).encode()).hexdigest()[:16]
 
     # ---- hard denies (§3.4) --------------------------------------------------------------------

@@ -246,6 +246,206 @@ def cp_restart_identity_only(data, pid):
       and not any(c.get(k) for k in ("foreign", "missing", "changed_outside", "invalid")), memory=mem)
 
 
+# ---- increment 3: repository mode (ADR-0013 gates), dedicated permission (D18), dogfood friction --------------
+def _cpr(k, rev, status="in_progress"):
+    return call(k, "tdflow_task_checkpoint", {"task_id": "repo", "title": "Repo", "status": status, "scopes": [FX],
+                                              "based_on_rev": rev})
+
+
+def _leaf(folder):
+    """The unique last component of the temp project folder: a leak of the absolute path in either slash
+    style (or JSON-escaped) contains it (review 11)."""
+    return os.path.basename(str(folder).replace("\\", "/").rstrip("/"))
+
+
+def _mem_api(method, path, obj=None):
+    r = mt.admin(method, path, obj)
+    return r.get("status"), (base.jbody(r) or {})
+
+
+def cp_repo_embedded(data, pid):
+    # A token with the dedicated repository-memory permission (owner-issued; never implied by role or scope).
+    r = mt.admin("POST", "/setup/api/tokens", {"display_name": "Agent R (repo memory)", "role": "builder",
+                                               "scope": FX + "/**", "capabilities": ["memory:repo:write"]})
+    j = base.jbody(r) or {}
+    TOKENS["R"] = j.get("token")
+    mt.SECRET_BODIES.append(r.get("body", b""))
+    T("repo.token_with_capability_created", r["status"] == 200 and j.get("agent", {}).get("capabilities") == ["memory:repo:write"],
+      agent=j.get("agent"))
+    bad = mt.admin("POST", "/setup/api/tokens", {"display_name": "x", "role": "observer", "scope": "/project1/**",
+                                                 "capabilities": ["memory:repo:write"]})
+    T("repo.capability_refused_for_observer", bad["status"] == 400 and base.code(bad) == "CAPABILITY_NOT_ALLOWED")
+    bad = mt.admin("POST", "/setup/api/tokens", {"display_name": "x", "role": "builder", "scope": "/project1/**",
+                                                 "capabilities": ["memory:decisions:write"]})
+    T("repo.unknown_capability_refused", bad["status"] == 400 and base.code(bad) == "CAPABILITY_NOT_ALLOWED")
+    bad = mt.admin("POST", "/setup/api/tokens", {"display_name": "x", "role": "builder", "scope": FX + "/**",
+                                                 "actions": ["read"], "capabilities": ["memory:repo:write"]})
+    T("repo.capability_refused_for_read_only_actions", bad["status"] == 400 and base.code(bad) == "CAPABILITY_NOT_ALLOWED")
+    lst = base.jbody(mt.admin("GET", "/setup/api/agents")) or {}
+    caps = {a["display_name"][:7]: a.get("capabilities") for a in lst.get("agents", [])}
+    T("repo.agent_list_shows_capabilities", caps.get("Agent R") == ["memory:repo:write"] and caps.get("Agent B") == [], caps=caps)
+    who = call("R", "tdflow_whoami")
+    T("repo.whoami_reports_permission", (who.get("memory") or {}).get("repository_write") is True
+      and (call("B", "tdflow_whoami").get("memory") or {}).get("repository_write") is False, who=who.get("memory"))
+    r1 = _cpr("B", 0)
+    s = call("B", "tdflow_set_parameters", {"path": FX + "/level1", "values": {"opacity": 0.45}})
+    r2 = call("B", "tdflow_handoff_create", {"task_id": "repo", "summary": "Embedded so far.", "based_on_rev": 1,
+                                             "claims": [{"kind": "changed", "path": FX + "/level1"}]})
+    T("repo.embedded_writes_need_no_capability", mt.ok(r1) and mt.ok(s) and mt.ok(r2) and r2.get("rev") == 2, r1=r1, r2=r2)
+    STATE["repo_folder"] = data["project_folder"]
+
+
+def cp_repo_migrate(data, pid):
+    st, j = _mem_api("GET", "/setup/api/memory")
+    T("repo.status_embedded", st == 200 and j.get("authority") == "embedded" and j.get("records") == 2
+      and j.get("state") == "ok" and j.get("project_saved") is True, status=j)
+    r = mt.admin("GET", "/setup/api/memory", csrf=False)
+    T("repo.status_needs_csrf", r["status"] == 401)
+    # Folders outside the project's own tree are refused; another project's folder blocks linking.
+    for name, folder in (("four_levels_up", "../../../.."), ("sibling", "../elsewhere"), ("absolute", "C:/Windows/Temp"),
+                         ("empty", "")):
+        st, j = _mem_api("POST", "/setup/api/memory/plan", {"to": "repo", "folder": folder})
+        T(f"repo.refused_folder_{name}", st == 409 and j.get("code") == "MEMORY_REPO_NOT_ALLOWED", status=st, body=j)
+    st, j = _mem_api("POST", "/setup/api/memory/plan", {"to": "repo", "folder": "nonexistent"})
+    T("repo.missing_folder_refused", st == 409 and j.get("code") == "MEMORY_REPO_MISSING", body=j)
+    st, j = _mem_api("POST", "/setup/api/memory/plan", {"to": "repo", "folder": "otherrepo"})
+    T("repo.MISMATCHED_PROJECTID_BLOCKS_LINKING", st == 409 and j.get("code") == "MEMORY_LINK_MISMATCH", body=j)
+    st, plan = _mem_api("POST", "/setup/api/memory/plan", {"to": "repo", "folder": "memrepo"})
+    T("repo.preview_lists_actions_and_writes_nothing", st == 200 and [a["action"] for a in plan.get("actions", [])] ==
+      ["create", "create"] and plan.get("target") == "<project folder>/memrepo" and plan.get("project_file") == "create"
+      and not os.path.exists(os.path.join(STATE["repo_folder"], "memrepo", "tdflow"))
+      and "tdflow-project.json" in plan.get("also_written", []) and "can read every task record" in plan.get("then", ""),
+      plan=plan)
+    T("repo.preview_shows_no_absolute_path", _leaf(STATE["repo_folder"]) not in json.dumps(plan))
+    st, j = _mem_api("POST", "/setup/api/memory/migrate", {"to": "repo", "folder": "memrepo", "digest": "0" * 64})
+    T("repo.wrong_digest_refused", st == 409 and j.get("code") == "PREVIEW_CHANGED"
+      and not os.path.exists(os.path.join(STATE["repo_folder"], "memrepo", "tdflow")), body=j)
+    st, j = _mem_api("POST", "/setup/api/memory/migrate", {"to": "repo", "folder": "memrepo", "digest": plan.get("digest")})
+    T("repo.migrated_to_repo", st == 200 and j.get("authority") == "repo" and j.get("records") == 2, body=j)
+    st, j = _mem_api("GET", "/setup/api/memory")
+    T("repo.status_repo", st == 200 and j.get("authority") == "repo" and j.get("folder") == "<project folder>/memrepo"
+      and j.get("link") == "ok" and j.get("state") == "ok" and j.get("records") == 2, status=j)
+    st, j = _mem_api("POST", "/setup/api/memory/plan", {"to": "repo", "folder": "memrepo"})
+    T("repo.second_migration_refused", st == 409 and j.get("code") == "ALREADY_REPOSITORY", body=j)
+
+
+def cp_repo_mode(data, pid):
+    lst = call("B", "tdflow_task_list")
+    T("repo.read_without_capability", mt.ok(lst) and lst["memory"].get("authority") == "repo" and lst["memory"]["state"] == "ok"
+      and [t["task_id"] for t in lst.get("tasks", [])] == ["repo"] and _leaf(STATE["repo_folder"]) not in json.dumps(lst), r=lst)
+    w = _cpr("B", 2)
+    T("repo.WRITE_WITHOUT_DEDICATED_PERMISSION_DENIED", mt.denied(w, ("DENIED",), ("M8",))
+      and "repository-memory permission" in w.get("message", ""), r=w)
+    T("repo.observer_still_denied", mt.denied(_cpr("C", 2), ("DENIED",), ("M1",)))
+    s = call("R", "tdflow_set_parameters", {"path": FX + "/level1", "values": {"opacity": 0.55}})
+    w = _cpr("R", 2)
+    T("repo.write_with_permission", mt.ok(s) and mt.ok(w) and w.get("record_id") == "checkpoint_repo_r3"
+      and (w.get("verified_facts") or {}).get("changes") == 1, r=w)
+    r = call("A", "tdflow_handoff_resume", {"task_id": "repo"})
+    T("repo.resume_from_files", mt.ok(r) and r.get("latest_rev") == 3 and (r.get("handoff") or {}).get("ledger") == "accepted"
+      and (r.get("checkpoint") or {}).get("record_id") == "checkpoint_repo_r3" and r["memory"]["authority"] == "repo", r=r)
+    T("repo.stale_write_rejected", mt.denied(_cpr("R", 2), ("MEMORY_CONFLICT",)))
+    T("repo.raw_tools_still_H4", mt.denied(call("D", "tdflow_get_dat_text", {"path": "/project1/tdflowProject/derived_index"}),
+                                           rules=("H4",)))
+    # Dogfood friction: which parameter changed outside TDflowMCP, and an operator created without a position.
+    STATE["repo_rev"] = 3
+
+
+def cp_repo_edited(data, pid):
+    w = _cpr("R", 3)
+    T("repo.OUTSIDE_FILE_EDIT_MAKES_MEMORY_READ_ONLY", mt.denied(w, ("MEMORY_READ_ONLY",), ("M5",))
+      and "linked project-memory folder" in w.get("message", ""), r=w)
+    lst = call("B", "tdflow_task_list")
+    T("repo.outside_edit_reported", (lst.get("memory") or {}).get("changed_outside") == ["checkpoint_repo_r1"],
+      memory=lst.get("memory"))
+    st, j = _mem_api("POST", "/setup/api/memory/plan", {"to": "embedded"})
+    T("repo.migration_refused_until_claimed", st == 409 and j.get("code") == "MEMORY_NEEDS_CLAIM", body=j)
+
+
+def cp_repo_claimed(data, pid):
+    w = call("R", "tdflow_handoff_create", {"task_id": "repo", "summary": "Finished in repository mode.",
+                                            "status": "done", "based_on_rev": 3,
+                                            "claims": [{"kind": "value", "path": FX + "/level1", "param": "opacity",
+                                                        "value": 0.55}]})
+    T("repo.writable_after_claim", mt.ok(w) and w.get("rev") == 4 and w["claim_summary"]["verified"] == 1, r=w)
+    lst = call("B", "tdflow_task_list")
+    T("friction.handoff_status_updates_task", mt.ok(lst) and lst["tasks"][0].get("status") == "done"
+      and lst["tasks"][0].get("status_source") == "agent_reported", tasks=lst.get("tasks"))
+    c = call("B", "tdflow_create_operator", {"parent": FX, "type": "blurTOP", "name": "auto_placed"})
+    rows = {o["name"]: o for o in call("B", "tdflow_list_operators", {"path": FX}).get("operators", [])}
+    others = [o for n, o in rows.items() if n != "auto_placed"]
+    T("friction.create_without_position_is_placed", mt.ok(c) and isinstance(c.get("x"), int)
+      and all(c["x"] > o["x"] for o in others if o.get("x") is not None), created=c)
+    u = call("B", "tdflow_undo")
+    c2 = call("B", "tdflow_create_operator", {"parent": FX, "type": "blurTOP", "name": "auto_placed", "x": -300, "y": 40})
+    T("friction.explicit_position_still_wins", mt.ok(u) and mt.ok(c2) and (c2.get("x"), c2.get("y")) == (-300, 40), created=c2)
+    T("friction.undo_then_recreate_auto", mt.ok(call("B", "tdflow_undo")) and
+      mt.ok(call("B", "tdflow_create_operator", {"parent": FX, "type": "blurTOP", "name": "auto_placed"})))
+
+
+def cp_repo_mismatch(data, pid):
+    lst = call("B", "tdflow_task_list")
+    T("repo.MISMATCH_BLOCKS_READS", mt.denied(lst, ("MEMORY_LINK_MISMATCH",), ("M7",)), r=lst)
+    T("repo.MISMATCH_BLOCKS_WRITES", mt.denied(_cpr("R", 4), ("MEMORY_LINK_MISMATCH",), ("M7",)))
+    st, j = _mem_api("GET", "/setup/api/memory")
+    T("repo.status_reports_mismatch", st == 200 and j.get("link") == "MEMORY_LINK_MISMATCH" and j.get("state") == "unavailable",
+      status=j)
+    st, j = _mem_api("POST", "/setup/api/memory/plan", {"to": "embedded"})
+    T("repo.mismatch_blocks_migration", st == 409 and j.get("code") == "MEMORY_LINK_MISMATCH", body=j)
+    st, j = _mem_api("POST", "/setup/api/memory/plan", {"to": "relink", "folder": "memrepo"})
+    T("repo.MISMATCH_BLOCKS_RELINKING", st == 409 and j.get("code") == "MEMORY_LINK_MISMATCH", body=j)
+
+
+def cp_repo_unlinked(data, pid):
+    lst = call("B", "tdflow_task_list")
+    T("repo.lost_link_is_unavailable_with_a_reason", mt.denied(lst, ("MEMORY_UNAVAILABLE",), ("M7",))
+      and "MEMORY_UNLINKED" in lst.get("message", ""), r=lst)
+    st, j = _mem_api("GET", "/setup/api/memory")
+    T("repo.status_reports_lost_link", st == 200 and j.get("link") == "MEMORY_UNLINKED" and j.get("state") == "unavailable", status=j)
+    st, j = _mem_api("POST", "/setup/api/memory/plan", {"to": "relink", "folder": "otherrepo"})
+    T("repo.relink_refuses_another_projects_folder", st == 409 and j.get("code") == "MEMORY_LINK_MISMATCH", body=j)
+    st, plan = _mem_api("POST", "/setup/api/memory/plan", {"to": "relink", "folder": "memrepo"})
+    T("repo.relink_preview", st == 200 and plan.get("project_file") == "create" and plan.get("records") == 4
+      and all(a["action"] == "keep" for a in plan.get("actions", [])), plan=plan)
+    st, j = _mem_api("POST", "/setup/api/memory/migrate", {"to": "relink", "folder": "memrepo", "digest": "0" * 64})
+    T("repo.relink_wrong_digest_refused", st == 409 and j.get("code") == "PREVIEW_CHANGED", body=j)
+    st, j = _mem_api("POST", "/setup/api/memory/migrate", {"to": "relink", "folder": "memrepo", "digest": plan.get("digest")})
+    T("repo.relinked", st == 200 and j.get("authority") == "repo" and j.get("records") == 4, body=j)
+    lst = call("B", "tdflow_task_list")
+    T("repo.usable_again_after_relink_without_claim", mt.ok(lst) and lst["memory"]["state"] == "ok"
+      and lst["tasks"][0].get("ledger") == "accepted", r=lst)
+
+
+def cp_repo_back(data, pid):
+    # Parameter-level drift (dogfood friction): the resume after an out-of-band edit names the parameter.
+    st, plan = _mem_api("POST", "/setup/api/memory/plan", {"to": "embedded"})
+    T("repo.preview_back", st == 200 and [a["action"] for a in plan.get("actions", [])] == ["create"] * 4
+      and plan.get("source") == "<project folder>/memrepo", plan=plan)
+    st, j = _mem_api("POST", "/setup/api/memory/migrate", {"to": "embedded", "digest": plan.get("digest")})
+    T("repo.migrated_back", st == 200 and j.get("authority") == "embedded" and j.get("records") == 4, body=j)
+    st, j = _mem_api("GET", "/setup/api/memory")
+    T("repo.status_embedded_again", j.get("authority") == "embedded" and j.get("state") == "ok" and j.get("records") == 4, status=j)
+    lst = call("B", "tdflow_task_list")
+    T("repo.ledger_ok_without_claim_after_return", mt.ok(lst) and lst["memory"]["state"] == "ok"
+      and lst["memory"].get("authority") == "embedded" and lst["tasks"][0]["rev"] == 4, r=lst)
+    w = _cpr("B", 4, "done")
+    T("repo.embedded_write_after_return", mt.ok(w) and w.get("rev") == 5, r=w)
+
+
+def cp_drift(data, pid):
+    r = call("A", "tdflow_handoff_resume", {"task_id": "repo"})
+    fp = r.get("fingerprint") or {}
+    pc = (fp.get("parameter_changes") or {}).get(FX + "/noise1") or {}
+    T("friction.RESUME_NAMES_THE_CHANGED_PARAMETER", mt.ok(r) and fp.get("changed_outside_tdflowmcp") is True
+      and pc.get("known") is True and pc.get("parameters") == ["amp"], fp=fp)
+    T("friction.parameter_values_not_exposed_in_fingerprint", "pars" not in json.dumps(r.get("checkpoint") or {}))
+
+
+REPO = {"setup_ready": mt.cp_setup_ready, "pair_approved": mt.cp_pair_approved, "repo_embedded": cp_repo_embedded,
+        "repo_migrate": cp_repo_migrate, "repo_mode": cp_repo_mode, "repo_edited": cp_repo_edited,
+        "repo_claimed": cp_repo_claimed, "repo_mismatch": cp_repo_mismatch, "repo_unlinked": cp_repo_unlinked,
+        "repo_back": cp_repo_back,
+        "repo_drift": cp_drift}
 PERSIST = {"setup_ready": mt.cp_setup_ready, "pair_approved": mt.cp_pair_approved, "persist_write": cp_persist_write,
            "persist_unsaved": cp_persist_unsaved}
 RESTART = {"restart_ready": cp_restart_ready, "restart_claimed": cp_restart_claimed,
@@ -287,15 +487,23 @@ def main():
     r2 = g.launch("memory_restart", os.path.abspath(a.tox), os.path.join(top, "restart"), pproj, penv, RESTART,
                   deadline_s=400, toe=toe) if toe and os.path.exists(toe) else {}
     shutil.rmtree(pproj, ignore_errors=True)
-    res = dict(res, tests=(res.get("tests") or []) + (r1.get("tests") or []) + (r2.get("tests") or []),
-               errors=(res.get("errors") or []) + (r1.get("errors") or []) + (r2.get("errors") or []),
-               persist=r1.get("persist"), restart=r2.get("restart"))
+    # Increment 3: repository mode in its own launch (a saved project in the system temp folder; the linked
+    # folder is inside that project folder, so nothing is written anywhere else).
+    rproj = tempfile.mkdtemp(prefix="tdflow-repo-project-")
+    mt.STATE["cookies"], mt.STATE["csrf"] = {}, None
+    os.makedirs(os.path.join(top, "repo"))
+    r3 = g.launch("memory_repo", os.path.abspath(a.tox), os.path.join(top, "repo"), rproj,
+                  {"TDFLOW_PRIVATE_ROOT": os.path.join(top, "private-repo")}, REPO, deadline_s=400)
+    shutil.rmtree(rproj, ignore_errors=True)
+    res = dict(res, tests=(res.get("tests") or []) + (r1.get("tests") or []) + (r2.get("tests") or []) + (r3.get("tests") or []),
+               errors=(res.get("errors") or []) + (r1.get("errors") or []) + (r2.get("errors") or []) + (r3.get("errors") or []),
+               persist=r1.get("persist"), restart=r2.get("restart"), repo=r3.get("repo"))
     secrets = [t.split(".", 1)[1] for t in TOKENS.values() if t]
     T("memory.no_token_in_answers", not any(s in raw for s in secrets for raw in STATE.get("raw", [])))
     in_td = res.get("tests") or []
     lat = sorted(x["ms"] for x in STATE["answers"] if x["tool"].startswith(("tdflow_task", "tdflow_handoff")))
     out = {"td_build": res.get("td_build"), "memory_audit": res.get("memory_audit"),
-           "persist": res.get("persist"), "restart": res.get("restart"),
+           "persist": res.get("persist"), "restart": res.get("restart"), "repo": res.get("repo"),
            "onframe": res.get("frame_stats_onframe"), "onframe_during_load": res.get("memory_load_onframe"),
            "load_ms": STATE.get("load_ms"),
            "memory_call_ms": {"n": len(lat), "p50": lat[len(lat) // 2] if lat else None, "max": lat[-1] if lat else None},

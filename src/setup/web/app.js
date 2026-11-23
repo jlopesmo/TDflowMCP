@@ -58,6 +58,12 @@
   async function refresh() {
     try {
       const r = await api("GET", "/setup/api/status");
+      if (r.status === 503 && r.data && r.data.error === "TDFLOW_NOT_COOKING") {
+        // TouchDesigner runs no frames while its window is minimized, so the component cannot answer.
+        $("status").dataset.state = "paused";
+        setText("message", "TouchDesigner is not running frames right now. If its window is minimized, restore it. Agents get a clear error meanwhile, and nothing is executed.");
+        return;
+      }
       if (!r.ok) throw new Error("HTTP " + r.status);
       const s = r.data;
       $("status").dataset.state = s.state || "unknown";
@@ -142,7 +148,8 @@
           toks.append(b);
         }
       }
-      tr.append(el("td", a.display_name), el("td", a.role + (a.enabled ? "" : " (disabled)")), el("td", a.scopes.join(", ")), toks);
+      const caps = (a.capabilities || []).includes("memory:repo:write") ? " + repository memory" : "";
+      tr.append(el("td", a.display_name), el("td", a.role + caps + (a.enabled ? "" : " (disabled)")), el("td", a.scopes.join(", ")), toks);
       body.append(tr);
     }
     const sb = $("sessions").tBodies[0];
@@ -157,6 +164,68 @@
       ", checkpoints " + (au.checkpoints_ok ? "valid" : "INVALID") + ".";
     $("audit").dataset.ok = String(!!au.ok);
     if (!skillsPending) await refreshSkills();
+    // The memory status reads every record, so it is refreshed every fifth poll (about 10 s), not every 2 s.
+    if (!memPending && (memTick++ % 5 === 0)) await refreshMemory();
+  }
+
+  // ---- Project memory (status; preview -> confirm the exact preview digest) --------------------
+  let memPending = null;
+  let memTick = 0;
+
+  async function refreshMemory() {
+    const r = await api("GET", "/setup/api/memory");
+    if (!r.ok || !r.data) return;
+    const d = r.data;
+    const ready = d.status === "ready";
+    $("memory").dataset.authority = ready ? d.authority : "none";
+    $("memory").dataset.state = ready ? (d.state || "") : d.status;
+    setText("mem-authority", !ready ? "No project memory (" + d.status + ")" :
+      d.authority === "repo" ? "Files in a folder of this project" : "Inside the tdflowProject component");
+    setText("mem-folder", ready && d.authority === "repo" ? d.folder : "–");
+    setText("mem-records", ready && d.records !== undefined ? d.records + " record(s), " + d.tasks + " task(s)" : "–");
+    setText("mem-state", !ready ? (d.reason || "") : d.state === "ok" ? "Writable by agents" :
+      d.state === "unavailable" ? "Not usable: " + (d.link_message || d.link) : "Read-only: " + (d.read_only_reason || "needs Claim Project Memory"));
+    $("mem-to-repo").hidden = !(ready && d.authority === "embedded");
+    const broken = ready && d.authority === "repo" && d.state === "unavailable";
+    $("mem-to-embedded").hidden = !(ready && d.authority === "repo" && !broken);
+    $("mem-relink").hidden = !broken;                       // the folder link was lost: offer to link it again
+    if (ready && !d.project_saved && !$("mem-status").textContent) $("mem-status").textContent = "Save the TouchDesigner project before linking a folder.";
+  }
+
+  async function planMemory(to) {
+    const req = to === "repo" ? { to, folder: $("mem-folder-input").value } :
+      to === "relink" ? { to, folder: $("mem-relink-input").value } : { to };
+    const r = await api("POST", "/setup/api/memory/plan", req);
+    if (!r.ok || !r.data) {
+      $("mem-status").textContent = "Not possible: " + ((r.data && (r.data.message || r.data.code || r.data.error)) || r.status) + ".";
+      return;
+    }
+    const p = r.data;
+    const lines = [to === "repo" ? "Move project memory into " + p.target + ":" :
+      to === "relink" ? "Link project memory to " + p.target + " again:" :
+      "Move project memory from " + p.source + " back into the component:"];
+    if (to !== "embedded") lines.push("  tdflow-project.json  " + p.project_file);
+    if (p.also_written && p.also_written.length) lines.push("  also written: " + p.also_written.join(", "));
+    for (const a of p.actions) lines.push("  " + a.action.padEnd(18) + a.record + "  sha256 " + a.sha256.slice(0, 12) + "…");
+    if (!p.actions.length) lines.push("  (no records yet)");
+    if (p.conflicts && p.conflicts.length) lines.push("", "Stopped: the folder already holds different records: " + p.conflicts.join(", "));
+    if (p.then) lines.push("", p.then);
+    $("mem-plan").textContent = lines.join("\n");
+    $("mem-confirm").disabled = !!(p.conflicts && p.conflicts.length);
+    memPending = Object.assign({ digest: p.digest }, req);
+    $("mem-preview").hidden = false;
+    $("mem-status").textContent = "";
+  }
+
+  async function confirmMemory() {
+    if (!memPending) return;
+    const p = memPending;
+    memPending = null;
+    $("mem-preview").hidden = true;
+    const r = await api("POST", "/setup/api/memory/migrate", p);
+    $("mem-status").textContent = r.ok ? "Project memory moved: " + r.data.records + " record(s). Save the TouchDesigner project."
+      : "Not done: " + ((r.data && (r.data.message || r.data.code || r.data.error)) || r.status) + ".";
+    await refreshMemory();
   }
 
   // ---- Skills (preview -> confirm the exact preview digest) -----------------------------------
@@ -230,8 +299,9 @@
   async function createToken(ev) {
     ev.preventDefault();
     const actions = Array.from($("t-actions").querySelectorAll("input:checked")).map((i) => i.value);
+    const capabilities = $("t-cap-repo").checked ? ["memory:repo:write"] : [];
     const r = await api("POST", "/setup/api/tokens", { display_name: $("t-name").value, role: $("t-role").value,
-                                                       scope: $("t-scope").value, actions });
+                                                       scope: $("t-scope").value, actions, capabilities });
     if (!r.ok) { $("token-status").textContent = "Could not create the token (" + ((r.data && r.data.error) || r.status) + ")."; return; }
     $("token-status").textContent = "Token created for " + r.data.agent.display_name + ".";
     $("token-once").hidden = false;
@@ -266,6 +336,11 @@
     $("copy-token").addEventListener("click", () => copyText($("token-value").textContent, "copy-token-status"));
     $("skills-confirm").addEventListener("click", confirmSkills);
     $("skills-cancel").addEventListener("click", () => { skillsPending = null; $("skills-preview").hidden = true; });
+    $("mem-plan-repo").addEventListener("click", () => planMemory("repo"));
+    $("mem-plan-embedded").addEventListener("click", () => planMemory("embedded"));
+    $("mem-plan-relink").addEventListener("click", () => planMemory("relink"));
+    $("mem-confirm").addEventListener("click", confirmMemory);
+    $("mem-cancel").addEventListener("click", () => { memPending = null; $("mem-preview").hidden = true; });
     refresh();
     setInterval(refresh, 2000);
   });

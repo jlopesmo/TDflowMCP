@@ -137,7 +137,7 @@ class AuditWorker:
         if not self._key:
             return None
         try:
-            blob = json.dumps(args, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")
+            blob = json.dumps(args, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8", "replace")
         except (TypeError, ValueError):
             blob = b"<unserializable>"
         return hmac.new(hmac.new(self._key, b"args", hashlib.sha256).digest(), blob, hashlib.sha256).hexdigest()

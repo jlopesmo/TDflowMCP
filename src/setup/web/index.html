@@ -57,6 +57,7 @@
           <label><input type="checkbox" value="update" checked> update</label>
           <label><input type="checkbox" value="delete" checked> delete</label>
         </fieldset>
+        <label><input type="checkbox" id="t-cap-repo"> May write task records into the linked repository folder (only matters when project memory is in repository mode)</label>
         <button type="submit">Create token</button>
         <span id="token-status" role="status"></span>
       </form>
@@ -70,6 +71,31 @@
       <h3>Recent sessions</h3>
       <table id="sessions"><thead><tr><th scope="col">Session</th><th scope="col">Agent</th><th scope="col">Last activity</th><th scope="col">Calls</th></tr></thead><tbody></tbody></table>
       <p id="audit" class="hint"></p>
+      <h3>Project memory</h3>
+      <p class="hint">Task checkpoints and handoffs live in exactly one place: inside the tdflowProject component, or as files in a folder of this project (for example its Git repository). Switching shows a preview first and is recorded in the audit log. TDflowMCP never runs Git.</p>
+      <dl id="memory">
+        <dt>Where</dt><dd id="mem-authority">–</dd>
+        <dt>Folder</dt><dd id="mem-folder">–</dd>
+        <dt>Records</dt><dd id="mem-records">–</dd>
+        <dt>State</dt><dd id="mem-state">–</dd>
+      </dl>
+      <div id="mem-to-repo" hidden>
+        <label>Folder, relative to the project file (<code>.</code> for the project folder, <code>..</code> for its parent) <input id="mem-folder-input" maxlength="1024" value="."></label>
+        <button id="mem-plan-repo" type="button">Preview moving memory to this folder</button>
+      </div>
+      <div id="mem-to-embedded" hidden>
+        <button id="mem-plan-embedded" type="button">Preview moving memory back into the component</button>
+      </div>
+      <div id="mem-relink" hidden>
+        <p class="hint">The link to the folder is not usable (for example the project was not saved after the move, was saved somewhere else, or the folder's tdflow-project.json is missing). You can link the folder again; no record is changed.</p>
+        <label>Folder, relative to the project file <input id="mem-relink-input" maxlength="1024" value="."></label>
+        <button id="mem-plan-relink" type="button">Preview linking this folder again</button>
+      </div>
+      <div id="mem-preview" hidden>
+        <pre id="mem-plan" tabindex="0"></pre>
+        <div class="row"><button id="mem-confirm" type="button">Confirm</button><button id="mem-cancel" type="button" class="secondary">Cancel</button></div>
+      </div>
+      <span id="mem-status" role="status"></span>
       <h3>Skills</h3>
       <p class="hint">TDflowMCP Skills teach your coding agent how to use these tools safely (guidance only; the server enforces every rule). Installing shows a preview first, never overwrites files you changed, and is recorded in the audit log.</p>
       <table id="skills"><thead><tr><th scope="col">Agent</th><th scope="col">Where</th><th scope="col">Installed</th><th scope="col">Bundled</th><th scope="col">Action</th></tr></thead><tbody></tbody></table>

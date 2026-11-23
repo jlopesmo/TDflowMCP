@@ -2,14 +2,15 @@
 
 A source-first, AI-powered TouchDesigner development environment: an MCP server packaged as a reusable `.tox`, with server-side permissions, agent identity, audit logging, approvals, a local browser dashboard, safe experimentation and optional Code Mode orchestration.
 
-> **Status: Phase 1B complete (2026-11-22), development builds only.**
-> - The source-built `TDflowMCP.tox` (TouchDesigner 2025.32440+) provides the local-only Setup Assistant (1A) and a secure MCP core (1B): 16 scoped, audited tools with verified undo, plus pairing, agent tokens and a kill switch.
-> - There is no arbitrary code execution, no governance dashboard (2B) and no agent onboarding or Skills (1C) yet.
+> **Status: Phase 2A complete except optional record types (2026-11-23), development builds only.**
+> - The source-built `TDflowMCP.tox` (TouchDesigner 2025.32440+) provides the local-only Setup Assistant (1A), a secure MCP core (1B: scoped, audited tools with verified undo, pairing, agent tokens, a kill switch), agent onboarding with Skills (1C), and project memory (2A: task checkpoints, verified handoffs, restart persistence, and records either inside the project file or as files in a folder of the project).
+> - There is no arbitrary code execution, no approval flow and no governance dashboard (2B) yet.
+> - Keep the TouchDesigner window open while agents work: TouchDesigner pauses while minimized.
 > - Nothing is released.
 >
 > See [current state](docs/icm/current-state.md) and [build and test](docs/operations/build-and-test.md).
 
-**Planned user experience** (design, not built): drag `TDflowMCP.tox` into a project → pulse **Open Setup** → the browser Setup Assistant runs compatibility checks and guides pairing, agent tokens and enabling MCP → copy **Tell Your Coding Agent** into Claude Code → work under enforced, audited scopes → resume later from verified handoffs.
+**User experience** (built for Claude Code; development builds): drag `TDflowMCP.tox` into a project → pulse **Open Setup** → the browser Setup Assistant runs compatibility checks and guides pairing, agent tokens and enabling MCP → copy **Tell Your Coding Agent** into Claude Code → work under enforced, audited scopes → resume later from verified handoffs.
 
 ## Start here
 

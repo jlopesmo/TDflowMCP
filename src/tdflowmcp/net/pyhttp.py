@@ -425,7 +425,9 @@ class EmbeddedHTTPTransport:
                  job_timeout: float = 5.0, dispatch_grace: float = 5.0, audit_max: int = 2048,
                  unauth_queue_max: int = 4, mcp_enabled: bool = False,
                  route_handlers: Optional[Mapping[str, Callable[["RouteContext"], Optional[Response]]]] = None,
-                 heartbeat_timeout: Optional[float] = None):
+                 heartbeat_timeout: Optional[float] = None,
+                 not_cooking_after: Optional[float] = None,
+                 paused_fn: Optional[Callable[[], Optional[bool]]] = None):
         if host not in BIND_HOSTS:
             raise TransportError("BIND_REFUSED", "only the literal 127.0.0.1 may be bound")
         if not (0 <= int(port) <= 65535):
@@ -464,6 +466,20 @@ class EmbeddedHTTPTransport:
         self._last_pump = time.monotonic()
         self.last_activity = time.monotonic()    # last request of any kind (idle timeout input)
         self.close_reason = ""
+        # TouchDesigner runs no frames while its window is minimized (spike S9), so nobody pumps. Two rules:
+        # - ``not_cooking_after``: once the owner has not pumped for this long, a request that needs the main
+        #   thread is answered at once (503 TDFLOW_NOT_COOKING) instead of waiting for a timeout. Nothing is
+        #   queued, so nothing can run later. None disables it (unit tests that pump by hand).
+        # - ``paused_fn`` (TD-free, any thread): True while the host window is known to be minimized. The
+        #   orphan watchdog then keeps the listener: the owner is alive, only paused. Unknown (None) or an
+        #   error counts as "not paused", so the watchdog closes exactly as before.
+        self.not_cooking_after = not_cooking_after
+        self.paused_fn = paused_fn
+        self._pause_seen = 0.0                   # serve thread: last time the host was seen paused
+        self._pause_state = False                # serve thread: the last answer (asked at most ``pause_sample_every``)
+        self._pause_checked = 0.0
+        self.pause_sample_after = 1.0            # start asking once nobody pumped for this long
+        self.pause_sample_every = 1.0
 
     # ---- owner-thread API -------------------------------------------------------------------
     def _own(self, what: str):
@@ -538,6 +554,10 @@ class EmbeddedHTTPTransport:
                     self._bump("dispatch_errors")
                     self.last_dispatch_error = type(e).__name__
                     resp = error(500, "INTERNAL_ERROR")
+            # Review 12: the owner is plainly alive right now. Stamp before waking the handler thread, so the
+            # next step of the same call (submitted the moment it wakes) is not refused as "not cooking" after a
+            # step that took longer than ``not_cooking_after``.
+            self._last_pump = time.monotonic()
             job.response = resp
             job.state = DONE
             job.done.set()
@@ -545,6 +565,7 @@ class EmbeddedHTTPTransport:
             n += 1
             if time.perf_counter() >= end:
                 break
+        self._last_pump = time.monotonic()
         return n
 
     def set_static(self, assets: Mapping[str, Tuple[str, bytes]]) -> None:
@@ -699,11 +720,47 @@ class EmbeddedHTTPTransport:
         self._rejected = keep
 
     def _watchdog(self) -> None:
-        """Serve thread: close an orphaned listener (nobody pumped for ``heartbeat_timeout`` seconds)."""
-        if self.heartbeat_timeout and not self._closing and \
-                time.monotonic() - self._last_pump > self.heartbeat_timeout:
-            self._bump("orphan_closed")
-            self._close_any_thread("heartbeat_lost")   # starts the closer thread; never blocks here
+        """Serve thread: close an orphaned listener (nobody pumped for ``heartbeat_timeout`` seconds).
+
+        Not while the host window is minimized (spike S9: TouchDesigner then runs no frames, but the owner is
+        alive). After the window comes back, the owner gets a full ``heartbeat_timeout`` to pump again."""
+        if not self.heartbeat_timeout or self._closing:
+            return
+        now = time.monotonic()
+        age = now - self._last_pump
+        if age <= min(self.pause_sample_after, self.heartbeat_timeout):
+            self._pause_state = False                # pumping: the next pause is a new episode
+            return
+        # Review 12: the pause is sampled from the first second without a pump (at most once per
+        # ``pause_sample_every``), not only after the heartbeat expired. A pause that ends shortly before the
+        # heartbeat mark is therefore known and earns the same grace.
+        paused = self._paused(now, fresh=False)
+        if age <= self.heartbeat_timeout:
+            return
+        if paused and self._paused(now, fresh=True):   # asked again right before deciding
+            return
+        if self._pause_seen and now - self._pause_seen <= self.heartbeat_timeout:
+            return                                   # just restored: give the owner time to pump
+        self._bump("orphan_closed")
+        self._close_any_thread("heartbeat_lost")   # starts the closer thread; never blocks here
+
+    def _paused(self, now: float, fresh: bool) -> bool:
+        """Serve thread: is the host known to be paused? Only a literal True counts; an error is "no"."""
+        if self.paused_fn is None:
+            return False
+        if not fresh and now - self._pause_checked < self.pause_sample_every:
+            return self._pause_state
+        self._pause_checked = now
+        try:
+            p = self.paused_fn() is True
+        except Exception:
+            p = False
+        if p and not self._pause_state:
+            self._bump("paused_kept")                # once per pause episode
+        self._pause_state = p
+        if p:
+            self._pause_seen = now
+        return p
 
     def _reap(self) -> None:
         """Serve-thread housekeeping: cut connections older than ``max_connection_seconds`` (slow clients)."""
@@ -726,8 +783,18 @@ class EmbeddedHTTPTransport:
             with self._lock:
                 self._unauth_pending = max(0, self._unauth_pending - 1)
 
+    def not_cooking(self) -> bool:
+        """Any thread: the owner has not pumped for ``not_cooking_after`` seconds (minimized window, or a very
+        long frame). Requests that need the main thread are refused at once while this holds."""
+        return bool(self.not_cooking_after) and time.monotonic() - self._last_pump > self.not_cooking_after
+
     def _submit(self, job: Job) -> Response:
         busy = error(503, "TDFLOW_BUSY", [("Retry-After", "1")])
+        if self._closing:
+            return error(503, "TDFLOW_CLOSING")
+        if self.not_cooking():
+            self._bump("not_cooking")
+            return error(503, "TDFLOW_NOT_COOKING", [("Retry-After", "2")])   # never queued, so it never runs
         with self._lock:
             if self._closing:
                 return error(503, "TDFLOW_CLOSING")

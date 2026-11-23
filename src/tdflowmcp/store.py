@@ -60,7 +60,7 @@ def redact(value: Any, limit: int = 2000) -> str:
         text = json.dumps(value, sort_keys=True, ensure_ascii=False, default=str)
     except (TypeError, ValueError):
         text = "<unserializable>"
-    text = _TOKENISH.sub("<redacted>", text)
+    text = _TOKENISH.sub("<redacted>", text.encode("utf-8", "replace").decode("utf-8"))   # no lone surrogates
     return text if len(text) <= limit else text[:limit] + "…<truncated>"
 
 
@@ -93,6 +93,7 @@ CREATE TABLE IF NOT EXISTS tokens (token_id TEXT PRIMARY KEY, agent_id TEXT NOT 
   digest TEXT NOT NULL, created_at TEXT NOT NULL, revoked_at TEXT);
 CREATE TABLE IF NOT EXISTS grants (id INTEGER PRIMARY KEY, agent_id TEXT NOT NULL, scope TEXT NOT NULL,
   actions TEXT NOT NULL, effect TEXT NOT NULL DEFAULT 'allow');
+CREATE TABLE IF NOT EXISTS capabilities (agent_id TEXT NOT NULL, name TEXT NOT NULL, PRIMARY KEY (agent_id, name));
 """
 
 
@@ -194,7 +195,7 @@ class Store:
     # ---- audit ---------------------------------------------------------------------------------
     def args_hmac(self, args: Any) -> str:
         try:
-            blob = json.dumps(args, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")
+            blob = json.dumps(args, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8", "replace")
         except (TypeError, ValueError):
             blob = b"<unserializable>"
         return hmac.new(self._key_for(b"args"), blob, hashlib.sha256).hexdigest()
@@ -389,7 +390,8 @@ class Store:
                  "ok_calls": r[5], "notes": r[6], "denied": r[7]} for r in rows]
 
     # ---- identity tables -----------------------------------------------------------------------
-    def put_agent(self, agent_id: str, display_name: str, role: str, grants: Iterable[Tuple[str, str, str]]):
+    def put_agent(self, agent_id: str, display_name: str, role: str, grants: Iterable[Tuple[str, str, str]],
+                  capabilities: Iterable[str] = ()):
         c = self._cc()
         c.execute("BEGIN IMMEDIATE")
         try:
@@ -398,6 +400,8 @@ class Store:
             for scope, actions, effect in grants:
                 c.execute("INSERT INTO grants(agent_id, scope, actions, effect) VALUES (?,?,?,?)",
                           (agent_id, scope, actions, effect))
+            for name in sorted(set(capabilities)):
+                c.execute("INSERT INTO capabilities(agent_id, name) VALUES (?,?)", (agent_id, name))
             c.execute("COMMIT")
         except BaseException:
             c.execute("ROLLBACK")
@@ -423,12 +427,13 @@ class Store:
         """For tests and diagnostics: (token_id, salt, digest). Never contains a secret."""
         return [tuple(r) for r in self._cc().execute("SELECT token_id, salt, digest FROM tokens").fetchall()]
 
-    def load_identity(self) -> Tuple[List[tuple], List[tuple], List[tuple]]:
+    def load_identity(self) -> Tuple[List[tuple], List[tuple], List[tuple], List[tuple]]:
         c = self._cc()
         agents = c.execute("SELECT id, display_name, role, enabled, created_at FROM agents ORDER BY created_at").fetchall()
         tokens = c.execute("SELECT token_id, agent_id, salt, digest, created_at, revoked_at FROM tokens").fetchall()
         grants = c.execute("SELECT agent_id, scope, actions, effect FROM grants ORDER BY id").fetchall()
-        return agents, tokens, grants
+        caps = c.execute("SELECT agent_id, name FROM capabilities ORDER BY agent_id, name").fetchall()
+        return agents, tokens, grants, caps
 
     # ---- DAT snapshots -------------------------------------------------------------------------
     def put_snapshot(self, path: str, op_id: int, before: str, before_sha: str, after_sha: str) -> int:

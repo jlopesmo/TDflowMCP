@@ -111,6 +111,23 @@ def run(comp, ext, T, frames, until, checkpoint, R, restart=False):
     comp.par.Suspendagents = False
     yield frames(5)
 
+    # Spike S9: TouchDesigner runs no frames while its window is minimized. The harness minimizes this process's
+    # window for longer than the 20 s orphan watchdog, probes the endpoint, then restores it. Nothing in here
+    # runs meanwhile (no frames), so the checks below see the state right after the restore.
+    yield checkpoint("minimized", {}, seconds=240)
+    yield frames(20)
+    tr = ext.ctl.transport
+    st = tr.stats() if tr is not None else {}
+    T("minimized.MCP_STILL_ENABLED_AFTER_RESTORE", comp.par.Status.eval() == "Enabled" and ext.mcp_on and tr is not None
+      and not tr.is_closed(), status=comp.par.Status.eval(), detail=comp.par.Statusdetail.eval())
+    T("minimized.listener_kept_not_orphan_closed", st.get("not_cooking", 0) >= 2 and st.get("paused_kept", 0) >= 1
+      and not st.get("orphan_closed"), stats={k: st.get(k) for k in ("not_cooking", "paused_kept", "orphan_closed", "timeouts")})
+    evs = yield from store_op(ext, until, "events", "error_code='TDFLOW_NOT_COOKING'", (), 20)
+    T("minimized.refusals_audited_as_denials", len(evs) >= 2 and all(e["kind"] == "deny" for e in evs),
+      kinds=[(e["kind"], e["tool"]) for e in evs])
+    T("minimized.nothing_executed_while_minimized", abs(td.op("/project1/fx/level1").par.opacity.eval() - 0.12) < 1e-6,
+      opacity=td.op("/project1/fx/level1").par.opacity.eval())
+
     # Audit store down → every call fails closed, MCP turns itself off; turning it on again reopens.
     before = td.op("/project1/fx/level1").par.opacity.eval()
     yield from store_op(ext, until, "close")              # test seam: the store dies inside the worker

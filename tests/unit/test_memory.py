@@ -24,7 +24,8 @@ def entry(rec):
 
 class PureTests(unittest.TestCase):
     def test_record_seal_and_parse(self):
-        r = MEM.new_record("checkpoint", "blur", [], {"title": "t", "scopes": ["/project1/fx"]}, "agt_1", 0, now="x")
+        r = MEM.new_record("checkpoint", "blur", [], {"title": "t", "scopes": ["/project1/fx"]}, "agt_1", 0,
+                           now="2026-11-23T00:00:00Z")
         self.assertEqual(r["record_id"], "checkpoint_blur_r1")
         text = MEM.record_text(r)
         self.assertEqual(MEM.parse_record(r["record_id"], text)[0], r)
@@ -125,7 +126,7 @@ class PureTests(unittest.TestCase):
         for body in ({"scopes": 5}, {"facts": []}, {"facts": {"audit_to": "x"}}, {"claims": "x"},
                      {"facts": {"fingerprint": {"ops": [1]}}}, {"status": "weird"}):
             r = MEM.seal({"record_id": "checkpoint_t_r1", "type": "checkpoint", "task_id": "t", "rev": 1,
-                          "based_on_rev": 0, "author": "a", "created_at": "x", "body": body})
+                          "based_on_rev": 0, "author": "a", "created_at": "2026-11-23T00:00:00Z", "body": body})
             self.assertEqual(MEM.parse_record("checkpoint_t_r1", MEM.record_text(r)), (None, "bad body"), body)
 
     def test_value_and_root_matching(self):                           # review 9, F12
@@ -481,6 +482,111 @@ class EngineMemoryTests(unittest.TestCase):
         self.assertNotIn(tok, json.dumps(self.store.events(limit=100)))
         self.assertNotIn(tok, json.dumps(self.ad.dats))                # records end up in the .toe
         self.assertIn("<redacted>", self.ad.dats["handoff_blur_r2"])
+
+    # ---- increment 3: dogfood friction ---------------------------------------------------------------
+    def test_handoff_may_state_the_task_status(self):
+        self.cp()
+        _, lst = self.call(self.A, "tdflow_task_list", {})
+        self.assertEqual(lst["tasks"][0]["status"], "in_progress")
+        err, out = self.call(self.A, "tdflow_handoff_create", {"task_id": "blur", "summary": "s", "status": "done",
+                                                               "based_on_rev": 1})
+        self.assertFalse(err, out)
+        self.assertEqual(json.loads(self.ad.dats["handoff_blur_r2"])["body"]["status"], "done")
+        _, lst = self.call(self.A, "tdflow_task_list", {})
+        self.assertEqual((lst["tasks"][0]["status"], lst["tasks"][0]["status_source"]), ("done", "agent_reported"))
+        self.call(self.A, "tdflow_handoff_create", {"task_id": "blur", "summary": "no status given", "based_on_rev": 2})
+        self.assertEqual(self.call(self.A, "tdflow_task_list", {})[1]["tasks"][0]["status"], "done")   # unchanged
+        err, out = self.call(self.A, "tdflow_handoff_create", {"task_id": "blur", "summary": "s", "status": "approved",
+                                                               "based_on_rev": 3})
+        self.assertEqual(out["code"], "INVALID_ARGS")                    # only the three agent statuses exist
+
+    def _detail_adapter(self, pars):
+        """The TD adapter's shape: digests arrive in chunks as [digest, {parameter: digest}]."""
+        orig = self.ad.memory_snapshot
+
+        def snapshot(*a, **kw):
+            out = orig(*a, **kw)
+            if out.get("fingerprint"):
+                out["fp_paths"], out["fingerprint"] = sorted(out["fingerprint"]), None
+            return out
+        self.ad.memory_snapshot = snapshot
+        self.ad.memory_digests = lambda paths: {p: [self.ad.fp[p], dict(pars.get(p, {}))] for p in paths}
+
+    def test_resume_names_the_changed_parameters(self):
+        pars = {"/project1/fx/level1": {"opacity": "aa0001"}, "/project1/fx/noise1": {}, "/project1/fx": {}}
+        self._detail_adapter(pars)
+        self.cp()
+        rec = json.loads(self.ad.dats["checkpoint_blur_r1"])
+        stored = rec["body"]["facts"]["fingerprint"]
+        self.assertEqual({k: sorted(v) for k, v in stored["pars"].items()}, {k: sorted(v) for k, v in pars.items()})
+        self.assertRegex(stored["pars"]["/project1/fx/level1"]["opacity"], r"^[0-9a-f]{10}$")   # keyed (review 11)
+        self.assertNotIn("aa0001", self.ad.dats["checkpoint_blur_r1"])                         # never the raw digest
+        self.assertRegex(stored["pars_key"], r"^[0-9a-f]{12}$")
+        self.assertEqual(MEM.read_records(sorted(self.ad.dats.items()))[0]["problem"], "")   # still a valid record
+        # Outside TDflowMCP: level1.opacity changes, noise1.amp leaves its default, fx gets a new input.
+        self.ad.fp.update({"/project1/fx/level1": "l1", "/project1/fx/noise1": "n1", "/project1/fx": "f1"})
+        pars["/project1/fx/level1"] = {"opacity": "bb0002"}
+        pars["/project1/fx/noise1"] = {"amp": "cc0003"}
+        err, res = self.call(self.A, "tdflow_handoff_resume", {"task_id": "blur"})
+        self.assertFalse(err, res)
+        pc = res["fingerprint"]["parameter_changes"]
+        self.assertEqual(pc["/project1/fx/level1"], {"known": True, "parameters": ["opacity"], "other_change": False})
+        self.assertEqual(pc["/project1/fx/noise1"]["parameters"], ["amp"])
+        self.assertEqual(pc["/project1/fx"], {"known": True, "parameters": [], "other_change": True})
+        self.assertNotIn("pars", json.dumps(res["checkpoint"]["body"]["facts"]["fingerprint"]))   # map stays server-side
+        self.assertNotIn("aa0001", json.dumps(res))
+
+    def test_parameter_detail_unknown_for_older_records_and_hidden_for_unreadable_operators(self):
+        self.cp()                                                        # a record without parameter detail
+        self._detail_adapter({"/project1/fx/level1": {"opacity": "x"}})
+        self.ad.fp["/project1/fx/level1"] = "l9"
+        _, res = self.call(self.A, "tdflow_handoff_resume", {"task_id": "blur"})
+        self.assertEqual(res["fingerprint"]["parameter_changes"], {"/project1/fx/level1": {"known": False, "parameters": []}})
+        # W records over a wider scope; A cannot read /project1/other, so nothing about it comes back.
+        self.ad.fp["/project1/other"] = "o0"
+        self._detail_adapter({"/project1/other": {"secretpar": "aa"}})
+        self.call(self.W, "tdflow_task_checkpoint", {"task_id": "wide", "title": "t", "status": "in_progress",
+                                                     "scopes": ["/project1/fx", "/project1/other"], "based_on_rev": 0})
+        self.ad.fp["/project1/other"] = "o1"
+        err, res = self.call(self.A, "tdflow_handoff_resume", {"task_id": "wide"})
+        self.assertTrue(err)                                             # the task itself is hidden from A (M6)
+        _, res = self.call(self.W, "tdflow_handoff_resume", {"task_id": "wide"})
+        self.assertIn("/project1/other", res["fingerprint"]["parameter_changes"])
+
+
+class Increment3PureTests(unittest.TestCase):
+    def test_par_budget_keeps_whole_operators_in_order(self):
+        pars = {f"/p/n{i:03d}": {"a": "1" * 6, "b": "2" * 6} for i in range(50)}
+        kept, cut = MEM.par_budget(pars, limit=400)
+        self.assertTrue(cut)
+        self.assertEqual(sorted(kept), sorted(pars)[:len(kept)])
+        self.assertLessEqual(len(MEM.canonical(kept)), 400)
+        self.assertEqual(MEM.par_budget(pars), (pars, False))
+        self.assertEqual(MEM.par_changes({}, {"/p/x": {}}, ["/p/x"]), {"/p/x": {"known": False, "parameters": []}})
+
+    def test_body_with_parameter_detail_must_have_the_servers_shape(self):
+        ok = MEM.new_record("checkpoint", "t", [], {"scopes": ["/p"], "facts": {"fingerprint": {
+            "ops": {"/p": "d"}, "pars": {"/p": {"amp": "aabbcc"}}}}}, "a", 0)
+        self.assertEqual(MEM.parse_record(ok["record_id"], MEM.record_text(ok))[1], "")
+        for bad in ({"/p": "x"}, {"/p": {"amp": 3}}, ["/p"]):
+            r = MEM.new_record("checkpoint", "t", [], {"scopes": ["/p"], "facts": {"fingerprint": {"ops": {}, "pars": bad}}},
+                               "a", 0)
+            self.assertEqual(MEM.parse_record(r["record_id"], MEM.record_text(r))[1], "bad body")
+
+    def test_derived_index_holds_counts_only(self):
+        r1 = MEM.new_record("checkpoint", "blur", [], {"title": "SECRET TITLE", "status": "in_progress", "scopes": ["/p"]},
+                            "a", 0)
+        r2 = MEM.new_record("checkpoint", "done_one", [], {"status": "done", "scopes": ["/p"]}, "a", 0)
+        text = MEM.derived_index([entry(r1), entry(r2)])
+        self.assertEqual(MEM.derived_counts(text), (2, 1))
+        self.assertNotIn("SECRET", text)
+        self.assertNotIn("blur", text)                                  # no agent-chosen ids or text
+        self.assertIn("DERIVED", text)
+        for junk in ("", "{", "[]", '{"derived": true, "tasks": 1, "open": 5}', '{"tasks": 2, "open": 1}',
+                     '{"derived": true, "tasks": "2", "open": 1}'):
+            self.assertEqual(MEM.derived_counts(junk), (0, 0))
+        self.assertEqual(MEM.tell_counts(0, 0), [])
+        self.assertIn("3 task(s), 2 not marked done", "\n".join(MEM.tell_counts(3, 2)))
 
 
 if __name__ == "__main__":

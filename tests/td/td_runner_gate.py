@@ -74,6 +74,8 @@ def run(mode, comp, ext, T, frames, until, checkpoint, R):
         yield from memory_persist(comp, ext, T, frames, until, checkpoint, R)
     elif mode == "memory_restart":
         yield from memory_restart(comp, ext, T, frames, until, checkpoint, R)
+    elif mode == "memory_repo":
+        yield from memory_repo(comp, ext, T, frames, until, checkpoint, R)
     elif mode == "dogfood":
         yield from dogfood(comp, ext, T, frames, until, checkpoint, R)
     elif mode == "gate_bench":
@@ -729,6 +731,159 @@ def memory_restart(comp, ext, T, frames, until, checkpoint, R):
     T("restart.audit_verifies", v["ok"], verify=v)
     T("restart.no_unaccounted_executions", len(unmatched_intents(evs)) == 0)
     R["restart"] = {"records": _record_names(mc), "events": len(evs)}
+    R["frame_stats_onframe"] = ext.FrameStats()
+    comp.par.Enablemcp = False
+    yield frames(5)
+
+
+# ---- Phase 2A increment 3: repository-mode memory (ADR-0013 gates) and the dogfood friction fixes -------------
+def _files(folder):
+    d = os.path.join(folder, "tdflow", "memory")
+    out = {}
+    for fn in sorted(os.listdir(d)) if os.path.isdir(d) else []:
+        if fn.endswith(".json"):
+            with open(os.path.join(d, fn), encoding="utf-8") as f:
+                out[fn[:-5]] = f.read()
+    return out
+
+
+def _wait_note(comp, until, text, seconds=15):
+    return until(lambda: text in comp.par.Statusdetail.eval(), seconds, "note_" + text[:12].replace(" ", "_"))
+
+
+def memory_repo(comp, ext, T, frames, until, checkpoint, R):
+    """Embedded records -> user-confirmed migration into a folder of the project -> agents work on files ->
+    a file edited outside (Git) + claim -> a Projectid mismatch -> migration back into the component."""
+    import json
+    MEM = sys.modules["tdflowmcp.memory"]
+    M.fixtures()
+    td.op("/project1/mem").destroy()
+    yield frames(5)
+    internals = _comp_digest(comp)
+    yield from open_and_pair(comp, ext, T, frames, until, checkpoint)
+    yield from enable(comp, until, "repo_enable")
+    comp.par.Createprojectmemory.pulse()
+    yield until(lambda: len(_memory_comps()) == 1, 10, "repo_created")
+    mc = _memory_comps()[0]
+    pid = str(mc.par.Projectid.eval())
+    rp = getattr(mc.par, "Repopath", None)
+    T("repo.new_component_has_unset_readonly_repopath", rp is not None and rp.readOnly and rp.eval() == ""
+      and str(mc.par.Memoryauthority.eval()) == "embedded")
+    yield frames(10)
+    folder = str(td.project.folder)
+    repo = os.path.join(folder, "memrepo")
+    os.makedirs(repo)                                   # the user's folder inside the project folder
+    other = os.path.join(folder, "otherrepo")           # a folder that belongs to another project's memory
+    os.makedirs(other)
+    with open(os.path.join(other, "tdflow-project.json"), "w", encoding="utf-8") as f:
+        json.dump({"schema": "tdflow-project/1", "project_id": "tfp_" + "9" * 16, "authority": "repo"}, f)
+
+    # 1. Records in embedded mode, then the harness previews and confirms the migration on the admin API.
+    g = yield checkpoint("repo_embedded", {"memory_id": pid, "project_folder": folder})
+    embedded = {d.name: MEM.text_sha(d.text) for d in mc.children if MEM.RECORD_NAME.match(d.name)}
+    T("repo.embedded_records_written", sorted(embedded) == ["checkpoint_repo_r1", "handoff_repo_r2"], names=sorted(embedded))
+    g = yield checkpoint("repo_migrate", {"memory_id": pid, "project_folder": folder})
+    yield frames(10)
+    files = _files(repo)
+    T("repo.MIGRATION_TO_REPO_PRESERVES_RECORDS_AND_HASHES",
+      {n: MEM.text_sha(t) for n, t in files.items()} == embedded, files=sorted(files))
+    pj = json.load(open(os.path.join(repo, "tdflow-project.json"), encoding="utf-8"))
+    T("repo.project_file_links_this_memory", pj.get("project_id") == pid and pj.get("authority") == "repo", pj=pj)
+    T("repo.component_is_a_pointer", str(mc.par.Memoryauthority.eval()) == "repo" and mc.par.Repopath.eval() == "memrepo"
+      and mc.par.Repopath.readOnly and mc.par.Memoryauthority.readOnly
+      and not [d.name for d in mc.children if MEM.RECORD_NAME.match(d.name)], children=sorted(d.name for d in mc.children))
+    idx = mc.op("derived_index")
+    T("repo.derived_index_counts_only", idx is not None and MEM.derived_counts(idx.text) == (1, 1)
+      and "DERIVED" in idx.text and "repo" not in json.loads(idx.text).get("note", "").lower().replace("derived", ""),
+      text=idx.text if idx is not None else None)
+    T("repo.migration_noted_in_both_homes", mc.op("MIGRATIONS") is not None and '"to": "repo"' in mc.op("MIGRATIONS").text
+      and os.path.exists(os.path.join(repo, "tdflow", "memory", "MIGRATIONS.jsonl")))
+    tell = comp.op("tellagent").text
+    T("repo.tell_resume_from_derived_index", "## Resume earlier work" in tell and "1 task(s), 1 not marked done" in tell
+      and os.path.basename(folder.replace("\\", "/").rstrip("/")) not in tell, tell=tell[-400:])
+    evs = yield from store_op(ext, until, "events", "kind='admin' AND tool='memory_migrate'", (), 10)
+    T("repo.migration_audited_before_and_after", sorted(e["outcome"] for e in evs) == ["ok", "started"],
+      outcomes=[e["outcome"] for e in evs])
+
+    # 2. Agents work on files: the dedicated permission is needed to write; reading is unchanged.
+    g = yield checkpoint("repo_mode", {"memory_id": pid, "project_folder": folder})
+    yield frames(10)
+    files = _files(repo)
+    T("repo.agent_record_is_a_file", sorted(files) == ["checkpoint_repo_r1", "checkpoint_repo_r3", "handoff_repo_r2"]
+      and not [d.name for d in mc.children if MEM.RECORD_NAME.match(d.name)], files=sorted(files))
+    T("repo.derived_index_follows_writes", MEM.derived_counts(mc.op("derived_index").text) == (1, 1))
+
+    # 3. A file changes outside TDflowMCP (a Git checkout or pull): read-only until the user's claim.
+    p = os.path.join(repo, "tdflow", "memory", "checkpoint_repo_r1.json")
+    with open(p, encoding="utf-8") as f:
+        text = f.read()
+    with open(p, "w", encoding="utf-8", newline="\n") as f:
+        f.write(text.replace("in_progress", "blocked"))
+    yield checkpoint("repo_edited", {})
+    T("repo.claim_after_outside_edit_durable", (yield from _claim(comp, ext, until)))
+    yield frames(5)
+    yield checkpoint("repo_claimed", {})
+
+    # 4. ADR-0013 gate: a folder whose tdflow-project.json names another Projectid blocks memory entirely.
+    pj_path = os.path.join(repo, "tdflow-project.json")
+    with open(pj_path, encoding="utf-8") as f:
+        good = f.read()
+    with open(pj_path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(good.replace(pid, "tfp_" + "8" * 16))
+    yield checkpoint("repo_mismatch", {})
+    comp.par.Claimprojectmemory.pulse()                  # a mismatch is never claimable
+    yield _wait_note(comp, until, "was not claimed")
+    T("repo.MISMATCH_NOT_CLAIMABLE", "MEMORY_LINK_MISMATCH" in comp.par.Statusdetail.eval(), detail=comp.par.Statusdetail.eval())
+    with open(pj_path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(good)
+    yield frames(5)
+
+    # 4b. Review 11: the link is lost (tdflow-project.json deleted, e.g. by `git clean`). Memory is unavailable,
+    # and the user links the same folder again from the Setup page; no record is touched.
+    os.remove(pj_path)
+    before_relink = {n: MEM.text_sha(t) for n, t in _files(repo).items()}
+    yield checkpoint("repo_unlinked", {})
+    yield frames(10)
+    pj2 = json.load(open(pj_path, encoding="utf-8")) if os.path.exists(pj_path) else {}
+    T("repo.RELINK_RESTORES_THE_LINK_WITHOUT_TOUCHING_RECORDS", pj2.get("project_id") == pid and pj2.get("authority") == "repo"
+      and {n: MEM.text_sha(t) for n, t in _files(repo).items()} == before_relink
+      and mc.par.Repopath.eval() == "memrepo" and '"relink": true' in mc.op("MIGRATIONS").text, pj=pj2)
+
+    # 5. Back into the component. Every record, including those written as files, arrives with the same hash.
+    before = {n: MEM.text_sha(t) for n, t in _files(repo).items()}
+    g = yield checkpoint("repo_back", {"memory_id": pid, "project_folder": folder})
+    yield frames(10)
+    now = {d.name: MEM.text_sha(d.text) for d in mc.children if MEM.RECORD_NAME.match(d.name)}
+    T("repo.MIGRATION_BACK_PRESERVES_RECORDS_AND_HASHES", {k: now.get(k) for k in before} == before and len(before) == 4,
+      before=sorted(before), now=sorted(now))
+    T("repo.embedded_again", str(mc.par.Memoryauthority.eval()) == "embedded" and mc.par.Repopath.eval() == ""
+      and mc.op("derived_index") is None and '"to": "embedded"' in mc.op("MIGRATIONS").text)
+    pj = json.load(open(pj_path, encoding="utf-8"))
+    T("repo.folder_marked_derived", pj.get("authority") == "embedded" and "DERIVED" in pj.get("note", "")
+      and sorted(_files(repo)) == sorted(before), pj=pj)
+    T("repo.write_after_return_is_a_dat", "checkpoint_repo_r5" in now and "checkpoint_repo_r5" not in _files(repo), now=sorted(now))
+    # Dogfood friction: the user changes one parameter outside TDflowMCP; resume names it.
+    td.op("/project1/fx/noise1").par.amp = 0.61
+    yield frames(3)
+    yield checkpoint("repo_drift", {})
+    yield frames(10)
+    tell = comp.op("tellagent").text
+    T("repo.tell_resume_after_return", "1 task(s), 0 not marked done" in tell, tell=tell[-300:])
+    evs = yield from store_op(ext, until, "events", limit=5000)
+    v = yield from store_op(ext, until, "verify")
+    T("repo.audit_verifies", v["ok"], verify=v)
+    T("repo.no_unaccounted_executions", len(unmatched_intents(evs)) == 0)
+    T("repo.tdflowmcp_internals_untouched", _comp_digest(comp) == internals)
+    diag = ext.Diagnostics()
+    T("repo.frame_no_errors", diag["frame_errors"] == 0, last=diag["last_frame_error"])
+    T("repo.nothing_written_outside_the_linked_folders", sorted(os.listdir(other)) == ["tdflow-project.json"]
+      and not os.path.exists(os.path.join(folder, "tdflow")), other=sorted(os.listdir(other)))
+    # Dogfood friction (increment 3): default placement of a created operator, checked from inside TD.
+    blur = td.op("/project1/fx/auto_placed")
+    sibs = [c for c in td.op("/project1/fx").children if c.name != "auto_placed"]
+    T("friction.default_placement_right_of_network", blur is not None and bool(sibs)
+      and all(blur.nodeX >= c.nodeX + c.nodeWidth for c in sibs), x=blur.nodeX if blur is not None else None)
+    R["repo"] = {"records": sorted(now), "memory_id": pid}
     R["frame_stats_onframe"] = ext.FrameStats()
     comp.par.Enablemcp = False
     yield frames(5)

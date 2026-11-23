@@ -18,7 +18,7 @@ import time
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Tuple
 
-from tdflowmcp.policy import ROLES, Agent, Grant
+from tdflowmcp.policy import CAP_MEMORY_REPO_WRITE, CAPABILITIES, ROLES, Agent, Grant
 
 TOKEN_RE = re.compile(r"^tdf_([A-Za-z0-9]{12})\.([A-Za-z0-9_\-]{43,128})$")
 _B62 = string.ascii_letters + string.digits
@@ -57,12 +57,18 @@ class Identity:
         self._apply(self.store.load_identity())
 
     def _apply(self, rows):
-        agents, tokens, grants = rows
+        agents, tokens, grants = rows[0], rows[1], rows[2]
+        caps = rows[3] if len(rows) > 3 else ()
         g: Dict[str, List[Grant]] = {}
         for agent_id, scope, actions, effect in grants:
             g.setdefault(agent_id, []).append(Grant(scope=scope, actions=frozenset(actions.split(",")), effect=effect))
+        cp: Dict[str, set] = {}
+        for agent_id, name in caps:
+            if name in CAPABILITIES:                 # an unknown name (newer build) never grants anything here
+                cp.setdefault(agent_id, set()).add(name)
         self.agents = {a[0]: Agent(id=a[0], display_name=a[1], role=a[2], enabled=bool(a[3]),
-                                   grants=tuple(g.get(a[0], ()))) for a in agents}
+                                   grants=tuple(g.get(a[0], ())), capabilities=frozenset(cp.get(a[0], ())))
+                       for a in agents}
         created = {a[0]: a[4] for a in agents}
         toks = {t[0]: TokenRecord(*t) for t in tokens}
         self.created, self.tokens = created, toks
@@ -70,7 +76,8 @@ class Identity:
                       if t.revoked_at is None and self.agents.get(t.agent_id) and self.agents[t.agent_id].enabled}
 
     # ---- main thread: administration -----------------------------------------------------------
-    def create_agent(self, display_name: str, role: str, scopes: Sequence[str]) -> Tuple[Agent, str]:
+    def create_agent(self, display_name: str, role: str, scopes: Sequence[str],
+                     capabilities: Sequence[str] = ()) -> Tuple[Agent, str]:
         name = (display_name or "").strip()
         if not (1 <= len(name) <= 64) or any(ord(ch) < 32 for ch in name):
             raise ValueError("display name must be 1–64 printable characters")
@@ -78,9 +85,15 @@ class Identity:
             raise ValueError("unknown role")
         if not scopes:
             raise ValueError("at least one scope is required")
+        caps = sorted(set(capabilities))
+        if not set(caps) <= CAPABILITIES:
+            raise ValueError("unknown capability")
+        if CAP_MEMORY_REPO_WRITE in caps and "update" not in ROLES[role]:
+            raise ValueError("writing project memory needs a role with update")
         grants = [Grant(scope=s, actions=ROLES[role]) for s in scopes]          # validates scopes
         agent_id = "agt_" + _rand_id(10)
-        self.store.put_agent(agent_id, name, role, [(gr.scope, ",".join(sorted(gr.actions)), "allow") for gr in grants])
+        self.store.put_agent(agent_id, name, role, [(gr.scope, ",".join(sorted(gr.actions)), "allow") for gr in grants],
+                             caps)
         token = self.issue_token(agent_id)
         return self.agents[agent_id], token
 
@@ -126,7 +139,7 @@ class Identity:
         for a in self.agents.values():
             out.append({"id": a.id, "display_name": a.display_name, "role": a.role, "enabled": a.enabled,
                         "created_at": self.created.get(a.id),
-                        "scopes": [g.scope for g in a.grants],
+                        "scopes": [g.scope for g in a.grants], "capabilities": sorted(a.capabilities),
                         "tokens": [{"token_id": t.token_id, "created_at": t.created_at, "revoked": bool(t.revoked_at)}
                                    for t in self.tokens.values() if t.agent_id == a.id]})
         return out

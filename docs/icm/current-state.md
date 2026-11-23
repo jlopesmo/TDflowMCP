@@ -1,6 +1,6 @@
 # TDflowMCP — Current state
 
-**Observed 2026-11-23 (re-verified after a PC restart), branch `dev`. Phase 1C (agent onboarding) is complete in the development build, together with the ADR-0006 audit worker and project-local storage** (owner D13). **Phase 2A increment 1 (project memory, checkpoints, verified handoffs) is implemented and verified in TD** (owner D17). A live Claude Code session connected using only the generated instructions, and the packaged component passes its in-TouchDesigner acceptance suites on **2025.32440**. Phases 1A and 1B are re-verified on the same build. This file records evidence only. Plans live in the [roadmap](roadmap.md).
+**Observed 2026-11-23 (re-verified after a PC restart), branch `dev`. Phase 1C (agent onboarding) is complete in the development build, together with the ADR-0006 audit worker and project-local storage** (owner D13). **Phase 2A increment 1 (project memory, checkpoints, verified handoffs) is implemented and verified in TD** (owner D17). A live Claude Code session connected using only the generated instructions, and the packaged component passes its in-TouchDesigner acceptance suites on **2025.32440**. Phases 1A and 1B are re-verified on the same build. **Phase 2A increments 2 and 3 are implemented and verified in TD** (restart persistence and identity; repository-mode memory with both remaining ADR-0013 gates), and the earlier unexplained hang is explained and handled (a minimized window). This file records evidence only. Plans live in the [roadmap](roadmap.md).
 
 ## Verified
 - **Repository:** private `jlopesmo/TDflowMCP`. `main` = `066dbd0` (Phase 0 foundation), **unchanged**. Development continues on `dev`.
@@ -41,10 +41,10 @@
   - Friction and missing capabilities are recorded (network summary tool, grouped undo, denial wording).
   - Verified on candidate builds from the uncommitted tree (see the [validation index](validation-index.md)). On `a414f3c9…`: 1A, 1B (113 checks), gate, onboarding and the full five-task dogfood pass 2, where every boundary held. On `1625ec54…` (never-cooked change): 1B 115/115 and dogfood `inspect` pass 3. **On the review-8 candidate `2dac3a27…`:** every suite passes, including dogfood pass 4 under full agent isolation ([review 8](../research/2026-11-22-dogfood-review.md)).
 - **Tests and checks** (latest observed run: 2026-11-23, clean build `e79ed3fe…` of `c888d00`, after the PC restart; [recovery record](../research/2026-11-23-post-restart-recovery.md)):
-  - 280 tests (`discover -s tests -t .`) on CPython 3.11.8 (2 skipped) and on TD Python 3.11.10 (1 skipped).
-  - 1A 49/49 + 69/69; 1B 43/43 + 115/115; gate (gate, crash, restart) 46/46 + 47/47; memory + restart 26/26 + 99/99; onboarding live 5/5 + 47/47.
+  - 345 tests (`discover -s tests -t .`) on CPython 3.11.8 (2 skipped) and on TD Python 3.11.10 (1 skipped).
+  - On the increment-3 candidate `273b185e…` (uncommitted tree): 1A 49/49 + 69/69; 1B 47/47 + 126/126; gate (gate, crash, restart) 46/46 + 47/47; memory + restart + repository 51/51 + 179/179; onboarding live 5/5 + 47/47.
   - Doc checker and secret scan pass.
-  - The clean rebuild has the same source digest as the candidate tested before the restart, so the committed source is what was tested.
+  - After the PC restart, a clean rebuild of `c888d00` had the same source digest as the candidate tested before it ([recovery record](../research/2026-11-23-post-restart-recovery.md)).
   - **Packaged component** (`2a7e72f`, tox `9a063083…`): 1A, 1B, gate and live onboarding suites all pass ([validation index](validation-index.md)).
 
 - **Phase 2A increment 1: project memory** ([record](../research/2026-11-22-phase-2a-memory.md), [continuity §7](../architecture/continuity-and-memory.md#7-phase-2a-increment-1-what-is-implemented-2026-11-22), [review 9](../research/2026-11-22-phase-2a-review.md)):
@@ -66,8 +66,20 @@
   - **Project identity verification:** a `tdflowProject` with another `Projectid` is read-only until claimed; this also holds with zero records. A truncated ledger fails closed.
   - **Frame hitch:** chunked fingerprints and a 1000-operator walk bound; frame max 7.1 ms on a 2000-operator scope.
   - Status is labelled `agent_reported`.
-  - **Hang:** a test-only stall watchdog runs in every in-TD suite. Two more two-agent dogfood runs and all suites showed no stall. The original hang is unexplained and unreproduced.
+  - **Hang:** a test-only stall watchdog runs in every in-TD suite. Two more two-agent dogfood runs and all suites showed no stall. The hang was unexplained at the time; **it is explained since 2026-11-23** (a minimized TouchDesigner window, below).
   - Verified on candidate `68e1f1f9…`: memory + restart 26/26 + 99/99; 1A 49/49 + 69/69; 1B 43/43 + 115/115; gate 46/46 + 47/47. [Review 10](../research/2026-11-23-phase-2a-increment-2.md#independent-review-10): no High findings, all fixed.
+- **Phase 2A increment 3** ([record](../research/2026-11-23-phase-2a-increment-3.md), [continuity §8](../architecture/continuity-and-memory.md#8-phase-2a-increment-3-repository-mode-2026-11-23), [review 11](../research/2026-11-23-phase-2a-increment-3-review.md), owner D19):
+  - **Repository mode:** task records as files in a folder inside the project's own folder tree (`tdflow/memory/`, with `tdflow-project.json`). The component then holds only the link and a derived index. File I/O never runs on TouchDesigner's main thread.
+  - **Both remaining ADR-0013 gates passed in TD:** a mismatched `Projectid` blocks linking, reading, writing, claiming and migrating; a migration in both directions preserves every record and hash.
+  - **Migration and re-link** on the paired Setup page: preview with a digest, then exactly that preview; audited before and after; refused while the ledger is not clean.
+  - **Dedicated permission (owner condition D18):** writing in repository mode needs the capability `memory:repo:write`, issued only by the user at token creation. **Awaiting the owner's confirmation** that this is the intended form ([ADR-0013](../decisions/0013-project-memory-model.md#conditional-decision-on-memory-permissions-owner-d18-2026-11-22)).
+  - **Untrusted folder contents:** files the audit log does not know are never used without the user's claim, cannot crash the tools, and cannot put text into server-labelled parts of an answer.
+  - **Friction fixes:** default placement of created operators; an optional `status` on handoffs; the changed parameters named on resume. Skill **1.2**.
+  - **Not verified:** a parent-folder link (`..`) in TD (unit-tested); a link on a cloud-synced or network folder.
+- **The earlier "unexplained hang" is explained and handled** ([S9](../research/2026-11-23-s9-minimized-window.md)):
+  - TouchDesigner 2025.32440 runs **no frames while its window is minimized** (measured: 0 frames in 4 s, also with independent time).
+  - Before: timeouts, then the listener closed after 20 s and MCP turned off. Now: calls that need TouchDesigner are refused at once with `TDFLOW_NOT_COOKING` and the reason, nothing executes, the listener and MCP stay, and work continues when the window is restored. Verified in TD (1B `minimized.*` checks).
+  - Windows only; elsewhere the earlier behaviour applies. While minimized, frame-driven checks (bind re-verification, idle stop, the `Suspendagents` parameter) are paused; nothing that touches the project can run. **For the owner:** accept this limit or ask for a background re-verification ([review 12](../research/2026-11-23-s9-minimized-window.md#independent-review-12)).
 
 ## Not implemented (nothing below exists)
 - **Withheld by design:**
@@ -76,8 +88,7 @@
   - project save.
 - **Later phases:**
   - the governance dashboard (2B);
-  - repo-mode project memory, `tdflow-project.json`, the `Projectid` link check and mode migration (later 2A increments);
-  - task, decision and ICM record types (`tdflow_memory_get/put`), archiving;
+  - task, decision and ICM record types (`tdflow_memory_get/put`), archiving (adding an agent-writable record type reopens owner condition D18);
   - a dashboard UI for choosing data locations beyond the `Datalocation` parameter (2B).
 - **Not yet:**
   - a 1.0 release (packages are `.dev` development builds);
@@ -101,11 +112,11 @@
 
 - `c888d00`: push evidence for `930154b`. **Post-restart recovery (2026-11-23, owner D19):** nothing was lost; the tree was clean and level with `origin/dev`; a clean build of this commit (tox `e79ed3fe…`) passes every baseline suite ([record](../research/2026-11-23-post-restart-recovery.md)).
 
+- `3a53e72`: post-restart recovery record and D19. Pushed to `origin/dev` and observed with `git ls-remote` (`refs/heads/dev` = `3a53e72…`, `refs/heads/main` = `066dbd0…`, so `main` is unchanged). CI: **not observed**.
+
 ## Next (owner direction D19: continue in dependency order)
-1. **Phase 2A increment 3:**
-   - repo mode with `tdflow-project.json`, the repository `Projectid` link check and migration (the remaining ADR-0013 gates);
-   - the dogfood friction: default operator placement, handoff status, per-parameter drift.
-2. **Hang:** keep the stall watchdog running in every suite; analyse any dump.
+1. **Phase 2B governance dashboard** ([ADR-0005](../decisions/0005-dashboard.md)): `/ui`, live events, sessions, audit search, reports, approvals, policy and token management, a kill switch that works without frames. Not started.
+2. **Owner confirmations:** the repository-memory capability (D18); whether to add agent-writable task, decision or ICM records.
 3. **ADR-0014 stage 1** (approved, D17): isolated candidate build/test bound to the `.tox` hash, plus a manual promotion recorded by the new A. Not started.
 4. **B3:** an observed CI run.
 5. **Remaining review-6 follow-ups:** bind/export propagation; pairing DoS mitigation. Checkpoints are now anchored in private storage outside the project.

@@ -28,6 +28,14 @@ Accepted for Phase 2A, conditionally:
 
 The condition is reopened if a later increment adds any agent-writable record type beyond checkpoints and handoffs.
 
+**Applied in increment 3 (2026-11-23), repository mode.** Checkpoints and handoffs written in repository mode are repository-backed files, so item 4 applies to them. The dedicated permission is the capability `memory:repo:write`:
+- only the user issues it, when creating a token on the paired Setup page, and only to a role that can update;
+- it is never implied by a role or an operator scope, and it is stored with the credentials in private storage;
+- the engine requires it for every write in repository mode (rule `M8`) and reads it again right before the file is created;
+- reading keeps the role-and-scope model, and embedded mode is unchanged.
+
+No new agent-writable record type was added, so the condition is not reopened. **For the owner to confirm:** that this capability is the intended form of the "dedicated memory permission" for repository-backed task records.
+
 ## Alternatives
 - Two-way sync between the `.toe` and the repo: rejected, because it is exactly the conflicting-authority problem.
 - Repo-only memory: excludes users without Git.
@@ -38,9 +46,9 @@ Phase 1B (passed 2026-11-22): raw operator tools are denied on a tagged `tdflowP
 
 Phase 2A:
 - A stale write is rejected. **Passed 2026-11-22** (in TD, `MEMORY_CONFLICT`; also a write between plan and execute, unit-tested).
-- A mismatched `Projectid` blocks linking. **Not yet:** repo mode is a later 2A increment.
-- A migration in both directions preserves records and hashes. **Not yet:** migration is a later 2A increment.
+- A mismatched `Projectid` blocks linking. **Passed 2026-11-23** (in TD, increment 3): a folder whose `tdflow-project.json` names another `Projectid` cannot be linked, and if the file changes later, reads, writes, claims and migrations are refused (`MEMORY_LINK_MISMATCH`).
+- A migration in both directions preserves records and hashes. **Passed 2026-11-23** (in TD, increment 3): embedded → repository → embedded with records written in both modes; every record arrives with the same text hash, and the ledger stays valid without a claim.
 - Raw operator tools are denied on `tdflowProject` (verified in Phase 1B; re-verified on record DATs in 2A).
-- **Project identity (D18; passed 2026-11-22 in TD):** a `tdflowProject` whose `Projectid` differs from the one this project's audit log created or claimed is detected and read-only until the user claims it. Repo mode's `tdflow-project.json` check is still open.
+- **Project identity (D18; passed 2026-11-22 in TD):** a `tdflowProject` whose `Projectid` differs from the one this project's audit log created or claimed is detected and read-only until the user claims it. Repository mode's `tdflow-project.json` check passed in increment 3 (above).
 - **Restart persistence (D18; passed 2026-11-22 in TD):** saved records, ledger and fingerprints survive a TouchDesigner restart. A record written after the last save is reported missing, and memory is restored by Claim Project Memory.
 - Additional checks in increment 1 (passed): a single authority (two `tdflowProject` components are refused), and edited, missing or foreign records make memory read-only until the user's Claim Project Memory. Fork and rewind detection uses the audit log as ledger instead of a `Datadir` registry ([continuity §7](../architecture/continuity-and-memory.md#7-phase-2a-increment-1-what-is-implemented-2026-11-22)).

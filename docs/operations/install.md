@@ -47,9 +47,20 @@ Keep the single quotes: the configuration then stores the text `${TDFLOW_TOKEN}`
 Toggle **Enable MCP**. It turns itself off again with a reason if a precondition fails (for example no
 token exists yet, or the audit log fails verification). Ask your agent to call `tdflow_whoami` first.
 
+**Keep the TouchDesigner window open while agents work.** It may sit behind other windows, but do not
+minimize it: TouchDesigner pauses completely while minimized. Your agent then gets the error
+`TDFLOW_NOT_COOKING` and nothing is changed. Restore the window and the agent can continue; MCP stays on.
+
 ## Optional: Skills
 On the Setup page (Agents and access → Skills) you can install the TDflowMCP Skills for Claude Code, in
 your user folder or in this project. You see a preview first; files you changed are never overwritten.
+
+## Optional: project memory
+Pulse **Create Project Memory** (Advanced page) to let agents record task checkpoints and handoffs in a
+`tdflowProject` component. On the Setup page (Agents and access → Project memory) you can instead keep
+those records as files in a folder of your project, for example its Git repository: you see a preview
+first, and you can move them back the same way. Agents then need a token created with "May write task
+records into the linked repository folder". TDflowMCP writes the files; it never runs Git.
 
 ## Safety controls
 - **Suspend Agents** (kill switch) stops every agent request at once, including queued ones.

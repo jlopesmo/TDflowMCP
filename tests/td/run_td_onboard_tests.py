@@ -185,9 +185,11 @@ def cp_onboard(data, pid):
         T("live.claude_code_session_ok", p.returncode == 0 and bool(line), rc=p.returncode, line=line,
           stderr=p.stderr[-800:])
         T("live.opacity_read_back", "opacity=0.25" in line, line=line)
-        T("live.expected_skill_version_from_whoami", "expected_skill_version=1.1" in line, line=line)
-        # Whole-word match: "expected_skill_version=1.1" must not satisfy it (review 8 follow-up).
-        T("live.project_skill_discovered", re.search(r"(?<![a-z_])skill_version=1\.1(?![0-9])", line) is not None, line=line)
+        from tdflowmcp import SKILL_VERSION as SV          # the bundled Skill version (1.2 since 2A increment 3)
+        T("live.expected_skill_version_from_whoami", f"expected_skill_version={SV}" in line, line=line)
+        # Whole-word match: "expected_skill_version=<v>" must not satisfy it (review 8 follow-up).
+        T("live.project_skill_discovered",
+          re.search(r"(?<![a-z_])skill_version=" + re.escape(SV) + r"(?![0-9])", line) is not None, line=line)
         T("live.no_token_in_agent_output", secret not in p.raw and secret not in p.stderr)
         with open(cfg_path, encoding="utf-8") as f:
             T("live.client_config_file_has_no_token", secret not in f.read())

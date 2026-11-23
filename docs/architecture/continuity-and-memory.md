@@ -1,6 +1,6 @@
 # Continuity and shared project memory
 
-**Status:** design for owner-approved requirements P15–P17 ([ADR-0012](../decisions/0012-session-continuity.md), [ADR-0013](../decisions/0013-project-memory-model.md), both Conditionally Accepted). Session logs (§4) are implemented since 1B. **Phase 2A increment 1 is implemented: embedded-mode project memory, task checkpoints, verified handoffs and resume ([§7](#7-phase-2a-increment-1-what-is-implemented-2026-11-22)).** Where §7 differs from §2–§6, §7 describes what exists; repo mode and migration remain design.
+**Status:** design for owner-approved requirements P15–P17 ([ADR-0012](../decisions/0012-session-continuity.md), [ADR-0013](../decisions/0013-project-memory-model.md), both Conditionally Accepted). Session logs (§4) are implemented since 1B. **Phase 2A increment 1 is implemented: embedded-mode project memory, task checkpoints, verified handoffs and resume ([§7](#7-phase-2a-increment-1-what-is-implemented-2026-11-22)). Increment 3 adds repository mode, the `Projectid` link check and migration ([§8](#8-phase-2a-increment-3-repository-mode-2026-11-23)).** Where §7 and §8 differ from §2–§6, they describe what exists.
 
 ## 1. Three kinds of state — and where each lives
 
@@ -100,8 +100,46 @@ A session (see [security model §2.3](security-model.md#23-sessions)) is a group
 - a checkpoint or resume over a 2000-operator scope (1000 walked, 300 fingerprinted): ≈ 185 ms, with a frame max of **7.1 ms**. Before chunking, a 300-operator fingerprint was one step of ≈ 19–28 ms.
 
 **Not yet:**
-- repo mode, `tdflow-project.json` and the `Projectid` link check;
-- migration between modes;
 - tasks, decisions and ICM record types (`tdflow_memory_get/put`);
 - record archiving;
-- (TouchDesigner restart persistence: **verified in increment 2**.)
+- (TouchDesigner restart persistence: **verified in increment 2**; repository mode, the link check and migration: **verified in increment 3**, [§8](#8-phase-2a-increment-3-repository-mode-2026-11-23).)
+
+## 8. Phase 2A increment 3: repository mode (2026-11-23)
+
+**Implemented and tested** in [`src/tdflowmcp/memrepo.py`](../../src/tdflowmcp/memrepo.py) (file I/O, never on the main thread), the engine's memory path, the TD adapter and the Setup page, with evidence in the [increment 3 record](../research/2026-11-23-phase-2a-increment-3.md). Where this section differs from §2, this section describes what exists.
+
+**Layout.** With `Memoryauthority` = `repo`, the authority is a folder the user linked:
+- `<folder>/tdflow-project.json`: `{schema, project_id, authority, created_at, updated_at, note}`;
+- `<folder>/tdflow/memory/<record_id>.json`: one record per file, the same canonical JSON as a record DAT;
+- `<folder>/tdflow/memory/MIGRATIONS.jsonl`: one informational line per migration.
+
+The component keeps the read-only `Repopath`, the `Projectid`, a `derived_index` DAT (counts and a digest, stamped DERIVED) and a `MIGRATIONS` note. It holds no record DATs.
+
+**The linked folder.** `Repopath` is always relative to the `.toe` folder: `.`, a folder below it, or up to three levels straight above it. Absolute paths, drive letters, sibling folders, and anything inside `.git` or `.tdflowmcp` are refused. No symbolic link or junction may be on any component between the `.toe` folder and the linked folder (the real path must equal the real path of the `.toe` folder plus the link; review 11), nor on `tdflow/`, `tdflow/memory/` or a touched file. After a write, the file's real path is checked again. TDflowMCP writes nothing outside `tdflow-project.json` and `tdflow/memory/`, never overwrites or deletes a record, and never runs Git.
+
+**Link check.** Before every read, write, claim and migration, `tdflow-project.json` must name this memory's `Projectid` with authority `repo`:
+- no file → `MEMORY_UNAVAILABLE` (unlinked);
+- another `Projectid` → `MEMORY_LINK_MISMATCH`. Claim Project Memory does not override it; the user must link the right folder;
+- authority `embedded` → the folder is a derived export left by a migration back (`MEMORY_UNAVAILABLE`, stale).
+
+**Untrusted files (review 11).** A record file is data from outside until the audit log accepts it:
+- reading a record never raises; anything malformed, oversized, linked or not encodable is `invalid` and named, and is never claimable;
+- the fields the server wrote are validated strictly when read back (`author` is an id, `created_at` a timestamp, fingerprint paths are operator paths, digests and parameter names are plain tokens);
+- resume returns **no comparison** when the task's latest record is not `accepted` (`fingerprint.comparison: "unavailable"`), and each `tdflow_task_list` row carries its `ledger` status;
+- an announced record whose write definitely failed (`error` or `aborted` outcome) is not authentic if a file with that text appears.
+
+**Ledger.** Unchanged: the audit log announces every record (intent with the text hash) and the user's claims. Files changed outside TDflowMCP, for example by a Git checkout or pull, are `changed_outside`, `foreign` or `missing`, and memory is read-only for agents until Claim Project Memory. In repository mode the claim reads the files on a background thread.
+
+**Threads.** The engine reads the files on its HTTP handler thread. A write is: durable intent → a main-thread step that re-checks the kill switch, the token and the grants and confirms that the component still links the same folder (it changes nothing) → the kill switch, token and capability are read once more → under one process-wide lock the link is checked again and the file is created only if the record set is unchanged (so two requests can never write the same revision, and a migration cannot switch the authority in between; review 11) → durable outcome → the derived index is refreshed. TouchDesigner's main thread never waits for the disk. When a task's recorded scopes are needed, the engine reads them from the files and plans a second time.
+
+**Access (owner condition D18).** Reading follows role and operator scopes, as in embedded mode. **Writing in repository mode additionally needs the capability `memory:repo:write`**, which only the user issues when creating a token (builder role). Without it: `DENIED`, rule `M8`. `tdflow_whoami` reports `memory.repository_write`.
+
+**Migration.** Setup page → Project memory, paired admin session: a preview (`POST /setup/api/memory/plan`) lists every action and returns a digest; the migration (`POST /setup/api/memory/migrate`) runs only for that exact digest, and only while the ledger is clean (otherwise claim first).
+- *Embedded → repository:* refused if the folder holds another project's file or different records. The files are written and verified by hash; then the component is switched in one main-thread step that also re-checks the record set. If that step does not happen, the folder is marked as a derived export.
+- *Repository → embedded:* the component's record DATs become exactly the folder's records; the folder is then marked `DERIVED` and is no longer read. The files are left in place.
+- *Re-link (review 11):* for repository mode whose link was lost (the `.toe` was not saved after a migration, the project was saved elsewhere, `tdflow-project.json` is missing or marked derived). The component points at the folder again and the folder is marked as this memory's authority. No record is changed, another project's folder is refused, and records the audit log does not know still need a claim.
+- Records already in the target folder are never overwritten: a different version of a record is a conflict; other records are left in place and face the ledger afterwards.
+- Every preview lists the other files written (`also_written`) and says that anyone who can read the files can read every task record in them.
+- All three write `memory_migrate` audit events before (`started`) and after (`ok`, `error` or `unknown`), with the relative folder. A failure after `started` always closes the trail. Record text and hashes do not change, so no claim is needed after a move.
+
+**Friction fixes delivered with this increment** ([record](../research/2026-11-23-phase-2a-increment-3.md#dogfood-friction)): an optional `status` on handoffs; the parameters that changed, per operator, in the resume answer (`fingerprint.parameter_changes`; digests of non-default parameters are keyed with the installation key, kept in the record only in the room the rest of the record leaves, at most 20,000 characters, and never returned; with another key the detail is `known: false`); default placement of created operators.
