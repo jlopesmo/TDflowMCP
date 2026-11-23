@@ -17,6 +17,10 @@ Resolver kinds (the adapter turns them into policy Targets):
   dat_text       update on args.path (+ execute unless the DAT is data)
   undo           inverse actions of the agent's last audited mutation
   script         Code Mode (Phase 3): execute on args.scope; always approval of the exact script text
+  copy           Phase 3 experiment: read on args.path, create per copied operator (+ execute for code in it)
+  promote        delete of the original + update (rename) of the experiment args.path
+  discard        delete of the experiment args.path/** (only an experiment)
+  save           execute on the project root (approval only)
   memory         project memory (Phase 2A): read on the task's scopes; records are written only by the
                  memory path in the engine, never as operator targets (tdflowProject stays H4-denied)
 """
@@ -29,7 +33,7 @@ from tdflowmcp import schema
 from tdflowmcp.policy import ACTIONS
 
 RESOLVERS = {"none", "project", "read_path", "read_children", "read_tree", "set_params", "create", "delete",
-             "wire", "dat_text", "undo", "memory", "script"}
+             "wire", "dat_text", "undo", "memory", "script", "copy", "promote", "discard", "save"}
 PATH = {"type": "string", "minLength": 1, "maxLength": 512, "pattern": r"^/[A-Za-z0-9_/]*$",
         "description": "Absolute operator path, e.g. /project1/geo1"}
 NAME = {"type": "string", "minLength": 1, "maxLength": 64, "pattern": r"^[A-Za-z_][A-Za-z0-9_]*$"}
@@ -203,6 +207,22 @@ def core_registry() -> Registry:
            "the exact text; repeat the identical call once approved. Not a sandbox.",
            obj({"scope": PATH, "code": {"type": "string", "minLength": 1, "maxLength": 20000}}, ["scope", "code"]),
            ("execute",), "script", "execute_script"))
+    # Phase 3: experiments (a copy to try changes on) and approval-only project save.
+    T(Tool("tdflow_experiment_create", "Create experiment", "Copy a component next to itself as an experiment to "
+           "try changes on, leaving the original untouched. The copy is classified like creating each operator in "
+           "it (at most about 50 operators per call); code inside it (executable operators, expressions, references) "
+           "needs the user's approval, and copied executable operators are switched off. Undo with tdflow_undo.",
+           obj({"path": PATH, "name": NAME}, ["path", "name"]), ("read", "create", "execute?"), "copy",
+           "experiment_create", reversible="td_undo"))
+    T(Tool("tdflow_experiment_promote", "Promote experiment", "Replace the original component with the experiment "
+           "(it takes the original's name, position and wiring). Counts as deleting the original. Undo with "
+           "tdflow_undo.", obj({"path": PATH}, ["path"]), ("delete", "update"), "promote", "experiment_promote",
+           destructive=True, reversible="td_undo"))
+    T(Tool("tdflow_experiment_discard", "Discard experiment", "Delete an experiment made by "
+           "tdflow_experiment_create (nothing else). Undo with tdflow_undo.", obj({"path": PATH}, ["path"]),
+           ("delete",), "discard", "experiment_discard", destructive=True, reversible="td_undo"))
+    T(Tool("tdflow_save_project", "Save project", "Save the open project to its file, like Ctrl+S. Always needs the "
+           "user's approval. Not reversible.", EMPTY, ("execute",), "save", "save_project", destructive=True))
     # Phase 2A: task checkpoints, verified handoffs (ADR-0012) on single-authority project memory (ADR-0013).
     T(Tool("tdflow_task_list", "Task list", "Tasks in this project's memory (the user's tdflowProject component) "
            "that you can read, with their latest revision and status, and whether memory is writable.",

@@ -267,11 +267,15 @@ class Policy:
                         f"{t.param}, which names another operator or a file", "text": "writes text TouchDesigner may run "
                         "as code", "wire": "wires data into an operator that may evaluate it",
                         "activation": f"switches {t.param} of an executable operator (its code starts or stops "
-                        "running)", "trigger": f"changes {t.param} of an Execute DAT, which decides when its code "
+                        "running)", "copy": f"copies a {t.op_type}, an operator that runs code (the copy is switched off)", "copied_expression":
+                        f"carries an expression or bind on parameter {t.param} into the copy, where it runs",
+                        "copied_reference": f"carries parameter {t.param}, which names another operator or a file, "
+                        "into the copy", "save": "saves the project to its file, as "
+                        "TouchDesigner's own save does (it cannot be undone)", "trigger": f"changes {t.param} of an Execute DAT, which decides when its code "
                         "runs", "script": "runs a Code Mode script (its complete text is shown). Each tdflow call in it is checked like a separate call and must stay inside this scope; calls that need approval are refused inside a script"}.get(t.change, f"creates a {t.op_type}, an operator that runs code (created "
                         "switched off)" if t.op_type else "runs code")
-                out.append(f"A1: {t.path} {what}. Approved code runs with full access to TouchDesigner (including "
-                           "TDflowMCP itself); scopes do not limit it")
+                out.append(f"A1: {t.path} {what}." + ("" if t.change == "save" else " Approved code runs with full "
+                           "access to TouchDesigner (including TDflowMCP itself); scopes do not limit it"))
             if t.action == "delete" and t.count > self.max_delete:
                 out.append(f"A2: deletes {t.count} operators under {t.path} (more than {self.max_delete})")
         return out[:10]

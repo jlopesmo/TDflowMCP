@@ -27,6 +27,15 @@
 
 `tdflow_describe_network` (**Phase 4, implemented**; dogfood 1 finding 5): read on `path/*` (a COMP; results filtered to what the caller can read). One network level in one call: per operator type, family, inputs, flags, errors and warnings, TouchDesigner's own `cook_count` and last `cook_ms`, TOP resolution; `edges`, `by_family`, `with_errors`, `never_cooked`; and heuristic `hints` (`slow_cook`, `frame_budget`, `large_texture`, `error`, `dead_end`), each with its reason. At most 300 operators (`truncated`). Reads attributes only: it never cooks or evaluates anything. Additive: `tool_surface_version` stays `1`.
 
+**Experiments and save (Phase 3 increment 2, implemented; [record](../research/2026-11-23-phase-3-experiments.md)):**
+
+| Tool | Classification | Purpose |
+|---|---|---|
+| `tdflow_experiment_create` | read on every source operator; create per copied operator; **+ execute** for executable types, expressions, binds, exports and reference parameters carried into the copy (approval binds a hash of that code); G3 for set denylisted parameters | Copy a COMP next to itself to try changes; copied executable operators switched off; undoable |
+| `tdflow_experiment_promote` | delete of the original (A2 above 50 operators) + update of the experiment + wiring per downstream operator | Replace the original with the experiment (name, position, operator wiring); undoable |
+| `tdflow_experiment_discard` | delete of the experiment | Delete an experiment (only experiments); undoable |
+| `tdflow_save_project` | execute on the project root; always approval | Save the project like TouchDesigner's own save; not reversible |
+
 ## Continuity and memory tools
 
 | Tool | Phase | Actions | Purpose |
@@ -46,7 +55,7 @@ Errors added in 2A: `MEMORY_UNAVAILABLE` (no, an uninitialised, or more than one
 ## Later phases (candidates)
 
 - **Phase 2B:** `tdflow_get_custom_parameters`, `tdflow_edit_custom_parameters` (capabilities from the original bridge; deleting a page or parameter counts as `delete`), `tdflow_search_operators`, `tdflow_get_docs` (offline operator and Python reference), `tdflow_cook_performance`, `tdflow_report` (session summary), `tdflow_approval_status`.
-- **Phase 3:** `tdflow_experiment_create/promote/discard`, `tdflow_snapshot_create/restore`, `tdflow_search_api`/`tdflow_describe_api` (progressive disclosure), `tdflow_execute_python` (raw, disabled by default), `tdflow_save_project` (approval only), `tdflow_get_call_output` (stdout/stderr of the agent's own script calls; no global redirect).
+- **Phase 3:** `tdflow_snapshot_create/restore`, `tdflow_search_api`/`tdflow_describe_api` (progressive disclosure), `tdflow_execute_python` (raw, disabled by default), `tdflow_get_call_output` (stdout/stderr of the agent's own script calls; no global redirect).
 - **Phase 4+ extensions:** `tdflow_x_capture_top` (visual analysis), `tdflow_x_trace_cook` (debugging), `tdflow_x_optimize_suggest`, multi-agent `tdflow_lease_scope`.
 
 ## Conventions

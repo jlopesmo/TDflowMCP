@@ -1062,8 +1062,8 @@ class Engine:
 # Which tools may be approved, per approval rule (Phase 2B increment 1): A1 (runs code) only for parameter
 # expressions and reference parameters; A2 (large delete) for deletes.
 APPROVABLE = {"A1": ("tdflow_set_parameters", "tdflow_set_dat_text", "tdflow_create_operator",
-                     "tdflow_execute_script"),
-              "A2": ("tdflow_delete_operator",)}
+                     "tdflow_execute_script", "tdflow_experiment_create", "tdflow_save_project"),
+              "A2": ("tdflow_delete_operator", "tdflow_experiment_promote", "tdflow_experiment_discard")}
 MUTATION_LIMIT = 5000                       # audited mutations read per evidence window
 FP_CHUNK = 50                               # operators fingerprinted per main-thread step
 
@@ -1080,8 +1080,12 @@ def _main_reason(code: str, default: str = "TouchDesigner did not process the re
 def _snapshot_fact(res) -> list:
     """For text writes, the approval also binds the hash of the text being replaced (D20): approved code is never
     written over different code than the user saw replaced."""
-    snap = res.context.get("snapshot") if hasattr(res, "context") else None
-    return [["replaces_text_sha256", str(snap[3])], ["op_id", str(snap[1])]] if snap else []
+    ctx = res.context if hasattr(res, "context") else {}
+    snap = ctx.get("snapshot")
+    out = [["replaces_text_sha256", str(snap[3])], ["op_id", str(snap[1])]] if snap else []
+    if ctx.get("content_fact"):                  # review 16: the code a copy carries, as it is now
+        out.append([str(x) for x in ctx["content_fact"]])
+    return out
 
 
 def _main_code(e) -> str:
@@ -1093,7 +1097,7 @@ def _requested_targets(tool: Tool, args: dict, facts=None) -> List[Target]:
     """Path-only targets straight from the arguments (used when resolution fails), with protection facts
     from the adapter so errors never describe protected operators (review 6)."""
     primary = {"set_params": "update", "create": "create", "delete": "delete", "wire": "update",
-               "dat_text": "update"}.get(tool.resolver, "read")
+               "dat_text": "update", "promote": "delete", "discard": "delete"}.get(tool.resolver, "read")
     pairs = []
     if isinstance(args.get("path"), str):
         pairs.append((primary, args["path"]))

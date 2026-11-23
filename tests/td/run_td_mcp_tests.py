@@ -32,7 +32,8 @@ from tdflowmcp.net import oslisteners  # noqa: E402
 
 O = "http://127.0.0.1:9480"
 TOKENS, STATE = {}, {"cookies": {}}
-EXPECTED_TOOLS = sorted(["tdflow_approval_status", "tdflow_describe_network"] + ["tdflow_connect", "tdflow_create_operator", "tdflow_delete_operator", "tdflow_disconnect",
+EXPECTED_TOOLS = sorted(["tdflow_approval_status", "tdflow_describe_network", "tdflow_experiment_create",
+                         "tdflow_experiment_promote", "tdflow_experiment_discard", "tdflow_save_project"] + ["tdflow_connect", "tdflow_create_operator", "tdflow_delete_operator", "tdflow_disconnect",
                          "tdflow_get_dat_text", "tdflow_get_errors", "tdflow_get_operator", "tdflow_get_parameters",
                          "tdflow_list_operators", "tdflow_project_info", "tdflow_session_list", "tdflow_session_note",
                          "tdflow_set_dat_text", "tdflow_set_parameters", "tdflow_undo", "tdflow_whoami",
@@ -190,7 +191,7 @@ def cp_enabled(data, pid):
     T("proto.notification_202", st == 202 and not r.get("body"))
     st, j, _ = B.rpc("tools/list")
     names = sorted(t["name"] for t in (j or {}).get("result", {}).get("tools", []))
-    T("proto.tools_list_22", names == EXPECTED_TOOLS, names=names)   # + tdflow_execute_script once Code Mode is on
+    T("proto.tools_list_26", names == EXPECTED_TOOLS, names=names)   # + tdflow_execute_script once Code Mode is on
     # modern era
     st, j, _ = B.rpc("server/discover", modern=True)
     T("proto.modern_discover", st == 200 and "2026-07-28" in j["result"]["supportedVersions"])
@@ -452,6 +453,49 @@ def script_flow(E):
     T("script.changes_undoable_one_by_one", ok(u) and u.get("verified"), r=u)
 
 
+def experiment_flow(E):
+    """Phase 3: an experiment is a copy to try changes on; promote replaces the original (undoable); discard deletes
+    only experiments; code inside a copy needs approval; saving the project is approval-only."""
+    B = MCP(TOKENS["B"])
+    B.call("tdflow_create_operator", {"parent": "/project1/fx", "type": "containerCOMP", "name": "exp_src"})
+    B.call("tdflow_create_operator", {"parent": "/project1/fx/exp_src", "type": "noiseTOP", "name": "n1"})
+    amp0 = (B.call("tdflow_get_parameters", {"path": "/project1/fx/exp_src/n1", "names": ["amp"]}).get("parameters") or [{}])[0].get("value")
+    c = B.call("tdflow_experiment_create", {"path": "/project1/fx/exp_src", "name": "exp_try"})
+    T("experiment.CREATED_AS_A_COPY", ok(c) and c.get("operators") == 2 and c.get("copied_from") == "/project1/fx/exp_src", r=c)
+    B.call("tdflow_set_parameters", {"path": "/project1/fx/exp_try/n1", "values": {"amp": 0.25}})
+    a = (B.call("tdflow_get_parameters", {"path": "/project1/fx/exp_src/n1", "names": ["amp"]}).get("parameters") or [{}])[0]
+    T("experiment.original_untouched", a.get("value") == amp0, a=a)
+    T("experiment.discard_only_experiments", B.call("tdflow_experiment_discard", {"path": "/project1/fx/exp_src"})
+      .get("code") == "INVALID_ARGS")
+    p = B.call("tdflow_experiment_promote", {"path": "/project1/fx/exp_try"})
+    a = (B.call("tdflow_get_parameters", {"path": "/project1/fx/exp_src/n1", "names": ["amp"]}).get("parameters") or [{}])[0]
+    T("experiment.PROMOTED", ok(p) and a.get("value") == 0.25 and
+      B.call("tdflow_get_operator", {"path": "/project1/fx/exp_try"}).get("code") == "NOT_FOUND", r=p, a=a)
+    u = B.call("tdflow_undo")
+    a = (B.call("tdflow_get_parameters", {"path": "/project1/fx/exp_src/n1", "names": ["amp"]}).get("parameters") or [{}])[0]
+    T("experiment.PROMOTE_UNDONE", ok(u) and u.get("verified") and a.get("value") == amp0 and
+      ok(B.call("tdflow_get_operator", {"path": "/project1/fx/exp_try"})), r=u, a=a)
+    d = B.call("tdflow_experiment_discard", {"path": "/project1/fx/exp_try"})
+    T("experiment.DISCARDED", ok(d) and B.call("tdflow_get_operator", {"path": "/project1/fx/exp_try"}).get("code") == "NOT_FOUND", r=d)
+    approved(E, "tdflow_set_parameters", {"path": "/project1/fx/exp_src/n1", "expressions": {"amp": "0.5"}})
+    T("experiment.builder_cannot_copy_code", B.call("tdflow_experiment_create", {
+        "path": "/project1/fx/exp_src", "name": "exp_b"}).get("rule_id") == "R1")
+    req, c2 = approved(E, "tdflow_experiment_create", {"path": "/project1/fx/exp_src", "name": "exp_e"})
+    T("experiment.CODE_IN_A_COPY_NEEDS_APPROVAL", req.get("code") == "APPROVAL_REQUIRED" and "expression or bind on parameter amp"
+      in json.dumps(req.get("reasons")) and ok(c2), r=req)
+    B.call("tdflow_delete_operator", {"path": "/project1/fx/exp_e"})
+    B.call("tdflow_delete_operator", {"path": "/project1/fx/exp_src"})
+    # Save: approval only, and only with a grant on the project root (added and removed by the user here).
+    T("save.scoped_agent_denied", E.call("tdflow_save_project").get("code") == "DENIED")
+    aid = E.call("tdflow_whoami").get("agent_id")
+    g = base.jbody(admin("POST", "/api/grants/add", {"agent_id": aid, "scope": "/project1/**", "actions": ["execute"]})) or {}
+    req, s = approved(E, "tdflow_save_project", {})
+    T("save.NEEDS_APPROVAL", req.get("code") == "APPROVAL_REQUIRED" and "cannot be undone" in json.dumps(req.get("reasons")), r=req)
+    T("save.SAVED_OR_NEVER_SAVED", ok(s) or (s.get("code") == "INVALID_ARGS" and "never been saved" in s.get("message", "")), r=s)
+    admin("POST", "/api/grants/remove", {"agent_id": aid, "grant_id": g.get("grant_id")})
+    T("save.grant_removed_again", E.call("tdflow_save_project").get("code") == "DENIED")
+
+
 def network_flow(B):
     """Phase 4: a bounded, read-only network summary with heuristic hints; it reads facts only."""
     d = B.call("tdflow_describe_network", {"path": "/project1/fx"})
@@ -498,6 +542,7 @@ def approval_flow():
     code_dat_flow(E)
     script_flow(E)
     network_flow(MCP(TOKENS["B"]))
+    experiment_flow(E)
     # Dashboard: overview, live tail and a verified report.
     ov = base.jbody(admin("GET", "/api/overview")) or {}
     T("dashboard.overview", ov.get("mcp") is True and ov.get("cooking") is True and (ov.get("audit") or {}).get("ok") is True, ov=ov)

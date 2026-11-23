@@ -21,9 +21,14 @@ from tdflowmcp import insights as INS
 from tdflowmcp import layout as LAYOUT
 from tdflowmcp import memory as MEM
 from tdflowmcp.engine import Adapter, Resolution, ToolFailure
-from tdflowmcp.policy import ACTIVATION_PARAMS, APPROVABLE_CREATE_TYPES, EXECUTABLE_TYPES, Target
+from tdflowmcp.policy import ACTIVATION_PARAMS, APPROVABLE_CREATE_TYPES, EXECUTABLE_TYPES, PARAM_DENYLIST, Target
+from tdflowmcp.policy import _name_denied
 
 DATA_TAG = "tdflowdata"
+EXPERIMENT_TAG = "tdflowexperiment"     # set by TDflowMCP only (agents cannot set tags, H7)
+EXPERIMENT_KEY = "tdflow_experiment_of"
+RESERVED_TAGS = {"TDflowMCP", "tdflowProject"}
+MAX_COPY = 500                         # operators inspected for a copy (the policy limit per call is lower)
 # Parameter styles whose value names another operator or a file: setting them can read or wire things
 # outside the agent's scope (review 6, H2), so they are classified as execute (denied in Phase 1).
 REFERENCE_STYLES = {"OP", "COMP", "OBJ", "Object", "PanelCOMP", "TOP", "CHOP", "SOP", "DAT", "MAT", "POP", "File",
@@ -46,6 +51,10 @@ README_REPO = ("Project memory for this TouchDesigner project (TDflowMCP, reposi
 
 def _norm(text):
     return str(text).replace("\r\n", "\n").rstrip("\n")
+
+
+def _denied_par(name):
+    return _name_denied(name, PARAM_DENYLIST)
 
 
 def _cooks(o):
@@ -143,6 +152,29 @@ class TDAdapter(Adapter):
             return self._resolve_params(args)
         if k == "create":
             return self._resolve_create(args)
+        if k == "copy":
+            return self._resolve_copy(args)
+        if k in ("promote", "discard"):
+            e = self._op(args["path"], "experiment")
+            if EXPERIMENT_TAG not in e.tags:
+                raise ToolFailure("INVALID_ARGS", f"{e.path} is not an experiment made by tdflow_experiment_create")
+            n = 1 + (len(e.findChildren()) if e.isCOMP else 0)
+            if k == "discard":
+                return Resolution([self._facts(e, "delete", change="delete", count=n)], {"op": e, "count": n})
+            origin = self._experiment_origin(e)
+            m = 1 + len(origin.findChildren())
+            ins = [[(c.owner, c.index) for c in conn.connections] for conn in origin.inputConnectors]
+            outs = [[(c.owner, c.index) for c in conn.connections] for conn in origin.outputConnectors]
+            ts = [self._facts(origin, "delete", change="delete", count=m), self._facts(e, "update", change="rename")]
+            for owner, _ in (x for srcs in ins for x in srcs):
+                ts.append(self._facts(owner, "read"))
+            for owner, _ in (x for dsts in outs for x in dsts):       # review 16: rewired downstream operators
+                ts.append(self._facts(owner, "update", change="wire"))
+                if owner.family == "DAT" or owner.OPType in EXECUTABLE_TYPES:
+                    ts.append(self._facts(owner, "execute", change="wire"))
+            return Resolution(ts, {"op": e, "origin": origin, "count": m, "ins": ins, "outs": outs})
+        if k == "save":
+            return Resolution([self._facts(None, "execute", path=self.root_fn(), change="save")], {})
         if k == "delete":
             o = self._op(args["path"])
             n = 1 + (len(o.findChildren()) if o.isCOMP else 0)
@@ -512,6 +544,151 @@ class TDAdapter(Adapter):
             out["staged_inactive"] = True                                  # checked inside do(), rolled back if not
         return out
 
+    # ---- Phase 3: experiments and project save -------------------------------------------------
+    def _experiment_origin(self, e):
+        origin = td.op(str(e.fetch(EXPERIMENT_KEY, "", search=False) or ""))
+        if origin is None or not origin.isCOMP or origin.parent() is None or e.parent() is None or \
+                origin.path == e.path or origin.parent().path != e.parent().path:
+            raise ToolFailure("INVALID_ARGS", "the experiment's original component no longer exists next to it")
+        return origin
+
+    def _resolve_copy(self, args):
+        """Copying is classified like reading every operator in the source and creating every operator in the copy
+        (so read denies, protection and the creation allowlist apply inside the subtree), plus execute for anything
+        that would run code once copied: executable types, parameters not in constant mode (expressions, binds,
+        exports) and constant parameters that name operators, DATs or files. Set denylisted parameters (an external
+        .tox, clone, extension...) make the copy G3-denied in any mode. Parameters still at TouchDesigner's default
+        (some COMP parameters default to an expression) are not new code. Anything that cannot be inspected fails
+        closed. Review 16: the approval also binds a hash of the code carried by the copy."""
+        src = self._op(args["path"], "component")
+        if not src.isCOMP or src.parent() is None:
+            raise ToolFailure("INVALID_ARGS", f"{src.path} is not a component that can be copied.")
+        parent = src.parent()
+        if parent.op(args["name"]) is not None:
+            raise ToolFailure("INVALID_ARGS", f"{parent.path}/{args['name']} already exists")
+        ops = [src] + list(src.findChildren())
+        if len(ops) > MAX_COPY:
+            raise ToolFailure("INVALID_ARGS", f"the component has {len(ops)} operators; at most {MAX_COPY} can be copied")
+        new = parent.path.rstrip("/") + "/" + args["name"]
+        ts, code = [], hashlib.sha256()
+        for o in ops:
+            if RESERVED_TAGS & set(o.tags):
+                raise ToolFailure("INVALID_ARGS", f"{o.path} is a TDflowMCP or project-memory component; it cannot be "
+                                                  "copied")
+            ts.append(self._facts(o, "read"))
+            p = new + o.path[len(src.path):]
+            ts.append(self._facts(None, "create", path=p, op_type=o.OPType))
+            if o.OPType in EXECUTABLE_TYPES:
+                ts.append(self._facts(None, "execute", path=p, op_type=o.OPType, change="copy"))
+            if o.isDAT and (o.OPType in EXECUTABLE_TYPES or DATA_TAG not in o.tags):
+                try:
+                    code.update(f"{o.path}\0{o.text}\0".encode("utf-8", "replace"))
+                except Exception:
+                    raise ToolFailure("INVALID_ARGS", f"the text of {o.path} cannot be read; nothing was copied")
+            for par in o.pars():
+                try:
+                    if par.isDefault:
+                        continue
+                    mode = str(par.mode).split(".")[-1]
+                    if _denied_par(par.name):
+                        ts.append(self._facts(None, "update", path=p, op_type=o.OPType, change="param",
+                                              param=par.name))
+                    if mode != "CONSTANT":
+                        ts.append(self._facts(None, "execute", path=p, op_type=o.OPType, change="copied_expression",
+                                              param=par.name))
+                        code.update(f"{o.path}\0{par.name}\0{mode}\0{par.expr if mode == 'EXPRESSION' else ''}"
+                                    f"\0{getattr(par, 'bindExpr', '')}\0".encode("utf-8", "replace"))
+                    elif par.style in REFERENCE_STYLES:
+                        ts.append(self._facts(None, "execute", path=p, op_type=o.OPType, change="copied_reference",
+                                              param=par.name))
+                        code.update(f"{o.path}\0{par.name}\0{par.eval()}\0".encode("utf-8", "replace"))
+                except ToolFailure:
+                    raise
+                except Exception:
+                    raise ToolFailure("INVALID_ARGS", f"parameter {par.name} of {o.path} cannot be inspected; nothing was "
+                                                      "copied")
+        return Resolution(ts, {"op": src, "parent": parent, "path": new,
+                               "content_fact": ["copies_code_sha256", code.hexdigest()]})
+
+    def _t_experiment_create(self, args, res, label, readable):
+        src, parent, path = res.context["op"], res.context["parent"], res.context["path"]
+
+        def do():
+            n = parent.copy(src, name=args["name"])
+            if n.path != path:
+                raise ToolFailure("EXECUTION_FAILED", "TouchDesigner named the copy differently")
+            # Review 16: copied executable operators are staged switched off, like tdflow_create_operator.
+            for c in [n] + list(n.findChildren()):
+                if c.OPType in EXECUTABLE_TYPES:
+                    for pn in ACTIVATION_PARAMS:
+                        q = getattr(c.par, pn, None)
+                        if q is not None:
+                            if str(q.mode).split(".")[-1] != "CONSTANT":
+                                q.mode = type(q.mode).CONSTANT
+                            q.val = False
+                            if bool(q.eval()):
+                                raise ToolFailure("EXECUTION_FAILED", f"{c.path} could not be switched off")
+            n.tags.add(EXPERIMENT_TAG)
+            n.store(EXPERIMENT_KEY, src.path)
+            try:
+                n.nodeX, n.nodeY = int(src.nodeX) + int(src.nodeWidth) + 40, int(src.nodeY)
+            except Exception:
+                pass
+            return n
+        n, stack = self._mutate(label, do)
+        return {"path": n.path, "copied_from": src.path, "operators": 1 + len(n.findChildren()),
+                "executable_operators_switched_off": sum(1 for c in n.findChildren() if c.OPType in EXECUTABLE_TYPES),
+                "_audit": {"kind": "create", "path": n.path, "type": n.OPType, "stack": stack,
+                           "reversible": "td_undo" if stack else "no"}}
+
+    def _t_experiment_promote(self, args, res, label, readable):
+        """Replace the original with the experiment in one undo block: the experiment takes the original's name,
+        position and operator wiring; references by path keep working."""
+        e, origin = res.context["op"], res.context["origin"]
+        name, path, typ = origin.name, origin.path, origin.OPType
+        ins, outs = res.context["ins"], res.context["outs"]
+
+        def do():
+            x, y = int(origin.nodeX), int(origin.nodeY)
+            origin.destroy()
+            e.name = name
+            if e.path != path:
+                raise ToolFailure("EXECUTION_FAILED", "the experiment could not take the original's name")
+            e.nodeX, e.nodeY = x, y
+            lost = 0
+            for i, srcs in enumerate(ins):
+                for owner, idx in srcs:
+                    try:
+                        owner.outputConnectors[idx].connect(e.inputConnectors[i])
+                    except Exception:
+                        lost += 1
+            for j, dsts in enumerate(outs):
+                for owner, idx in dsts:
+                    try:
+                        e.outputConnectors[j].connect(owner.inputConnectors[idx])
+                    except Exception:
+                        lost += 1
+            e.tags.remove(EXPERIMENT_TAG)            # last: TD's undo does not revert tags (see undo)
+            e.unstore(EXPERIMENT_KEY)
+            return lost
+        lost, stack = self._mutate(label, do)
+        return {"promoted": e.path, "replaced": typ, "connections_lost": lost,
+                "_audit": {"kind": "promote", "path": path, "type": typ, "experiment": args["path"],
+                           "experiment_type": e.OPType, "stack": stack, "reversible": "td_undo" if stack else "no"}}
+
+    def _t_experiment_discard(self, args, res, label, readable):
+        return self._t_delete_operator(args, res, label, readable)
+
+    def _t_save_project(self, args, res, label, readable):
+        """Approval only (A1). Saves the open project like TouchDesigner's own save (which may add a version number to
+        the file name, depending on the user's preferences). Returns the file name TouchDesigner reports."""
+        if not td.project.folder or not td.project.name:
+            raise ToolFailure("INVALID_ARGS", "the project has never been saved; save it once in TouchDesigner")
+        ok = td.project.save()
+        if ok is False:
+            raise ToolFailure("EXECUTION_FAILED", "TouchDesigner did not save the project")
+        return {"saved": td.project.name, "_audit": {"kind": "save", "reversible": "no"}}
+
     def _t_delete_operator(self, args, res, label, readable):
         o = res.context["op"]
         path, typ = o.path, o.OPType
@@ -574,6 +751,15 @@ class TDAdapter(Adapter):
         if not d.get("stack") or self._stack() != d.get("stack"):     # None/unrecorded is never 'unchanged'
             raise ToolFailure("UNDO_CONFLICT", "other changes happened since (or TouchDesigner was restarted)")
         td.ui.undo.undo()
+        if kind == "promote":
+            # TouchDesigner's undo does not revert tags or storage: mark the restored copy as an experiment again.
+            e = td.op(d.get("experiment", ""))
+            if e is not None and e.OPType == d.get("experiment_type") and td.op(d.get("path", "")) is not None:
+                try:
+                    e.tags.add(EXPERIMENT_TAG)
+                    e.store(EXPERIMENT_KEY, d.get("path"))
+                except Exception:
+                    pass
         return {"undone": True, "verified": self._verify(d)}
 
     def _verify(self, d):
@@ -581,6 +767,10 @@ class TDAdapter(Adapter):
         try:
             if kind == "create":
                 return td.op(path) is None
+            if kind == "promote":
+                o, e = td.op(path), td.op(d.get("experiment", ""))
+                return o is not None and o.OPType == d.get("type") and e is not None and \
+                    e.OPType == d.get("experiment_type")
             if kind == "delete":
                 o = td.op(path)
                 return o is not None and o.OPType == d.get("type")

@@ -87,7 +87,8 @@ A grant is `{subject: agent|role, scope, actions, effect: allow|deny, constraint
 | Wire or unwire | `update` on `dst`, `read` on `src` |
 | Delete | `delete` on `path/**` |
 | Undo an audited action | the inverse actions on the action's targets (create ↔ delete, update ↔ update) |
-| Save the `.toe` | `execute` on `/**` and always approval. **Not offered in Phase 1** |
+| Save the `.toe` | `execute` on the project root and always approval (`tdflow_save_project`, Phase 3) |
+| Copy a component (experiment) | read on every source operator, create per copied operator, and execute for code carried into the copy (approval binds its hash) |
 | Raw `execute_python`, Code Mode script | `execute` on `/**` (raw, not built); Code Mode: `execute` on the script's declared `scope`, always approval of the exact text, and every facade call classified like the same call made directly |
 
 The tool registry refuses a tool whose resolver doesn't declare its classification, and each row above gets allow and deny tests in Phase 1.
