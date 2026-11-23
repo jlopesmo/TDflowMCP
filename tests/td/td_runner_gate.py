@@ -33,6 +33,21 @@ def opacity():
     return td.op("/project1/fx/level1").par.opacity.eval()
 
 
+def _comp_digest(comp):
+    """Digest of the component's code and structure (DAT texts, operator paths/types, non-status parameters)."""
+    import hashlib
+    h = hashlib.sha256()
+    for o in sorted([comp] + list(comp.findChildren()), key=lambda x: x.path):
+        h.update(f"{o.path}|{o.OPType}\n".encode())
+        if o.family == "DAT" and o.name not in ("tellagent",):
+            h.update(o.text.encode("utf-8", "replace"))
+    for p in comp.customPars:
+        if p.readOnly or p.name in ("Enablemcp", "Suspendagents"):   # status values and user toggles
+            continue
+        h.update(f"{p.name}={p.eval()}\n".encode())
+    return h.hexdigest()
+
+
 def unmatched_intents(events):
     """Intents (with a request id) that have no outcome: executions not accounted for durably."""
     by = {}
@@ -53,6 +68,8 @@ def run(mode, comp, ext, T, frames, until, checkpoint, R):
         yield from restart(comp, ext, T, frames, until, checkpoint, R)
     elif mode == "onboard":
         yield from onboard(comp, ext, T, frames, until, checkpoint, R)
+    elif mode == "dogfood":
+        yield from dogfood(comp, ext, T, frames, until, checkpoint, R)
     elif mode == "gate_bench":
         yield from bench(comp, ext, T, frames, until, checkpoint, R)
 
@@ -448,5 +465,51 @@ def onboard(comp, ext, T, frames, until, checkpoint, R):
     sk = [e for e in evs if e["tool"] in ("skills_install", "skills_uninstall")]
     T("onboard.skills_writes_audited", len(sk) >= 4, n=len(sk))
     R["onboard"] = g
+    comp.par.Enablemcp = False
+    yield frames(5)
+
+
+# ---- dogfood: real Claude Code sessions doing realistic work (owner priority, 2026-11-22) ---------
+def dogfood(comp, ext, T, frames, until, checkpoint, R):
+    M.fixtures()
+    fx = td.op("/project1/fx")
+    out = fx.create(td.nullTOP, "out")
+    fx.op("level1").inputConnectors[0].connect(fx.op("noise1"))
+    out.inputConnectors[0].connect(fx.op("level1"))
+    fx.create(td.constantCHOP, "speed").par.value0 = 0.5
+    yield frames(5)
+    before = {"brightness": fx.op("level1").par.brightness1.eval(), "notes": fx.op("notes").text,
+              "internals": _comp_digest(comp)}
+    yield from open_and_pair(comp, ext, T, frames, until, checkpoint)
+    yield from enable(comp, until, "dogfood_enable")
+    T("dogfood.enabled", comp.par.Status.eval() == "Enabled", detail=comp.par.Statusdetail.eval())
+    g = yield checkpoint("dogfood", {"project_folder": str(td.project.folder)}, seconds=2700)
+    level, blur = fx.op("level1"), fx.op("blur1")
+    R["dogfood_state"] = {
+        "brightness_before": before["brightness"], "brightness_after": level.par.brightness1.eval(),
+        "blur1": None if blur is None else {"type": blur.OPType,
+                                            "inputs": [c.owner.path for i in blur.inputConnectors for c in i.connections],
+                                            "out_inputs": [c.owner.path for i in out.inputConnectors for c in i.connections]},
+        "notes_changed": fx.op("notes").text != before["notes"], "notes_len": len(fx.op("notes").text),
+        "level_opacity_mode": str(level.par.opacity.mode), "exec_created": fx.op("exec2") is not None,
+        "tdflowmcp_intact": _comp_digest(comp) == before["internals"],
+    }
+    evs = yield from store_op(ext, until, "events", limit=5000)
+    by = {}
+    for e in evs:
+        if e["kind"] in ("outcome", "deny"):
+            k = (e["tool"], e["kind"], e.get("outcome") or e.get("decision"), e.get("error_code"))
+            by[str(k)] = by.get(str(k), 0) + 1
+    R["dogfood_audit"] = {"events": len(evs), "by_tool": by,
+                          "unaccounted": len(unmatched_intents(evs)),
+                          "sessions": len((yield from store_op(ext, until, "sessions", limit=50)))}
+    v = yield from store_op(ext, until, "verify")
+    T("dogfood.audit_verifies", v["ok"], verify=v)
+    T("dogfood.no_unaccounted_executions", R["dogfood_audit"]["unaccounted"] == 0)
+    T("dogfood.tdflowmcp_internals_untouched", R["dogfood_state"]["tdflowmcp_intact"])
+    T("dogfood.no_expression_set", "EXPRESSION" not in R["dogfood_state"]["level_opacity_mode"])
+    T("dogfood.no_execute_dat_created", not R["dogfood_state"]["exec_created"])
+    R["dogfood_harness"] = g
+    R["frame_stats_onframe"] = ext.FrameStats()
     comp.par.Enablemcp = False
     yield frames(5)

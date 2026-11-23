@@ -4,11 +4,15 @@
     python -I tests/td/run_td_onboard_tests.py [--tox build/TDflowMCP.tox] [--no-live]
 
 Safety:
-- disposable project, data, private storage and Skills home under .tmp/td-onboard-tests/ only;
+- disposable project in a fresh system-temp folder outside the repository (Claude Code's working directory, so
+  the repository's CLAUDE.md, memory and settings never apply); data, private storage and Skills home under
+  .tmp/td-onboard-tests/;
 - the MCP client config is a temporary file in .tmp passed with ``--mcp-config`` and ``--strict-mcp-config``:
   the user's Claude Code configuration and ~/.claude/skills are never written (``claude mcp add`` is not run);
 - the token reaches Claude Code only through the TDFLOW_TOKEN environment variable of the child process;
-- Claude Code may use exactly the tools listed in ``--allowedTools``; no permission bypass is used.
+- Claude Code gets only TDflowMCP tools, Skill and ToolSearch (``--tools``, ``--disallowedTools``; asserted from
+  the init message); only the disposable project's settings load (``--setting-sources project``); default
+  permission mode; no session persistence; no permission bypass is used.
 Results: build/td-onboard-test-results.json.
 """
 from __future__ import annotations
@@ -21,6 +25,8 @@ import shutil
 import subprocess
 import sys
 import time
+import tempfile
+import types
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -31,6 +37,43 @@ ROOT = base.ROOT
 STATE = {}
 ALLOWED = ["mcp__tdflow__tdflow_whoami", "mcp__tdflow__tdflow_get_parameters", "mcp__tdflow__tdflow_set_parameters",
            "Skill"]
+# Review 8 (M2/M3): --allowedTools only pre-approves. Isolation therefore also needs: only Skill/ToolSearch as
+# built-in tools, only the disposable project's settings, explicit denials, and no session persistence.
+# --restricted would also hide project Skills (checked 2026-11-22), so settings are limited to the disposable
+# project's own (``--setting-sources project``): user and local settings, hooks and user Skills are not loaded.
+ISOLATION = ["--tools", "Skill,ToolSearch", "--setting-sources", "project", "--permission-mode", "default",
+             "--no-session-persistence",
+             "--disallowedTools", "Bash", "PowerShell", "Write", "Edit", "NotebookEdit", "WebFetch", "WebSearch",
+             "Task", "Agent", "Workflow", "CronCreate", "RemoteTrigger"]
+EXPECTED_BUILTINS = {"Skill", "ToolSearch"}
+
+
+def init_tools(stdout: str):
+    """Tool names from the stream-json system init message (None if absent)."""
+    for line in stdout.splitlines():
+        try:
+            m = json.loads(line)
+        except ValueError:
+            continue
+        if m.get("type") == "system" and m.get("subtype") == "init":
+            return list(m.get("tools") or [])
+    return None
+
+
+def isolated_ok(tools) -> bool:
+    return tools is not None and all(t.startswith("mcp__tdflow__") or t in EXPECTED_BUILTINS for t in tools)
+
+
+def run_claude(exe, args, cwd, env, timeout):
+    """Run Claude Code; on timeout kill its whole process tree (own child only)."""
+    p = subprocess.Popen([exe, *args], cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                         stdin=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace")
+    try:
+        out, err = p.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        subprocess.run(["taskkill", "/PID", str(p.pid), "/T", "/F"], capture_output=True)
+        out, err = p.communicate()
+    return p.returncode, out, err
 PROMPT = ("You are connected to a TouchDesigner project through the MCP server named tdflow. "
           "If a skill named tdflow-core is available, use it and note its TDflowMCP skill version. "
           "1) Call tdflow_whoami. 2) Set parameter opacity of /project1/fx/level1 to 0.25 with tdflow_set_parameters. "
@@ -110,11 +153,22 @@ def cp_onboard(data, pid):
         ver = subprocess.run([exe, "--version"], capture_output=True, text=True, timeout=60).stdout.strip()
         env = dict(os.environ, TDFLOW_TOKEN=TOKENS["B"])
         t0 = time.time()
-        p = subprocess.run([exe, "-p", PROMPT, "--mcp-config", cfg_path, "--strict-mcp-config",
-                            "--allowedTools", *ALLOWED, "--output-format", "json"],
-                           cwd=work, env=env, capture_output=True, text=True, timeout=600)
+        rc, sout, serr = run_claude(exe, ["-p", PROMPT, "--mcp-config", cfg_path, "--strict-mcp-config",
+                                          "--allowedTools", *ALLOWED, *ISOLATION, "--output-format", "stream-json",
+                                          "--verbose"], work, env, 600)
+        tools = init_tools(sout)
+        T("live.agent_tools_isolated", isolated_ok(tools), tools=tools)
+        res = {}
+        for line in sout.splitlines():
+            try:
+                m = json.loads(line)
+            except ValueError:
+                continue
+            if m.get("type") == "result":
+                res = m
+        p = types.SimpleNamespace(returncode=rc, stdout=json.dumps(res), stderr=serr, raw=sout)
         with open(os.path.join(STATE["top"], "claude_output.json"), "w", encoding="utf-8") as f:   # .tmp only
-            json.dump({"stdout": p.stdout.replace(secret, "<redacted>"), "stderr": p.stderr.replace(secret, "<redacted>")}, f)
+            json.dump({"stdout": p.raw.replace(secret, "<redacted>"), "stderr": p.stderr.replace(secret, "<redacted>")}, f)
         st = base.jbody(base.req("GET", "/setup/api/status", {"X-TDflow-Request": "1"})) or {}
         out["transport_after"] = st.get("transport") or st.get("listener")
         out["claude_version"] = ver
@@ -132,8 +186,9 @@ def cp_onboard(data, pid):
           stderr=p.stderr[-800:])
         T("live.opacity_read_back", "opacity=0.25" in line, line=line)
         T("live.expected_skill_version_from_whoami", "expected_skill_version=1.0" in line, line=line)
-        T("live.project_skill_discovered", "skill_version=1.0" in line, line=line)
-        T("live.no_token_in_agent_output", secret not in p.stdout and secret not in p.stderr)
+        # Whole-word match: "expected_skill_version=1.0" must not satisfy it (review 8 follow-up).
+        T("live.project_skill_discovered", re.search(r"(?<![a-z_])skill_version=1\.0(?![0-9])", line) is not None, line=line)
+        T("live.no_token_in_agent_output", secret not in p.raw and secret not in p.stderr)
         with open(cfg_path, encoding="utf-8") as f:
             T("live.client_config_file_has_no_token", secret not in f.read())
     return out
@@ -154,12 +209,13 @@ def main():
     os.makedirs(top)
     STATE.update(top=top, live=not a.no_live, skills_home=os.path.join(top, "home"))
     os.makedirs(STATE["skills_home"])
-    proj, run_dir = os.path.join(top, "project"), os.path.join(top, "onboard")
-    os.makedirs(proj)
+    proj = tempfile.mkdtemp(prefix="tdflow-onboard-project-")      # outside the repository (review 8, M3)
+    run_dir = os.path.join(top, "onboard")
     os.makedirs(run_dir)
     tox = os.path.abspath(a.tox)
     res = g.launch("onboard", tox, run_dir, proj, {"TDFLOW_PRIVATE_ROOT": os.path.join(top, "private"),
                                                    "TDFLOW_SKILLS_HOME": STATE["skills_home"]}, HANDLERS)
+    shutil.rmtree(proj, ignore_errors=True)
     in_td = res.get("tests") or []
     errs = res.get("errors") or []
     out = {"tox_sha256": g.hashlib.sha256(open(tox, "rb").read()).hexdigest(), "td_build": res.get("td_build"),

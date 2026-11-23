@@ -214,6 +214,19 @@ def cp_enabled(data, pid):
     T("tool.get_operator", ok(go) and go["type"] == "levelTOP" and go["family"] == "TOP")
     gp = B.call("tdflow_get_parameters", {"path": "/project1/fx/level1", "limit": 200})
     T("tool.get_parameters", ok(gp) and any(p["name"] == "opacity" for p in gp["parameters"]))
+    # Dogfood 1 regressions: a page filter on a Level TOP crashed; a names filter; inputs/position in lists.
+    gp2 = B.call("tdflow_get_parameters", {"path": "/project1/fx/level1", "page": "Post"})
+    T("dogfood.page_filter_works", ok(gp2) and gp2["parameters"] and all(p["page"] == "Post" for p in gp2["parameters"]),
+      result={k: gp2.get(k) for k in ("code", "total")})
+    gp3 = B.call("tdflow_get_parameters", {"path": "/project1/fx/level1", "names": ["opacity", "brightness1"]})
+    T("dogfood.names_filter", ok(gp3) and sorted(p["name"] for p in gp3["parameters"]) == ["brightness1", "opacity"])
+    lo2 = B.call("tdflow_list_operators", {"path": "/project1/fx"})
+    ge2 = B.call("tdflow_get_errors", {"path": "/project1/fx"})
+    T("dogfood.get_errors_reports_never_cooked", ok(ge2) and isinstance(ge2.get("never_cooked"), list),
+      never_cooked=ge2.get("never_cooked"))
+    T("dogfood.get_operator_cook_count", "cook_count" in B.call("tdflow_get_operator", {"path": "/project1/fx/level1"}))
+    T("dogfood.list_has_inputs_and_position", ok(lo2) and all("inputs" in o and "x" in o and "y" in o
+                                                               for o in lo2["operators"]))
     gt = B.call("tdflow_get_dat_text", {"path": "/project1/fx/notes"})
     T("tool.get_dat_text", ok(gt) and gt["text"] == "hello")
     ge = B.call("tdflow_get_errors", {"path": "/project1/fx"})

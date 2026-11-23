@@ -8,6 +8,7 @@
 - Scope: live monitoring (WebSocket `/api/events`), sessions, audit search, report export, the approval queue, policy and token management, the kill switch, and continuity views (checkpoints and handoffs).
 - **Admin authentication:** the pairing flow from ADR-0010. Every request needs an exact canonical Origin plus a CSRF token header ([security model §2.5](../architecture/security-model.md#25-dashboard-and-setup-admin-sessions)). Agent bearer tokens never grant dashboard access.
 - The dashboard is a **view and decision surface only**. All enforcement is server-side.
+- **Owner direction D14 (2026-11-22):** the dashboard is where users configure data locations and **optional** session/diagnostic logging. The **mandatory security audit** (intent and outcome for every MCP call, fail closed) cannot be disabled while MCP is on.
 
 ## Alternatives
 - A React/Vite SPA: needs npm and a build step.

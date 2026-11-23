@@ -106,15 +106,17 @@ def core_registry() -> Registry:
     T(Tool("tdflow_project_info", "Project info", "TouchDesigner build, project name, FPS and the top-level "
            "components under the project root that you may read.", EMPTY, ("read",), "project", "project_info",
            read_only=True, idempotent=True))
-    T(Tool("tdflow_list_operators", "List operators", "Children of a COMP with type and family, paginated. "
-           "Protected or unpermitted operators are filtered out (reported as 'filtered').",
+    T(Tool("tdflow_list_operators", "List operators", "Children of a COMP with type, family, inputs and node "
+           "position (x, y), paginated. Protected or unpermitted operators are filtered out (reported as 'filtered').",
            obj({"path": PATH, "offset": {"type": "integer", "minimum": 0, "maximum": 100000},
                 "limit": {"type": "integer", "minimum": 1, "maximum": 200}}, ["path"]),
            ("read",), "read_children", "list_operators", read_only=True, idempotent=True))
     T(Tool("tdflow_get_operator", "Get operator", "Type, family, flags, inputs, outputs and errors of one operator.",
            obj({"path": PATH}, ["path"]), ("read",), "read_path", "get_operator", read_only=True, idempotent=True))
     T(Tool("tdflow_get_parameters", "Get parameters", "Parameter values, modes, expressions and defaults, "
-           "optionally for one parameter page.", obj({"path": PATH, "page": {"type": "string", "maxLength": 64},
+           "optionally for one parameter page or only the named parameters.",
+           obj({"path": PATH, "page": {"type": "string", "maxLength": 64},
+                "names": {"type": "array", "maxItems": 50, "items": {"type": "string", "minLength": 1, "maxLength": 64}},
                                                       "offset": {"type": "integer", "minimum": 0, "maximum": 10000},
                                                       "limit": {"type": "integer", "minimum": 1, "maximum": 200}}, ["path"]),
            ("read",), "read_path", "get_parameters", read_only=True, idempotent=True))

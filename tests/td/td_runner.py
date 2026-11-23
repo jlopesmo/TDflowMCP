@@ -51,8 +51,8 @@ def until(fn, seconds, name):
     return ("until", fn, time.monotonic() + seconds, name)
 
 
-def checkpoint(name, data=None):
-    return ("cp", name, data or {}, time.monotonic() + 300)
+def checkpoint(name, data=None, seconds=300):
+    return ("cp", name, data or {}, time.monotonic() + seconds)
 
 
 def own_listening(port):
@@ -89,7 +89,7 @@ def script():
     comp = load()
     yield frames(20)
     ext = comp.ext.TDflowMCPExt
-    if MODE.startswith(("gate", "perf", "onboard")):                 # audit-worker gate + 1B-vs-worker comparison
+    if MODE.startswith(("gate", "perf", "onboard", "dogfood")):                 # audit-worker gate + 1B-vs-worker comparison
         ext.launcher = lambda url: True
         yield from __import__("td_runner_gate").run(MODE, comp, ext, T, frames, until, checkpoint, R)
         return

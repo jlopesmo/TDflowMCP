@@ -32,6 +32,20 @@ def _norm(text):
     return str(text).replace("\r\n", "\n").rstrip("\n")
 
 
+def _cooks(o):
+    try:
+        return int(o.totalCooks)
+    except Exception:
+        return None
+
+
+def _pos(o, attr):
+    try:
+        return int(getattr(o, attr))
+    except Exception:
+        return None
+
+
 def _sha(text):
     """Hash of DAT text as TouchDesigner stores it (line endings and trailing newlines normalised)."""
     return hashlib.sha256(_norm(text).encode("utf-8")).hexdigest()
@@ -246,10 +260,15 @@ class TDAdapter(Adapter):
         kids = sorted(o.children, key=lambda c: c.name)
         facts = [self._facts(c, "read") for c in kids]
         vis = {t.path for t in readable(facts)}
-        rows = [{"name": c.name, "path": c.path, "type": c.OPType, "family": c.family} for c in kids if c.path in vis]
+        # Dogfood 1: inputs and node position per child, so agents need not call get_operator per child.
+        # Review 8 (L2): the extra fields are built only for the requested page (main-thread cost).
+        shown = [c for c in kids if c.path in vis]
         off, lim = int(args.get("offset", 0)), int(args.get("limit", 100))
-        return {"path": o.path, "operators": rows[off:off + lim], "total": len(rows),
-                "next_offset": off + lim if off + lim < len(rows) else None, "filtered": len(kids) - len(rows)}
+        rows = [{"name": c.name, "path": c.path, "type": c.OPType, "family": c.family,
+                 "inputs": self._conn_paths(list(c.inputs), readable), "x": _pos(c, "nodeX"), "y": _pos(c, "nodeY")}
+                for c in shown[off:off + lim]]
+        return {"path": o.path, "operators": rows, "total": len(shown),
+                "next_offset": off + lim if off + lim < len(shown) else None, "filtered": len(kids) - len(shown)}
 
     def _conn_paths(self, ops, readable):
         facts = [self._facts(x, "read") for x in ops if x is not None]
@@ -269,12 +288,20 @@ class TDAdapter(Adapter):
                 "inputs": self._conn_paths(list(o.inputs), readable),
                 "outputs": self._conn_paths(list(o.outputs), readable),
                 "errors": (o.errors() or "")[:4000], "warnings": (o.warnings() or "")[:4000],
-                "comment": (o.comment or "")[:1000], "num_children": len(o.children) if o.isCOMP else 0}
+                "comment": (o.comment or "")[:1000], "num_children": len(o.children) if o.isCOMP else 0,
+                "x": _pos(o, "nodeX"), "y": _pos(o, "nodeY"), "cook_count": _cooks(o)}
 
     def _t_get_parameters(self, args, res, label, readable):
         o = res.context["op"]
         page = args.get("page")
-        pars = [p for p in o.pars() if (not page or p.page.name == page)]
+        names = set(args.get("names") or ())
+
+        def page_name(p):                       # dogfood 1: some parameters have no page object
+            try:
+                return p.page.name if p.page is not None else ""
+            except Exception:
+                return ""
+        pars = [p for p in o.pars() if (not page or page_name(p) == page) and (not names or p.name in names)]
         rows = []
         for p in pars:
             def g(attr, default=None, fn=lambda x: x):
@@ -313,16 +340,25 @@ class TDAdapter(Adapter):
         o = res.context["op"]
         cands = [o] + (list(o.findChildren()) if o.isCOMP else [])
         vis = {t.path for t in readable([self._facts(c, "read") for c in cands])}
-        out = []
+        out, uncooked = [], []
         for c in cands:
             if c.path not in vis:
                 continue
             e, w = c.errors() or "", c.warnings() or ""
             if e or w:
                 out.append({"path": c.path, "errors": e[:2000], "warnings": w[:2000]})
+            elif _cooks(c) == 0:
+                uncooked.append(c.path)               # dogfood 1: errors exist only after a cook
             if len(out) >= int(args.get("limit", 100)):
                 break
-        return {"path": o.path, "problems": out, "filtered": len(cands) - len(vis)}
+        r = {"path": o.path, "problems": out, "filtered": len(cands) - len(vis), "never_cooked": uncooked[:200],
+             "never_cooked_total": len(uncooked), "never_cooked_truncated": len(uncooked) > 200,
+             "complete": len(out) < int(args.get("limit", 100))}
+        if uncooked:
+            r["note"] = ("TouchDesigner reports errors only after an operator cooks. The operators in never_cooked "
+                         "have not cooked yet, so their errors are unknown, not absent. This tool does not cook "
+                         "anything to find out.")
+        return r
 
     # -- mutations --
     def _t_set_parameters(self, args, res, label, readable):

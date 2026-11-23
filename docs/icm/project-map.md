@@ -13,8 +13,8 @@ This map lists the repository's actual contents (Phase 1C). Planned directories 
 | `docs/icm/` | TDflowMCP's own ICM layer (this folder) | [README](README.md) |
 | `docs/product/vision.md` | Vision, pillars P1–P17, success criteria | [ADR-0001](../decisions/0001-product-scope.md) |
 | `docs/research/` | Dated research and independent-review records | — |
-| `docs/architecture/` | Design documents: system, security, setup, integration, continuity/memory, tools, stack, source rules | [decisions](../decisions/README.md) |
-| `docs/decisions/` | ADRs 0001–0013 + index | — |
+| `docs/architecture/` | Design documents: system, security, setup, integration, continuity/memory, tools, stack, source rules, self-development (proposed) | [decisions](../decisions/README.md) |
+| `docs/decisions/` | ADRs 0001–0014 + index | — |
 | `docs/milestones/` | Phase 0 and Phase 1 (1A/1B/1C) scope and acceptance | [roadmap](roadmap.md) |
 | `docs/operations/` | Git workflow, verification and release procedures | — |
 | `tools/check_docs.py` | Stdlib doc validator (required files, links/anchors, ADR status vs index, privacy patterns) | [validation-index](validation-index.md) |
@@ -26,7 +26,7 @@ This map lists the repository's actual contents (Phase 1C). Planned directories 
 | `tools/build_tox/` | Source-first builder (`build.py` outside TD, `builder_runtime.py` inside) → `build/TDflowMCP.tox` + `TDflowMCP.json` | [build and test](../operations/build-and-test.md) |
 | `tools/scan_secrets.py` | Secret scanner over git-tracked files (CI step) | [validation-index](validation-index.md) |
 | `tools/tdtoe.py`, `tools/tdrun.py` | Disposable `.toe` generator; TouchDesigner launcher that protects other TD processes | [build and test](../operations/build-and-test.md) |
-| `tests/td/` | In-TouchDesigner tests: `td_runner.py`, `td_runner_mcp.py`, `td_runner_gate.py` (inside TD), plus the external harnesses `run_td_tests.py` (1A), `run_td_mcp_tests.py` (1B), `run_td_gate_tests.py` (audit gate, storage, perf) and `run_td_onboard_tests.py` (1C live Claude Code + Skills) → `build/td-*-results.json` | [validation-index](validation-index.md) |
+| `tests/td/` | In-TouchDesigner tests: `td_runner.py`, `td_runner_mcp.py`, `td_runner_gate.py` (inside TD), plus the external harnesses `run_td_tests.py` (1A), `run_td_mcp_tests.py` (1B), `run_td_gate_tests.py` (audit gate, storage, perf) `run_td_onboard_tests.py` (1C live Claude Code + Skills) and `run_td_dogfood.py` (real Claude Code sessions doing development tasks) → `build/td-*-results.json` | [validation-index](validation-index.md) |
 | `build/` | **Git-ignored** build output: `TDflowMCP.tox` (development build), `TDflowMCP.json`, `reproducibility.json`, test results | [build and test](../operations/build-and-test.md) | [security model §8](../architecture/security-model.md#8-network-posture), [setup assistant §3](../architecture/setup-assistant.md#3-compatibility-checks) |
 | `src/integrations/clients.json` | Coding-agent registry (support levels, verified connection snippets, token-entry recipes), embedded as the `clients` DAT | [agent integration](../architecture/agent-integration.md) |
 | `src/skills/tdflow-core/SKILL.md` | TDflowMCP Skill v1.0 (authored independently), embedded and installed only by user consent | [ADR-0011](../decisions/0011-agent-integration-and-skills.md) |
@@ -37,6 +37,7 @@ This map lists the repository's actual contents (Phase 1C). Planned directories 
 | `spikes/s4/` | Disposable S4 + S4b spikes (undo semantics; interleaving, save/reload) | [S4 record](../research/2026-11-22-s4-undo-semantics.md) |
 | `spikes/s5/` | Disposable, reproducible S5 spike code. Never built or imported | [S5 findings](../research/2026-11-22-s5-compatibility-2025.32440.md) |
 | `spikes/s6/` | Disposable S6 spike: toe builder, Setup page assets, in-TD driver, external harness. Its `s6/*` control methods are spike-only and unsafe in production | [S6 findings](../research/2026-11-22-s6-embedded-python-transport.md) |
+| `spikes/b6/` | Rejected B6 main-thread-continuation experiment: `continuation.patch` + measurements | [spike B6](../../spikes/b6/README.md) |
 | `spikes/s7/` | Disposable S7 spike: frame callbacks while the project timeline is paused | [S7 README](../../spikes/s7/README.md) |
 | `reference/historical/mcp_bridge/` | Read-only historical reference: owner's original bridge audit + extracted source zip + provenance README. Never built, loaded or tested | [ADR-0008](../decisions/0008-upstream-reuse-policy.md) |
 | `reference/third_party/` | **Git-ignored**; future home of official third-party releases downloaded for hands-on testing | [ADR-0008](../decisions/0008-upstream-reuse-policy.md) |

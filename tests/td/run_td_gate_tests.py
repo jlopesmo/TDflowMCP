@@ -54,7 +54,14 @@ def timed(cli, name, args):
 def load(threads=8, per=30, seq=30, tag="load"):
     """Sequential calls (one client), then ``threads`` concurrent clients (writers + readers)."""
     B = MCP(TOKENS["B"])
-    seq_lat, errors = [], []
+    seq_lat, errors, ping_lat, list_lat = [], [], [], []
+    for i in range(seq):                       # transport-only requests: no audit, no main thread (B6)
+        t0 = time.perf_counter()
+        B.rpc("ping")
+        ping_lat.append((time.perf_counter() - t0) * 1000)
+        t0 = time.perf_counter()
+        B.rpc("tools/list")
+        list_lat.append((time.perf_counter() - t0) * 1000)
     for i in range(seq):
         ms, r = timed(B, "tdflow_set_parameters", {"path": "/project1/fx/level1", "values": {"opacity": (i % 50) / 100}})
         seq_lat.append(ms)
@@ -82,6 +89,7 @@ def load(threads=8, per=30, seq=30, tag="load"):
         t.join(300)
     wall = time.perf_counter() - t0
     out = {"sequential": stats(seq_lat), "concurrent": stats(conc), "clients": threads, "calls": len(conc),
+           "ping": stats(ping_lat), "tools_list": stats(list_lat),
            "throughput_calls_s": round(len(conc) / wall, 1) if wall else None, "errors": len(errors),
            "error_codes": sorted(set(map(str, errors)))[:5]}
     T(f"{tag}.all_calls_succeeded", not errors, **{k: out[k] for k in ("errors", "error_codes")})
@@ -206,13 +214,13 @@ GATE = {"setup_ready": mt.cp_setup_ready, "pair_approved": mt.cp_pair_approved, 
 PERF = {"setup_ready": mt.cp_setup_ready, "pair_approved": mt.cp_pair_approved, "load": cp_load}
 
 
-def launch(mode, tox, run_dir, proj_dir, env, handlers, expect_kill=False):
+def launch(mode, tox, run_dir, proj_dir, env, handlers, expect_kill=False, deadline_s=900):
     for f in ("td_runner.py", "td_runner_mcp.py", "td_runner_gate.py"):
         shutil.copyfile(os.path.join(HERE, f), os.path.join(run_dir, f))
     H["run_dir"] = run_dir
     toe = make_toe(proj_dir, "td_tests", boot_script("td_runner", start_frame=20))
     td = TDProcess(toe, run_dir, env=dict({"TDFLOW_TOX": tox, "TDFLOW_SRC_ROOT": ROOT, "TDFLOW_TEST_MODE": mode}, **env))
-    done, deadline = set(), time.time() + 900
+    done, deadline = set(), time.time() + deadline_s
     try:
         while td.alive() and time.time() < deadline:
             if os.path.exists(os.path.join(run_dir, "td_results.json")):

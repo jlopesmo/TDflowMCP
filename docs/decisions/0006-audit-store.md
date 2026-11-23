@@ -25,7 +25,8 @@ Hash chaining detects tampering but does not prevent a local admin from deleting
 - **Tamper detection relative to a checkpoint: passed** (unit and in-TD). This includes a recomputed unkeyed chain caught by the keyed checkpoint, and a deleted checkpoints file. Checkpoints are written every 50 events, at Enable MCP and at shutdown.
 - **Mutations fail closed when the store is unavailable: passed.** Reads also fail closed. A failed outcome write suspends all agents.
 - **Auth-failure aggregation: implemented** (one `auth_fail_burst` event per 10 s) and observed in the in-TD run. No flood test was run.
-- **Write latency (main-thread impact): passed with the audit worker; MCP-latency tradeoff awaits owner acceptance.**
+- **Write latency: closed (owner B6, 2026-11-22).** The audit worker with `synchronous=FULL` is the approved baseline. A bounded main-thread-continuation experiment was **rejected**: the median sequential latency changed by −0.2 % (target ≥ 25 %). Per call, latency is about five frame-boundary GIL windows: the floor of off-main-thread durable writes in TouchDesigner. Main-thread fsync, as in 1B, was faster but is excluded because of its frame impact ([spike B6](../../spikes/b6/README.md)). No further SQLite-latency optimisation is planned unless testing shows a serious usability or reliability problem.
+- *History, before B6:* main-thread impact passed with the audit worker; the MCP-latency tradeoff awaited owner acceptance.
   - Main thread: the 1B build appended ≈ 5.3 ms p50 per event on the main thread (frame max 46 ms under load). With the worker, OnFrame costs ≤ 1.8 ms even with a simulated 50 ms disk (frame max 23.6 ms).
   - Cost: MCP latency rises to ≈ 85–150 ms sequential (1B: 55 ms), because each worker step waits for TouchDesigner to release the GIL (about once per frame).
   - Guarantees: kept and tested in TD: crash, shutdown/restart, load, slow disk, overflow, kill-switch race, injected outcome failure.

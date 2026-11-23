@@ -39,7 +39,9 @@ python -I tests/td/run_td_tests.py --mode real_browser   # opens your default br
 python -I tests/td/run_td_mcp_tests.py                   # Phase 1B MCP acceptance -> build/td-mcp-test-results.json
 python -I tests/td/run_td_gate_tests.py                  # audit-worker gate, storage, perf -> build/td-gate-test-results.json
 python -I tests/td/run_td_onboard_tests.py               # 1C: live Claude Code + Skills -> build/td-onboard-test-results.json
+python -I tests/td/run_td_dogfood.py [--tasks inspect,…]  # real Claude Code development sessions -> build/td-dogfood-results.json
 ```
+- **Dogfood** (`run_td_dogfood.py`): five Claude Code sessions (inspect, edit/verify/undo, build and wire, DAT + session notes, boundaries) in a disposable project. The safety rules are the same as for onboarding. Token-redacted transcripts go to `.tmp/td-dogfood/`, and per-call tools, errors, turns and costs go to the results file. In-TD checks: final state, audit verification, no unaccounted executions, TDflowMCP internals untouched.
 - **Gate suite** (`run_td_gate_tests.py`, five TouchDesigner launches, all under `.tmp/td-gate-tests/`):
   - `gate`: project-local storage decision; idle, load and simulated slow-disk frame impact (OnFrame cost and frame intervals) with MCP latency measured separately; the kill switch flipped while an intent is being written; queue overflow; an injected outcome-write failure.
   - `gate_crash`: load from 8 clients, then a hard kill of that TouchDesigner process (own child only).
