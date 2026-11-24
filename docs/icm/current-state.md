@@ -110,7 +110,7 @@
   - **Coding Agent:** Auto (lookup without execution).
   - **TouchDesigner only:** Connect Agent and a clipboard-only token handoff kept out of Windows Clipboard History; native management of agents, scopes, tokens and approvals through the dashboard's backend.
   - **Web:** one-click sign-in for pages opened from TouchDesigner (single-use 30-s fragment ticket, 5-s read-only warm-up, fail-closed interception); pairing only for typed URLs.
-  - **Verified in TD** on candidate `c11706ce…`, including the TouchDesigner-only first run with a live Claude Code session and a restart from the saved project. [Review 18](../research/2026-11-23-first-run-ux.md#independent-review-18-security): 1 High, 3 Medium, all addressed.
+  - **Verified in TD** on candidate `c11706ce…` and on the **packaged** `TDflowMCP-1.0.0rc2-132e8c3317` (tox `dfabfaca…`, commit `132e8c3`), including the TouchDesigner-only first run with a live Claude Code session and a restart from the saved project. [Review 18](../research/2026-11-23-first-run-ux.md#independent-review-18-security): 1 High, 3 Medium, all addressed.
 
 ## Not implemented (nothing below exists)
 - **Withheld by design:**
@@ -145,6 +145,8 @@
 
 - `3a53e72`: post-restart recovery record and D19. Pushed to `origin/dev` and observed with `git ls-remote` (`refs/heads/dev` = `3a53e72…`, `refs/heads/main` = `066dbd0…`, so `main` is unchanged). CI: **not observed**.
 - `1233815`: **Phase 2A increment 3** (repository-mode memory, link check, migration, the repository-memory capability, friction fixes) and the minimized-window handling (S9), reviews 11 and 12. Pushed to `origin/dev` and observed with `git ls-remote` (`refs/heads/dev` = `1233815…`, `refs/heads/main` = `066dbd0…`, so `main` is unchanged). Verified on candidate `273b185e…` built from the pre-commit tree; a clean build of the commit (tox `a2250474…`, `source_dirty` false) has the same source digest `ffb75892…`. No package was built. This record was added by the follow-up commit. CI: **not observed**.
+- `132e8c3`: **1.0.0rc2**, first-run UX redesign (owner D21), review 18. Pushed to `origin/dev` with its evidence commit (push observed with `git ls-remote` in the next record). Packaged from a clean worktree; every suite passes on the package. CI: **not observed**.
+- `348360a` / `ba6480a`: **1.0.0rc1** and its packaged acceptance. Pushed to `origin/dev` and observed with `git ls-remote` (`refs/heads/dev` = `ba6480a…`, `refs/heads/main` = `066dbd0…`). CI: **not observed**.
 - `47e47dc`: **Phase 4** (capture, leases, inert snapshots, benchmark), review 17. Pushed to `origin/dev` and observed with `git ls-remote` (`refs/heads/dev` = `47e47dc…`, `refs/heads/main` = `066dbd0…`). Verified on candidate `1b8657a0…`. CI: **not observed**.
 - `df0ea46`: **Phase 3 increment 2** (experiments, approval-only save), review 16. Pushed to `origin/dev` and observed with `git ls-remote` (`refs/heads/dev` = `df0ea46…`, `refs/heads/main` = `066dbd0…`). Verified on candidate `8476555f…` built from the pre-commit tree. CI: **not observed**.
 - `4c55ca0`: **Phase 3 increment 1** (Code Mode) and the Phase 4 network summary, review 15. Pushed to `origin/dev` and observed with `git ls-remote` (`refs/heads/dev` = `4c55ca0…`, `refs/heads/main` = `066dbd0…`, so `main` is unchanged). Verified on candidate `8c829556…` built from the pre-commit tree. No package was built. CI: **not observed**.

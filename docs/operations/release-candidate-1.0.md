@@ -66,7 +66,7 @@ No other compatibility is claimed.
 - [x] Unit tests, doc checker and secret scan pass on the candidate commit.
 - [x] `.tox` built reproducibly from source (two builds, equal source digest).
 - [x] All in-TD suites (1A, 1B, gate, memory, onboarding) pass on 2025.32440.
-- [ ] rc2: the package is built from a clean worktree of the candidate commit, and all suites pass on the **packaged** `.tox` (validation index). (rc1: done for `348360a`, package `TDflowMCP-1.0.0rc1-348360a56b`, tox `394e10439ed3f3cf…`.)
+- [x] rc2: the package is built from a clean worktree of the candidate commit (`132e8c3`, `dist/TDflowMCP-1.0.0rc2-132e8c3317`, tox SHA-256 `dfabfaca7a048601…`, source digest `5b014335…`), and every suite (1A, 1B, gate, memory, onboarding, native first run with a live agent) passes on the **packaged** `.tox` (validation index). (rc1: `348360a`, package `TDflowMCP-1.0.0rc1-348360a56b`, tox `394e10439ed3f3cf…`.)
 - [x] Independent reviews for every security-sensitive increment (reviews 14–18), findings addressed.
 - [x] rc2: the TouchDesigner-only first run (drop-in → diagnostics → Connect Agent → Copy Token → Enable MCP → a live Claude Code session → Connected → Suspend/Resume → restart) passes on the candidate build (validation index).
 - [x] Real coding-agent dogfooding of the new tools (round 3 in the validation index; its one friction point fixed).
