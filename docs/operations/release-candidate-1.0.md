@@ -87,6 +87,7 @@ No other compatibility is claimed.
 - [x] Independent reviews for every security-sensitive increment (reviews 14–18), findings addressed.
 - [x] rc2: the TouchDesigner-only first run (drop-in → diagnostics → Connect Agent → Copy Token → Enable MCP → a live Claude Code session → Connected → Suspend/Resume → restart) passes on the candidate build (validation index).
 - [x] Real coding-agent dogfooding of the new tools (round 3 in the validation index; its one friction point fixed).
+- [x] rc3: the package is built from a clean worktree of the candidate commit (`f033b72`, `dist/TDflowMCP-1.0.0rc3-f033b72d48`, tox SHA-256 `ffbb3ea1fa404d66…`, source digest `b137a685…`, zip `6d094b8b…`). Every suite (1A, 1B, gate, memory, onboarding, native one-click connection with live clients) and the visual review pass on the **packaged** `.tox` (validation index).
 - [x] rc3: the one-click connection on the candidate build. The real Claude Code CLI and the VS Code extension's engine connect using only the configuration TDflowMCP wrote, a live session works with no token step, and restart, revocation, repair, a failed setup and Disconnect all pass (validation index).
 - [x] rc3: independent security review 19 and the usability review, findings addressed (record).
 - [ ] **rc3 owner acceptance on the real profile:**
