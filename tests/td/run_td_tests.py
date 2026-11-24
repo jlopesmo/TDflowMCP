@@ -202,8 +202,9 @@ def cp_serving(data, pid):
       and not [k for k in hd if k.startswith("access-control")] and hd.get("cache-control") == ["no-store"])
     r = req("GET", "/.well-known/tdflowmcp")
     wk = jbody(r) or {}
-    T("well_known.minimal", r.get("status") == 200 and set(wk) == {"product", "version"} and wk["product"] == "TDflowMCP",
-      body=wk)
+    # ADR-0015: once the store is open it also names the project's non-secret storage id (``connect``), nothing else.
+    T("well_known.minimal", r.get("status") == 200 and set(wk) <= {"product", "version", "connect"}
+      and wk["product"] == "TDflowMCP" and (("connect" not in wk) or wk["connect"].startswith("prj_")), body=wk)
     r = req("GET", "/setup/api/status", {"X-TDflow-Request": "1"})
     st = jbody(r) or {}
     T("api.status", r.get("status") == 200 and st.get("state") == "Setup" and st.get("mcp") == "disabled"
@@ -404,7 +405,8 @@ def main():
     toe = make_toe(run_dir, "td_tests", boot_script("td_runner", start_frame=20))
     # Open Setup opens the audit store: keep its private storage inside the disposable run folder too.
     td = TDProcess(toe, run_dir, env={"TDFLOW_TOX": tox, "TDFLOW_SRC_ROOT": ROOT, "TDFLOW_TEST_MODE": a.mode,
-                                      "TDFLOW_PRIVATE_ROOT": os.path.join(run_dir, "private")})
+                                      "TDFLOW_PRIVATE_ROOT": os.path.join(run_dir, "private"),
+                                      "TDFLOW_CLIENT_HOME": os.path.join(run_dir, "client-home")})
     H["preexisting_td"] = len(td.preexisting)
     done = set()
     deadline = time.time() + 600

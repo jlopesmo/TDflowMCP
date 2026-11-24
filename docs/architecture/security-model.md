@@ -52,26 +52,17 @@ The Setup Assistant (1B+) and the Governance Dashboard (2B) share one admin cred
 
 The match code only prevents approving the wrong request. Holding it grants nothing, so it is safe in a saved parameter, in autosaves and on a shared screen.
 
-**One-click sign-in from TouchDesigner (owner UX assignment D21, 2026-11-23; [record](../research/2026-11-23-first-run-ux.md); hardened by review 18).** When the user pulses **Open Setup** or **Open Dashboard** inside TouchDesigner, the page it launches signs in without pairing:
-1. **The ticket.** After the bind gate passed, TouchDesigner creates a random 256-bit ticket: single use, valid 30 s, and only one outstanding (a new launch voids the old one). Only its SHA-256 is kept, in memory.
-2. **The fragment.** The ticket travels in the URL fragment (`/ui/#t=…`). Fragments are never sent to the server, so the ticket never appears in request logs or `Referer` headers. The page removes it from the address bar and history (`history.replaceState`) before redeeming it.
-3. **Redemption.** The page calls `POST /setup/api/pair/ticket` (exact Origin, `X-TDflow-Request`, same-origin fetch, canonical host). It is handled on a handler thread:
-   - the attempt is recorded durably **before** any session exists (`browser_ticket` `redeeming`), and refused with 503 while the audit store is unavailable;
-   - success gives the same admin session as pairing (HttpOnly SameSite=Strict cookie + CSRF token; one session at a time; 8 h).
-4. **Failed attempts.** Any attempt consumes the ticket, so a wrong, replayed or expired ticket fails and voids the outstanding one: tickets cannot be guessed. After 5 failed attempts in a minute, attempts are answered 429 without further records.
-5. **Warm-up.** For its first 5 s a ticket-born session may read but not change anything (`409 SESSION_STARTING`).
-6. **Interception.** If an already redeemed ticket comes back within 15 s, two parties had it. The server then fails closed:
-   - ends every admin session;
-   - suspends all agents (the kill switch, effective at once);
-   - revokes the tokens and disables the agents created since that sign-in, and turns Code Mode off;
-   - audits each step (`browser_ticket` `intercepted`, `revoke_token`, `agent_disable`, `setting`), and TouchDesigner says what happened.
-
-**Why the warm-up and interception response exist (review 18).** The browser's command line, and so the URL with its fragment, is visible to other processes of the same user until the ticket is used. "Malware on localhost" is in this threat model (§1). Such a process can race the page for the ticket. The real page redeems within a second or two of loading, so a raced session is detected inside its 5-s warm-up, before it can change anything, and everything it could have created since is revoked.
-
-**Residual risk (listed for the owner):**
-- If the real page never loads (the browser fails to open), a racing process keeps a session after the warm-up. Status Detail and **Browser Session** on the Web page show every sign-in, and **End Browser Session** ends it.
-- Manual pairing (above) has no such exposure and stays available for typed URLs.
-- A same-user process can in any case read the user's files and send input to TouchDesigner; TDflowMCP does not claim to stop it.
+**Pages opened from TouchDesigner (owner D22, 2026-11-24, [ADR-0015](../decisions/0015-consent-based-client-connection.md) §8).**
+- The rc2 one-click ticket is **retired**, and its route is no longer served.
+  - Why: the ticket travelled in the URL fragment, so it was visible on the browser's command line to other processes of the user.
+  - The 5-s warm-up and race detection limited the damage, but a racing process kept its session whenever the real page failed to load.
+- **Now:**
+  1. When the user pulses **Open Setup** or **Open Dashboard**, the browser opens `/setup/#pair` or `/ui/#pair`. The address carries no secret.
+  2. The page asks to pair at once (the reverse flow above).
+  3. For 90 s after that pulse, the pairing request opens a **TouchDesigner dialog**. **Number matching (review 19):** the dialog offers the real match code among two random decoys, and the user picks the code the page shows. Only that request is approved (`expect`); a wrong pick denies it. No dialog opens over another open dialog.
+  4. A pairing request that nobody launched from TouchDesigner never opens a dialog; it waits on the Web page as before.
+- **Residual:** a local process could create the request before the real page does. A request is never replaced, so the real page then reports a pending request. The user sees a code in TouchDesigner that the page does not show, and is told to approve only matching codes. Nothing is granted without that approval.
+- Typed URLs pair exactly as before.
 
 **Reloads.** The page keeps its CSRF token in the tab's `sessionStorage`, never in a cookie or the URL, so reloading the same tab keeps the session while it is valid. There is no endpoint that hands out the CSRF token: a stolen cookie alone stays useless. **End Browser Session** signs every browser out.
 
@@ -79,12 +70,18 @@ The match code only prevents approving the wrong request. Holding it grants noth
 - The same validation, audit records and locks apply. Native actions are also recorded as `native_action` with `via: touchdesigner`.
 - That principal is never produced from an HTTP request: HTTP principals come only from the authenticator (`admin:<sid hash>`, `agent:<token id>`).
 - **Approvals:** Approve Request and Deny Request decide only the request that View Approval showed. The backend refuses a different argument digest (`APPROVAL_CHANGED`). The viewer is cleared after the decision or after 2 minutes, so agent arguments do not stay in a DAT that is saved with the project.
-- **Tokens:** a token created there (Connect Agent, New Token) stays in memory for at most 2 minutes and leaves it only through **Copy Token**. Copy Token writes it to the Windows clipboard with the formats that keep it out of Clipboard History and Cloud Clipboard and ask clipboard monitors to ignore it. If that is not possible, the copy is refused rather than made plainly. The clipboard is cleared after a minute if it still holds the token. The token is never written to a parameter, a DAT or a log.
+- **Connect Agent (owner D22, [ADR-0015](../decisions/0015-consent-based-client-connection.md)):**
+  - For a client with automatic setup (Claude Code), the new token goes from the backend straight into the user's protected store, on a background thread. That store is a Windows DPAPI current-user file under the private root, or the macOS Keychain through `security -i` on stdin.
+  - The token is never in memory longer than that step, and never in the clipboard, a parameter, a DAT, a log, the audit or the client's configuration.
+  - The client's `headersHelper` reads it for the project that the listener announces. It releases the token only after the listener proves this project's connect key: an HMAC over the helper's fresh nonce via `/.well-known/tdflowmcp-proof/<nonce>`. A port squatter therefore gets nothing (review 19).
+  - The helper's output bypasses PowerShell transcription.
+  - The `connect_view` viewer is cleared after 2 minutes, because it is saved with the project, and paths in it are shown in `%LOCALAPPDATA%` form.
+- **Tokens for the manual fallback:** a token created there (Connect Agent for a client without automatic setup, New Token) stays in memory for at most 2 minutes and leaves it only through **Copy Token**. Copy Token writes it to the Windows clipboard with the formats that keep it out of Clipboard History and Cloud Clipboard and ask clipboard monitors to ignore it. If that is not possible, the copy is refused rather than made plainly. The clipboard is cleared after a minute if it still holds the token. The token is never written to a parameter, a DAT or a log.
 
 **Request rules:** because **cookies are not isolated by port** (SameSite treats other `127.0.0.1` ports as same-site), the cookie is never relied on alone. See the [per-route gate table](#81-per-route-gate-table). The canonical origin is `http://127.0.0.1:<port>`; requests to `localhost` are redirected to it.
 
 ### 2.6 OAuth 2.1
-Deferred (TDMCP uses it). It may be added behind the same identity interface if clients require it, which is an owner decision.
+Deferred (TDMCP uses it). It may be added behind the same identity interface if clients require it, which is an owner decision. It is the documented route to automatic, secret-free setup for Codex, Cursor and VS Code Copilot, which have no helper mechanism ([ADR-0015](../decisions/0015-consent-based-client-connection.md)).
 
 ## 3. Permissions
 
@@ -194,7 +191,8 @@ TD's main thread cannot pre-empt running Python. Limits are therefore:
 | `/setup/api/*`, `/api/*` reads | GET | Valid Host + custom header `X-TDflow-Request: 1`. A cross-origin page cannot send a custom header without a CORS preflight, and the server never grants preflights. `Sec-Fetch-Site`, if present, must be `same-origin`. Reads after pairing also need the admin session |
 | `/setup/api/*`, `/api/*` mutations | POST/PUT/DELETE | Valid Host + **Origin exactly canonical (a missing Origin is rejected)** + admin session cookie + `X-TDflow-CSRF` matching the session |
 | `/api/events` | WebSocket upgrade | As for mutations: exact Origin + session + CSRF token in the first message |
-| `/.well-known/tdflowmcp` | GET | Valid Host. Returns only `{product, version}`: no project name, path or instance details |
+| `/.well-known/tdflowmcp-proof/<nonce>` | GET | Valid Host; the nonce is exactly 32 lowercase hex characters. Unauthenticated by design; answered on a handler thread without TouchDesigner. Returns `{proof}` = HMAC-SHA256(project connect key, `tdflowmcp-proof|<project id>|<port>|<nonce>`), or 404 when no connection exists in this project. It grants nothing: it proves to Claude Code's headersHelper that this listener holds the key ([ADR-0015](../decisions/0015-consent-based-client-connection.md)) |
+| `/.well-known/tdflowmcp` | GET | Valid Host. Returns `{product, version}`, plus `connect` (the project's random, non-secret storage id `prj_…`, also its Projectid parameter) once the store is open. Claude Code's headersHelper uses it to pick that project's credential ([ADR-0015](../decisions/0015-consent-based-client-connection.md)). No project name, path or instance details |
 
 Responses never include `Access-Control-Allow-*` headers.
 
@@ -262,13 +260,23 @@ TD steps of all calls are serialized on TD's main thread (audit writes on the au
 
 - The Setup listener starts only on a user action (`Opensetup` or `Enablemcp`). It serves application requests only after the bind-verification gate (§8.2) passes, and it is closed immediately if verification fails or is ambiguous. Guidance is then shown only in parameters and an internal DAT.
 - Phase 1A Setup is read-only: status, checks, troubleshooting text and "Tell Your Coding Agent". From 1B, actions (create or disable tokens, choose scope presets, enable MCP, Skills writes) require a paired admin session (§2.5).
-- **No unauthorized changes:** TDflowMCP never installs packages or software, never changes TouchDesigner preferences or Python search paths, never edits firewall or OS settings, never writes coding-agent configuration of any kind (MCP server entries, permission or approval settings), and never kills processes. MCP client connection is **instruction-only**: the user runs the generated command or pastes the snippet. File writes are limited to two cases, both user-confirmed from a preview and audited:
+- **No unauthorized changes:** TDflowMCP never installs packages or software, never changes TouchDesigner preferences or Python search paths, never edits firewall or OS settings, never writes client permission or approval settings, and never kills processes. File writes are limited to three cases, each user-confirmed from a preview and audited:
+  - **Coding-agent connection (owner D22, [ADR-0015](../decisions/0015-consent-based-client-connection.md)):**
+    - Only after the user approved the exact plan in a TouchDesigner dialog (or a second Connect Agent pulse within two minutes).
+    - Only for clients marked automatic (Claude Code): one user-scope `mcpServers.tdflow` entry with a fixed `headersHelper`.
+    - Other servers and settings are preserved; a backup goes to private storage first.
+    - The write is atomic and read back; a changed plan is refused (`CONFIG_CHANGED`).
+    - Undone by Disconnect, which removes only an entry that is still TDflowMCP's and restores one it replaced.
+    - The credential goes only to the OS-protected store.
+
+    Silent modification is never done, and other clients keep an instruction-only manual fallback.
   - **Skills files**, in assisted-write mode, with a hash manifest, only into the registry-listed skills directories ([agent integration §3](agent-integration.md#3-client-aware-installation-consent-first));
   - **project-memory record files** (2A increment 3), only after the user migrated project memory to a folder inside the project's own folder tree, and only `tdflow-project.json` and `tdflow/memory/` in that folder (§11).
+- **Processes:** the core never starts a process. The TD adapter starts only the fixed macOS `/usr/bin/security` Keychain commands, and only after the user's approval; secrets go to them on stdin. Coding-agent programs that discovery finds are never run.
 - **Secrets:** custom parameters are saved into the `.toe`, so they never hold tokens. Pairing uses non-secret match codes (§2.5). Tokens are displayed once, in the Setup page only.
 - **Token placeholders and shells:** generated commands keep `${TDFLOW_TOKEN}` literal by using **single quotes**, which are literal in both POSIX shells and PowerShell. A double-quoted form would let bash or zsh expand the real token into the client config, and in PowerShell it would expand an empty variable. Generated commands use user/local scope, never project scope (which writes a committable `.mcp.json`). Whether each client expands `${VAR}` in stored headers at runtime is **[verify in 1C]**. A 1C test asserts that no client config file written by following the instructions contains the token.
 - **Generated text hygiene ("Tell Your Coding Agent", parameters):** only allowlisted fields are included (versions, state, check ids/results, fixed remediation text, endpoint URL). Environment-derived strings (operator names, probe answers, error messages) are excluded or truncated and fenced as data. Paths are shown as `.tdflowmcp\<name>` or `%LOCALAPPDATA%\TDflowMCP\projects\<id>\data`, never expanded with a username. Connection instructions always reference the token as the literal `${TDFLOW_TOKEN}` (single-quoted in bash, zsh and PowerShell commands). The resume section is **reference-only by default** (handoff id, verified-fact counts). Agent-authored summaries are returned only through `tdflow_handoff_resume`, fenced and labelled.
-- Client detection reports only `present`/`absent` from `shutil.which`, never paths, plus user selection. TDflowMCP does not read client config files unless the user points it at one (read-only).
+- Client detection is read-only: names on PATH (`shutil.which`) and extension or configuration folder names. It never reports paths and never runs anything. A client's configuration file is read only to compute a connection plan, after the user pulsed Connect Agent.
 
 ## 11. Project memory and continuity safety
 

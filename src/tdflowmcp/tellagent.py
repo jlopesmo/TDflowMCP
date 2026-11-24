@@ -14,7 +14,9 @@ from tdflowmcp.compat import CheckResult, summary
 
 RULES = ("Do not install software, change TouchDesigner, operating-system, firewall or coding-agent "
          "configuration, or end any process without asking the user first. Explain each step to the user "
-         "and let them perform it.")
+         "and let them perform it. Connecting you is the user's action in TouchDesigner (Connect Agent, then Approve): "
+         "TDflowMCP then makes exactly the configuration change the user approved. That is authorized; changing "
+         "configuration silently, or editing TDflowMCP's entry yourself, is not.")
 
 
 def _state_sentence(state: str, error_code: str, port: int) -> str:
@@ -22,13 +24,12 @@ def _state_sentence(state: str, error_code: str, port: int) -> str:
         return (f"{state}. MCP is served at http://127.0.0.1:{port}/mcp (this computer only)"
                 + (". All agents are currently suspended by the user." if state == "Suspended" else "."))
     if state == "Setup":
-        return (f"Setup. The Setup Assistant is running at http://127.0.0.1:{port}/setup/ and is reachable "
-                "from this computer only.")
+        return "Listener on (this computer only); MCP is not on yet."
     if state == "Error":
         return f"Error ({error_code or 'unknown'}). The listener is not running."
     if state in ("Starting", "Stopping"):
         return f"{state}. The listener is changing state; ask the user to wait a moment."
-    return "Off. No listener is running. The user starts it with the component's Open Setup button."
+    return "Off (MCP is not on yet)."
 
 
 SHELLS = (("bash", "bash"), ("zsh", "zsh"), ("powershell", "PowerShell"))
@@ -72,51 +73,69 @@ def display(clients: Mapping, cid: str) -> str:
     return cid
 
 
-def connect_section(port: int, clients: Mapping, selected: Sequence[str] = ()) -> list:
-    """'Connect' section from the client registry (src/integrations/clients.json). Allowlisted inputs only:
-    the port, the registry and the selected client ids; the token is always the literal placeholder
-    ${TDFLOW_TOKEN}."""
+def _shell(platform: str):
+    return ("powershell", "PowerShell") if platform == "win32" else ("zsh", "zsh") if platform == "darwin" else         ("bash", "bash")
+
+
+def connect_section(port: int, clients: Mapping, selected: Sequence[str] = (), platform: str = "win32",
+                    automatic: Sequence[str] = (), set_up: Sequence[str] = ()) -> list:
+    """'Connect' section (owner D22): only the selected client(s) and this platform. ``automatic``: client ids with
+    consent-based automatic setup on this platform; ``set_up``: clients already connected in this project. Allowlisted
+    inputs only; the token never appears (the manual fallback names the ${TDFLOW_TOKEN} placeholder)."""
     url = f"http://127.0.0.1:{int(port)}/mcp"
     reg = clients.get("clients", []) if isinstance(clients, Mapping) else []
     if selected:
         reg = [c for c in reg if c.get("id") in selected] or reg
     env = clients.get("token_env", {}) if isinstance(clients, Mapping) else {}
-    out = ["", "## Connect your coding agent",
-           "The user does these steps; show them the commands, do not run configuration commands yourself.",
-           "1. In TouchDesigner, the user pulses Connect Agent on the component's TDflowMCP page (or creates a token "
-           "on the Setup page), then Copy Token. The token is shown or copied only once.",
-           "2. Put it in the TDFLOW_TOKEN environment variable of the terminal that starts the agent "
-           "(never in a file, a commit or the chat):"]
-    for key, label in SHELLS:
-        if env.get(key):
-            out.append(f"   - {label}: `{env[key]}`")
-    out.append("3. Register the server named `tdflow` (Streamable HTTP, " + url + "):")
+    key, label = _shell(platform)
+    out = []
     for c in reg:
+        cid, name = c.get("id"), c.get("display")
+        if cid in automatic:
+            state = "already set up for this project" if cid in set_up else "not set up yet"
+            out += ["", f"## Connect {name} (automatic; {state})",
+                    "The user does this in TouchDesigner; there is nothing to type or paste:",
+                    "1. TDflowMCP page: Connect Agent, then Approve in the dialog. TDflowMCP adds the user-scope MCP "
+                    "server `tdflow` to Claude Code's configuration (shared by the CLI and the VS Code extension). Its "
+                    "fixed helper command reads this project's credential from the user's protected store; no token "
+                    "is shown, pasted or stored in plain text.",
+                    "2. Start a new Claude Code conversation (VS Code: a new chat; CLI: a new session), or run /mcp "
+                    "and reconnect `tdflow`.",
+                    "3. Call `tdflow_whoami`. TouchDesigner then shows Agent Connected — Ready.",
+                    "If `tdflow` is missing or Failed: first ask the user to check that TouchDesigner is open (not "
+                    "minimized) and Enable MCP is on (it is off after every restart). Otherwise ask for Repair "
+                    "Connection (Agents page). Do not edit the `tdflow` entry yourself."]
+            continue
         mcp = _fill(c.get("mcp") or {}, url)
-        tag = {"primary": "primary, tested", "verified": "tested", "generic": "any MCP client with Streamable HTTP"}.get(
-            c.get("support"), "from vendor docs, not tested")
-        out.append(f"   - {c.get('display')} ({tag}):")
-        if mcp.get("json"):
-            out.append("     JSON config entry: `" + json.dumps(mcp["json"], separators=(", ", ": ")) + "`")
-        if mcp.get("toml"):
-            out.append("     TOML config entry (one line per `;`): `" + mcp["toml"].replace("\n", "; ") + "`")
+        why = c.get("manual_reason") or "this client cannot fetch a credential by itself"
+        out += ["", f"## Connect {name} (manual setup)",
+                f"Why manual: {why}. The token is pasted once per terminal.",
+                f"1. TouchDesigner: set Coding Agent to {name}, pulse Connect Agent, then Copy Token (Agents page) "
+                "within 2 minutes.",
+                f"2. In the {label} terminal that starts the agent (never in a file, a commit or the chat):"]
+        if env.get(key):
+            out.append(f"   `{env[key]}`")
+        out.append(f"3. Register the server `tdflow` once ({url}, Streamable HTTP):")
         cmds = mcp.get("add_command") or {}
-        for key, label in SHELLS:
-            if cmds.get(key):
-                out.append(f"     {label}: `{cmds[key]}`")
+        if cmds.get(key):
+            out.append(f"   `{cmds[key]}`")
+        elif mcp.get("toml"):
+            out.append("   TOML (one line per `;`): `" + mcp["toml"].replace("\n", "; ") + "`")
+        elif mcp.get("json"):
+            out.append("   JSON entry: `" + json.dumps(mcp["json"], separators=(", ", ": ")) + "`")
         if mcp.get("config_file_note"):
-            out.append("     Where: " + mcp["config_file_note"])
-    out += ["4. The user turns on Enable MCP in TouchDesigner. Start (or restart) the agent from that terminal and call "
-            "`tdflow_whoami` to confirm the connection and see your scopes; the component then shows the agent under "
-            "Connected Agents.",
-            "5. Optional: install the TDflowMCP Skills from the Setup page (preview first, nothing is "
-            "overwritten). `tdflow_whoami` reports `expected_skill_version`; tell the user if your Skills differ."]
+            out.append("   Where: " + mcp["config_file_note"])
+        start = {"cursor": "`cursor .`", "vscode-copilot": "`code .`"}.get(cid, "the agent")
+        out.append(f"4. Turn on Enable MCP, start {start} from that terminal, call `tdflow_whoami`.")
+    out += ["", "Optional: TDflowMCP Skills install from the Setup page (preview first). `tdflow_whoami` reports "
+            "`expected_skill_version`; tell the user if your Skills differ."]
     return out
 
 
 def build(state: str, error_code: str, port: int, td_build: str, checks: Sequence[CheckResult],
           troubleshooting: Mapping, version: str = __version__, clients: Mapping = None,
-          memory_lines: Sequence[str] = (), selected: Sequence[str] = (), access: str = "") -> str:
+          memory_lines: Sequence[str] = (), selected: Sequence[str] = (), access: str = "",
+          platform: str = "win32", automatic: Sequence[str] = (), set_up: Sequence[str] = ()) -> str:
     entries = troubleshooting.get("entries", {}) if isinstance(troubleshooting, Mapping) else {}
     problems = [c for c in checks if c.result in ("fail", "warn")]
     lines = [
@@ -127,14 +146,10 @@ def build(state: str, error_code: str, port: int, td_build: str, checks: Sequenc
         "## Setup",
         f"- TDflowMCP component v{version} is installed in a TouchDesigner {td_build or '(unknown build)'} project.",
         f"- State: {_state_sentence(state, error_code, port)}",
-        (f"- MCP endpoint: http://127.0.0.1:{port}/mcp (Streamable HTTP). Authenticate with a bearer token that the "
-         "user creates in TouchDesigner (Connect Agent) or on the Setup page and stores as the TDFLOW_TOKEN environment "
-         "variable. Never write the token "
-         "into project files. Call tdflow_whoami first to see your scopes; every change is audited."
+        (f"- MCP endpoint: http://127.0.0.1:{port}/mcp (Streamable HTTP, server name `tdflow`). Call tdflow_whoami "
+         "first to see your scopes; every change is audited."
          if state in ("Enabled", "Suspended") else
-         "- MCP access is not enabled. The user turns it on with the component's Enable MCP toggle after creating "
-         "an agent token (Connect Agent in TouchDesigner, or the Setup page). Do not write MCP or agent configuration "
-         "for TDflowMCP yourself."),
+         "- MCP is not on yet. The user connects you from TouchDesigner: Connect Agent, then Approve (see below)."),
         f"- Compatibility checks: {summary(checks) if checks else 'not run yet (pulse Run Diagnostics)'}.",
         # Spike S9: TouchDesigner runs no frames while its window is minimized.
         "- The TouchDesigner window must stay open (it may be behind other windows, but not minimized): "
@@ -144,7 +159,7 @@ def build(state: str, error_code: str, port: int, td_build: str, checks: Sequenc
         lines.append(f"- Access the user chose for new agents: {access}. Your own permissions are what tdflow_whoami "
                      "reports; the server enforces them.")
     if clients:
-        lines += connect_section(port, clients, selected)
+        lines += connect_section(port, clients, selected, platform, automatic, set_up)
     if memory_lines:                               # Phase 2A: built from validated memory fields only
         lines += [""] + list(memory_lines)
     lines += [
@@ -154,7 +169,7 @@ def build(state: str, error_code: str, port: int, td_build: str, checks: Sequenc
     ]
     if error_code and error_code in {"PORT_IN_USE", "BIND_UNVERIFIED", "CLOSE_UNCONFIRMED", "TRANSPORT_FAILED"}:
         lines.append(f"- Listener error {error_code}: see the matching check below, or ask the user to pulse "
-                     "Open Setup once more. TDflowMCP never restarts the listener by itself.")
+                     "Enable MCP (or Connect Agent) once more. TDflowMCP never restarts the listener by itself.")
     if not problems:
         lines.append("- No repair needed: no check reports a warning or failure.")
     for c in problems:

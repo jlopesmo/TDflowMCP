@@ -1,6 +1,6 @@
 # ADR-0011 — Agent integration, Skills and "Tell Your Coding Agent"
 
-**Status:** Conditionally Accepted (owner, 2026-11-22), subject to its validation gates. The requirements (P13, P14) are owner-approved. Implemented in Phase 1C ([record](../research/2026-11-22-audit-worker-and-phase-1c.md)).
+**Status:** Conditionally Accepted (owner, 2026-11-22), subject to its validation gates. **Decision 3 is amended by [ADR-0015](0015-consent-based-client-connection.md)** (owner D22, 2026-11-24): for Claude Code, connection is consent-based automatic setup; other clients stay instruction-only. The requirements (P13, P14) are owner-approved. Implemented in Phase 1C ([record](../research/2026-11-22-audit-worker-and-phase-1c.md)).
 
 ## Context
 The owner requires MCP and agent Skills integration with client-aware installation and version management, and a dynamic "Tell Your Coding Agent" parameter covering setup, connection, repair and work resumption. Reference projects auto-write client configs and permission postures; Envoy writes `.claude/settings.local.json` with auto-approve defaults ([research](../research/2026-11-22-landscape-and-comparison.md)). That conflicts with TDflowMCP's server-side enforcement and its no-unauthorized-changes requirement.

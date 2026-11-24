@@ -220,7 +220,9 @@ def launch(mode, tox, run_dir, proj_dir, env, handlers, expect_kill=False, deadl
         shutil.copyfile(os.path.join(HERE, f), os.path.join(run_dir, f))
     H["run_dir"] = run_dir
     toe = toe or make_toe(proj_dir, "td_tests", boot_script("td_runner", start_frame=20))
-    td = TDProcess(toe, run_dir, env=dict({"TDFLOW_TOX": tox, "TDFLOW_SRC_ROOT": ROOT, "TDFLOW_TEST_MODE": mode}, **env))
+    td = TDProcess(toe, run_dir, env=dict({"TDFLOW_TOX": tox, "TDFLOW_SRC_ROOT": ROOT, "TDFLOW_TEST_MODE": mode,
+                                         # never the real client configuration (ADR-0015)
+                                         "TDFLOW_CLIENT_HOME": os.path.join(run_dir, "client-home")}, **env))
     done, deadline = set(), time.time() + deadline_s
     try:
         while td.alive() and time.time() < deadline:

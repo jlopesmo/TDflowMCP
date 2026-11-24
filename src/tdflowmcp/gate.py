@@ -80,9 +80,11 @@ def classify(path: str) -> str:
         return "mcp"
     if path == "/.well-known/tdflowmcp":
         return "well_known"
+    if path.startswith("/.well-known/tdflowmcp-proof/"):
+        return "proof"                     # ADR-0015: the listener proves it holds this project's connect key
     if path == "/api/events":
         return "events"
-    if path in ("/setup/api/pair", "/setup/api/pair/status", "/setup/api/pair/ticket"):
+    if path in ("/setup/api/pair", "/setup/api/pair/status"):
         return "pair"
     if path.startswith("/setup/api/") or path.startswith("/api/"):
         return "api"
@@ -160,6 +162,16 @@ def decide(method: str, raw_path: str, headers: Mapping[str, str], state: Listen
     if route == "well_known":
         return d(True, 200, "OK") if method == "GET" else d(False, 405, "METHOD_NOT_ALLOWED")
 
+    if route == "proof":
+        # Unauthenticated by design (the helper has nothing else to show); grants nothing: an HMAC over the caller's
+        # own nonce. Strict nonce shape; GET only.
+        nonce = path[len("/.well-known/tdflowmcp-proof/"):]
+        if method != "GET":
+            return d(False, 405, "METHOD_NOT_ALLOWED")
+        if len(nonce) != 32 or any(c not in "0123456789abcdef" for c in nonce):
+            return d(False, 404, "NOT_FOUND")
+        return d(True, 200, "OK")
+
     if route == "static":
         if method != "GET":
             return d(False, 405, "METHOD_NOT_ALLOWED")
@@ -185,11 +197,6 @@ def decide(method: str, raw_path: str, headers: Mapping[str, str], state: Listen
             if origin != cfg.canonical_origin:
                 return d(False, 403, "BAD_ORIGIN")
             return d(True, 200, "OK", "pair")
-        if method == "POST" and path == "/setup/api/pair/ticket":
-            # One-click authorization: the ticket itself (in the body) is the credential; exact Origin required.
-            if origin != cfg.canonical_origin:
-                return d(False, 403, "BAD_ORIGIN")
-            return d(True, 200, "OK", "")
         if method == "GET" and path == "/setup/api/pair/status":
             if origin is not None and origin != cfg.canonical_origin:
                 return d(False, 403, "BAD_ORIGIN")

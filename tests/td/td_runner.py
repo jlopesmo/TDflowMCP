@@ -21,18 +21,21 @@ TOX = os.environ.get("TDFLOW_TOX", "")
 ROOT = os.environ.get("TDFLOW_SRC_ROOT", "")
 MODE = os.environ.get("TDFLOW_TEST_MODE", "full")
 MAIN = threading.main_thread()
-EXPECTED_PARS = ["Version", "Compatsummary", "Rundiagnostics", "Status", "Statusdetail", "Codingagent",
-                 "Agentaccess", "Allowedscope", "Connectagent", "Copytoken", "Enablemcp", "Suspendagents",
-                 "Tellagent", "Copytellagent", "Viewinstructions", "Connectedagents", "Manageagents",
-                 "Opendashboard", "Agentsummary", "Agentselect", "Agentinfo", "Agentscope", "Addscope",
-                 "Removescope", "Enableagent", "Disableagent", "Rotatetoken", "Revoketokens", "Viewagents",
-                 "Approvalsummary", "Viewapproval", "Approverequest", "Denyrequest", "Opensetup", "Webdashboard",
-                 "Websession", "Setupurl", "Pairingrequest", "Approvepairing", "Rejectpairing",
-                 "Endbrowsersession", "Buildinfo", "Viewdiagnostics", "Stopserver", "Port", "Portstatus",
-                 "Projectroot", "Datalocation", "Datadir", "Datastatus", "Confirmmove", "Claimproject",
-                 "Createprojectmemory", "Claimprojectmemory", "Projectid", "Loglevel"]
+EXPECTED_PARS = ["Version", "Compatsummary", "Rundiagnostics", "Lastcheck", "Status", "Statusdetail", "Codingagent",
+                 "Agentaccess", "Allowedscope", "Connectagent", "Enablemcp", "Suspendagents", "Tellagent",
+                 "Copytellagent", "Viewinstructions", "Connectedagents", "Manageagents", "Opendashboard",
+                 "Detectedclients", "Agentsummary", "Agentselect", "Agentinfo", "Viewagents", "Agentscope",
+                 "Addscope", "Removescope", "Enableagent", "Disableagent", "Repairconnection", "Disconnectagent",
+                 "Rotatetoken", "Copytoken", "Revoketokens", "Approvalsummary", "Viewapproval", "Approverequest",
+                 "Denyrequest", "Opensetup", "Webdashboard", "Websession", "Setupurl", "Pairingrequest",
+                 "Approvepairing", "Rejectpairing", "Endbrowsersession", "Buildinfo", "Viewdiagnostics",
+                 "Viewconnection", "Stopserver", "Port", "Portstatus", "Projectroot", "Datalocation", "Datadir",
+                 "Datastatus", "Confirmmove", "Claimproject", "Createprojectmemory", "Claimprojectmemory",
+                 "Projectid", "Loglevel"]
 EXPECTED_PAGES = ["TDflowMCP", "Agents", "Web", "Advanced"]
-READONLY_PARS = ["Version", "Compatsummary", "Status", "Statusdetail", "Tellagent", "Connectedagents", "Agentsummary", "Agentinfo", "Approvalsummary", "Websession", "Setupurl", "Pairingrequest", "Buildinfo", "Portstatus", "Datadir", "Datastatus", "Projectid"]
+READONLY_PARS = ["Version", "Compatsummary", "Lastcheck", "Status", "Statusdetail", "Tellagent", "Connectedagents",
+                 "Detectedclients", "Agentsummary", "Agentinfo", "Approvalsummary", "Websession", "Setupurl",
+                 "Pairingrequest", "Buildinfo", "Portstatus", "Datadir", "Datastatus", "Projectid"]
 
 R = {"mode": MODE, "tests": [], "harness": {}, "frames": [], "errors": []}
 S = {"gen": None, "wait": None, "label": "boot", "done": False}
@@ -98,7 +101,9 @@ def script():
     comp = load()
     yield frames(20)
     ext = comp.ext.TDflowMCPExt
-    if MODE.startswith(("gate", "perf", "onboard", "dogfood", "memory", "native")):                 # audit-worker gate + 1B-vs-worker comparison
+    if MODE != "native_screens":
+        ext.connector.dialog_opener = lambda title, text, buttons, cb: False   # no real dialogs in automated runs
+    if MODE.startswith(("gate", "perf", "onboard", "dogfood", "memory", "native", "probe")):                 # audit-worker gate + 1B-vs-worker comparison
         ext.launcher = lambda url: True
         yield from __import__("td_runner_gate").run(MODE, comp, ext, T, frames, until, checkpoint, R)
         return
@@ -109,7 +114,11 @@ def script():
     # UX assignment: four pages; diagnostics run automatically on load, and safely (no listener, no store).
     T("ux.PAGES", [pg.name for pg in comp.customPages] == EXPECTED_PAGES, pages=[pg.name for pg in comp.customPages])
     T("ux.RUN_DIAGNOSTICS_ON_FIRST_PAGE", comp.par.Rundiagnostics.page.name == "TDflowMCP"
-      and comp.par.Connectagent.page.name == "TDflowMCP" and comp.par.Opensetup.page.name == "Web")
+      and comp.par.Connectagent.page.name == "TDflowMCP" and comp.par.Opensetup.page.name == "Web"
+      and comp.par.Lastcheck.page.name == "TDflowMCP")
+    T("ux.COPY_TOKEN_IS_A_MANUAL_FALLBACK_ON_THE_AGENTS_PAGE", comp.par.Copytoken.page.name == "Agents"
+      and comp.par.Disconnectagent.page.name == "Agents" and comp.par.Viewconnection.page.name == "Advanced")
+    T("ux.LAST_CHECK_SHOWN", "(automatic)" in comp.par.Lastcheck.eval(), last=comp.par.Lastcheck.eval())
     T("ux.AUTO_DIAGNOSTICS_ON_LOAD", comp.par.Compatsummary.eval().startswith(("Ready", "Partly", "Not ready")) and bool(ext.checks),
       summary=comp.par.Compatsummary.eval())
     T("ux.auto_diagnostics_open_nothing", ext.ctl.transport is None and ext.worker is None
@@ -162,7 +171,7 @@ def script():
       events=list(ext.ctl.events)[-4:])
     yield frames(15)
     T("open.browser_launched_once_after_serving", len(calls) == 1 and calls[0]["url"].split("#")[0] == "http://127.0.0.1:9480/setup/"
-      and calls[0]["url"].split("#")[1].startswith("t=")
+      and calls[0]["url"].split("#")[1] == "pair"                    # ADR-0015: no secret in the launched URL
       and calls[0]["state"] == "Setup" and calls[0]["off_main"], calls=calls)
     T("open.setupurl", comp.par.Setupurl.eval() == "http://127.0.0.1:9480/setup/")
     T("open.portstatus", comp.par.Portstatus.eval() == "this component", portstatus=comp.par.Portstatus.eval())
@@ -183,7 +192,7 @@ def script():
         ext.clipboard_writer = broken
         comp.par.Copytellagent.pulse()
         yield frames(3)
-        T("copy.failure_reported", "could not copy" in comp.par.Statusdetail.eval().lower(),
+        T("copy.failure_reported", "copy failed" in comp.par.Statusdetail.eval().lower(),
           detail=comp.par.Statusdetail.eval())
     finally:
         ext.clipboard_writer = ext._default_clipboard

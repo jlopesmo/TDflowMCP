@@ -791,66 +791,44 @@ def cp_native_approved(data, pid):
     return {}
 
 
-def cp_ticket(data, pid):
-    t = data.get("ticket", "")
+def cp_web_pair_request(data, pid):
+    """Owner D22: the page TouchDesigner opened pairs (no secret in its URL); the retired ticket route is refused."""
     h = {"X-TDflow-Request": "1", "Origin": O, "Content-Type": "application/json", "Sec-Fetch-Site": "same-origin"}
-    body = json.dumps({"ticket": t}).encode()
-    T("web.ticket_needs_exact_origin", base.req("POST", "/setup/api/pair/ticket", dict(h, Origin="http://evil.example"),
-                                                body)["status"] == 403)
-    r = base.req("POST", "/setup/api/pair/ticket", h, body)
-    sid = next((sc.split(";", 1)[0].split("=", 1)[1] for sc in r.get("headers", {}).get("set-cookie", [])
-                if sc.startswith("tdflow_admin=")), None)
+    old = base.req("POST", "/setup/api/pair/ticket", h, json.dumps({"ticket": "x" * 43}).encode())
+    T("web.TICKET_ROUTE_RETIRED", old["status"] in (401, 403, 404, 410), status=old["status"])
+    STATE["cookies"].pop("tdflow_pair", None)
+    r = http("POST", "/setup/api/pair", {"X-TDflow-Request": "1", "Origin": O, "Sec-Fetch-Site": "same-origin"})
     j = base.jbody(r) or {}
-    T("web.ONE_CLICK_SIGN_IN", r["status"] == 200 and bool(sid) and bool(j.get("csrf")), status=r["status"])
-    cookie = {"Cookie": f"tdflow_admin={sid}"}
-    hp = dict(cookie, **{"X-TDflow-Request": "1", "X-TDflow-CSRF": j.get("csrf", ""), "Origin": O,
-                         "Content-Type": "application/json"})
-    w = base.req("POST", "/api/settings", hp, json.dumps({"diagnostic_log": False}).encode())
-    T("web.WARM_UP_NO_CHANGES_IN_THE_FIRST_SECONDS", w["status"] == 409 and base.code(w) == "SESSION_STARTING",
-      status=w["status"])
-    time.sleep(5.5)
-    w = base.req("POST", "/api/settings", hp, json.dumps({"diagnostic_log": False}).encode())
-    T("web.changes_allowed_after_the_warm_up", w["status"] == 200, status=w["status"])
-    T("web.no_session_resume_endpoint", base.req("GET", "/setup/api/session", dict(cookie, **{"X-TDflow-Request": "1"}))
-      ["status"] in (401, 403, 404))
-    ov = base.req("GET", "/api/overview", dict(cookie, **{"X-TDflow-Request": "1", "X-TDflow-CSRF": j.get("csrf", "")}))
+    T("web.page_pairing_requested", r["status"] == 200 and j.get("state") == "pending", status=r["status"])
+    return {"match_code": j.get("match_code")}
+
+
+def cp_web_paired(data, pid):
+    st = http("GET", "/setup/api/pair/status", {"X-TDflow-Request": "1"})
+    j = base.jbody(st) or {}
+    T("web.SIGNED_IN_AFTER_APPROVAL_IN_TD", j.get("state") == "approved" and bool(j.get("csrf")), state=j.get("state"))
+    STATE["csrf"] = j.get("csrf")
+    ov = admin("GET", "/api/overview")
     T("web.SIGNED_IN_DASHBOARD_WORKS", ov["status"] == 200, status=ov["status"])
-    T("web.stale_harness_session_ended", admin("GET", "/api/overview")["status"] in (401, 403, 404))
-    STATE["cookies"]["tdflow_admin"], STATE["csrf"] = sid, j.get("csrf")   # one session at a time: adopt it
+    w = admin("POST", "/api/settings", {"diagnostic_log": False})
+    T("web.changes_allowed_at_once", w["status"] == 200, status=w["status"])     # no warm-up needed any more
+    T("web.no_session_resume_endpoint", http("GET", "/setup/api/session", {"X-TDflow-Request": "1"})
+      ["status"] in (401, 403, 404))
     return {}
 
 
-def _redeem(t):
-    h = {"X-TDflow-Request": "1", "Origin": O, "Content-Type": "application/json", "Sec-Fetch-Site": "same-origin"}
-    r = base.req("POST", "/setup/api/pair/ticket", h, json.dumps({"ticket": t}).encode())
-    sid = next((sc.split(";", 1)[0].split("=", 1)[1] for sc in r.get("headers", {}).get("set-cookie", [])
-                if sc.startswith("tdflow_admin=")), None)
-    return r["status"], sid, (base.jbody(r) or {}).get("csrf")
-
-
-def cp_ticket_race(data, pid):
-    """Another program read the URL and was faster; then the real page presents the same ticket."""
-    st1, sid1, csrf1 = _redeem(data["ticket"])
-    T("web.race_first_redemption_works", st1 == 200 and bool(sid1))
-    st2, _, _ = _redeem(data["ticket"])
-    T("web.TICKET_REPLAY_REFUSED", st2 == 401)
-    ov = base.req("GET", "/api/overview", {"Cookie": f"tdflow_admin={sid1}", "X-TDflow-Request": "1",
-                                           "X-TDflow-CSRF": csrf1 or ""})
-    T("web.RACED_SESSION_ENDED", ov["status"] in (401, 403, 404), status=ov["status"])
-    return {}
-
-
-def cp_ticket_again(data, pid):
-    st, sid, csrf = _redeem(data["ticket"])
-    T("web.sign_in_again_after_interception", st == 200 and bool(sid))
-    STATE["cookies"]["tdflow_admin"], STATE["csrf"] = sid, csrf
+def cp_web_pair_untriggered(data, pid):
+    STATE["cookies"].pop("tdflow_pair", None)
+    r = http("POST", "/setup/api/pair", {"X-TDflow-Request": "1", "Origin": O})
+    T("web.untriggered_request_is_pending_only", r["status"] == 200, status=r["status"])
     return {}
 
 
 HANDLERS = {"setup_ready": cp_setup_ready, "pair_approved": cp_pair_approved, "enabled": cp_enabled,
             "native_token": cp_native_token, "native_rotated": cp_native_rotated, "native_disabled": cp_native_disabled,
             "native_approval_requested": cp_native_approval_requested, "native_approved": cp_native_approved,
-            "ticket": cp_ticket, "ticket_race": cp_ticket_race, "ticket_again": cp_ticket_again,
+            "web_pair_request": cp_web_pair_request, "web_paired": cp_web_paired,
+            "web_pair_untriggered": cp_web_pair_untriggered,
             "human_edited": cp_human_edited, "suspended": cp_suspended, "resumed": cp_resumed, "minimized": cp_minimized,
             "queue_block": cp_queue_block, "queue_checked": cp_queue_checked, "audit_down": cp_audit_down,
             "audit_up": cp_audit_up, "scan": cp_scan, "revoked": cp_revoked, "disabled": cp_disabled,
@@ -862,7 +840,8 @@ def launch(mode, tox, run_dir, datadir):
     shutil.copyfile(os.path.join(HERE, "td_runner_mcp.py"), os.path.join(run_dir, "td_runner_mcp.py"))
     toe = make_toe(run_dir, "td_tests", boot_script("td_runner", start_frame=20))
     td = TDProcess(toe, run_dir, env={"TDFLOW_TOX": tox, "TDFLOW_SRC_ROOT": ROOT, "TDFLOW_TEST_MODE": mode,
-                                      "TDFLOW_DATADIR": datadir, "TDFLOW_PRIVATE_ROOT": os.path.join(os.path.dirname(datadir), "private-root")})
+                                      "TDFLOW_DATADIR": datadir, "TDFLOW_PRIVATE_ROOT": os.path.join(os.path.dirname(datadir), "private-root"),
+                                      "TDFLOW_CLIENT_HOME": os.path.join(run_dir, "client-home")})
     done, deadline = set(), time.time() + 600
     try:
         while td.alive() and time.time() < deadline:

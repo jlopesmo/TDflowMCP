@@ -20,6 +20,7 @@ ENV_CHECKS = ("td.build", "py.version", "py.deps", "net.capability", "net.port",
 MCP_CHECKS = ("fs.datadir", "audit.integrity")
 LIVE_CHECKS = ("net.bind", "sec.selftest")        # verified live when MCP is enabled
 CONNECTED_WITHIN_S = 120
+MAX_LINE = 26               # characters visible in TouchDesigner's default parameter window (416 px), D22 review
 
 CHECK_LABELS = {
     "td.build": "TouchDesigner build", "py.version": "Python version", "py.deps": "Python modules",
@@ -76,50 +77,67 @@ def evaluate(f: Mapping) -> Dict:
     conn = connected(f.get("connected") or (), float(f.get("now") or 0))
     client = f.get("client") or "your coding agent"
     if f.get("error_code"):
-        stage, line = "error", f"Error {f['error_code']}. Pulse Run Diagnostics."
+        stage, line = "error", f"Error: {f['error_code']}"
     elif f.get("suspended"):
-        stage, line = "suspended", "Agents suspended. Turn off Suspend Agents to resume."
+        stage, line = "suspended", "Agents suspended."
     elif env["state"] == "pending" and not f.get("checks"):
-        stage, line = "checking", "Environment checks pending. Pulse Run Diagnostics."
+        stage, line = "checking", "Pulse Run Diagnostics."
     elif env["state"] == "not_ready":
-        names = ", ".join(CHECK_LABELS.get(i, i) for i in env["failing"])
-        stage, line = "env_not_ready", f"Not ready: {names}. See View Diagnostics (Advanced)."
+        short = {"td.build": "TD build", "py.version": "Python", "py.deps": "modules", "net.capability": "loopback",
+                 "net.port": "port", "td.instances": "2 components"}
+        named = f"Not ready: {short.get(env['failing'][0], '')}" if len(env["failing"]) == 1 else ""
+        stage, line = "env_not_ready", named if 11 < len(named) <= MAX_LINE else "Not ready: see Diagnostics"
+    elif f.get("connect_urgent") and f.get("connect_line"):    # a Connect Agent step in progress or failed (D22)
+        stage, line = "connecting", f["connect_line"]
     elif conn:
-        who = conn[0]
-        more = f" (+{len(conn) - 1} more)" if len(conn) > 1 else ""
-        stage, line = "connected", f"{who.get('client') or who.get('agent')} connected{more}. Ready."
+        stage, line = "connected", "Agent Connected — Ready"     # Connected Agents names them (+N)
+    elif f.get("connect_line"):                   # set up, waiting for the agent's first request (owner D22)
+        stage, line = "connecting", f["connect_line"]
     elif f.get("mcp_on"):
         if f.get("handoff"):
-            stage, line = "enabled_handoff", f"Pulse Copy Token, then start {client}."
+            stage, line = "enabled_handoff", "Copy Token (Agents page)"
         else:
-            stage, line = "enabled_waiting", f"Waiting for {client} to connect."
+            stage, line = "enabled_waiting", "Waiting for the agent…"
     elif int(f.get("agents_enabled") or 0) < 1:
-        stage, line = "env_ready", "Ready. Pulse Connect Agent."
+        stage, line = "env_ready", "Ready: pulse Connect Agent"
     elif f.get("handoff"):
-        stage, line = "agent_created", "Pulse Copy Token, then turn on Enable MCP."
+        stage, line = "agent_created", "Copy Token, Enable MCP"
     else:
-        stage, line = "agent_configured", "Agent ready. Turn on Enable MCP."
+        stage, line = "agent_configured", "Turn on Enable MCP."
     return {"environment": env, "mcp": m, "mcp_enabled": bool(f.get("mcp_on")), "agent_connected": bool(conn),
             "connected": conn, "stage": stage, "line": line}
 
 
+def counts(checks: Sequence) -> Dict[str, int]:
+    """Passed / warning / failed / pending ('unknown': needs a listener or a connection; never counted as passed)."""
+    by = dict(_result(c) for c in checks or ())
+    return {k: sum(1 for v in by.values() if v == k) for k in ("pass", "warn", "fail", "unknown")}
+
+
 def system_line(checks: Sequence) -> str:
-    """Compact System Check parameter value."""
+    """Compact System Check parameter value (UX-01: all four counts; fits the default parameter width)."""
     env = environment(checks)
     if env["state"] == "pending" and not checks:
         return "Not run yet"
-    by = dict(_result(c) for c in checks or ())
-    counts = {k: sum(1 for v in by.values() if v == k) for k in ("pass", "warn", "fail", "unknown")}
-    label = {"ready": "Ready", "warning": "Ready, with warnings", "not_ready": "Not ready",
-             "pending": "Partly checked"}[env["state"]]
-    tail = f"{counts['fail']} fail" if counts["fail"] else (f"{counts['warn']} warn" if counts["warn"] else
-                                                             f"{counts['pass']} pass")
-    return f"{label} · {tail} · {counts['unknown']} later"
+    c = counts(checks)
+    label = {"ready": "Ready", "warning": "Ready", "not_ready": "Not ready", "pending": "Partly"}[env["state"]]
+    # The default parameter window shows about 26 characters (visual review, D22): zero warn/fail counts are left
+    # out; every count is in the completion note and View Diagnostics.
+    bad = [f"{c['fail']} fail"] * bool(c["fail"]) + [f"{c['warn']} warn"] * bool(c["warn"])
+    tail = [f"{c['pass']} ok"] + [f"{c['unknown']} pending"] * bool(c["unknown"])
+    for parts in (bad + tail, bad + tail[:1], bad):
+        line = (f"{label}: " + ", ".join(parts)) if bad else (label + " · " + " · ".join(parts))
+        if len(line) <= MAX_LINE:
+            return line
+    return line[:MAX_LINE]
 
 
 def report(checks: Sequence, remediation: Optional[Mapping] = None, detected: Sequence[str] = ()) -> str:
     """Full diagnostics text for the native viewer (no secrets, no absolute paths)."""
-    lines = ["TDflowMCP diagnostics", "", system_line(checks), ""]
+    c = counts(checks)
+    lines = ["TDflowMCP diagnostics", "", system_line(checks),
+             f"Passed {c['pass']}, warnings {c['warn']}, failed {c['fail']}, pending {c['unknown']} (pending checks "
+             "need a listener or a connection; they are never counted as passed).", ""]
     for c in checks or ():
         cid, res = _result(c)
         ev = c.get("evidence") if isinstance(c, Mapping) else getattr(c, "evidence", "")

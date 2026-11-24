@@ -142,19 +142,23 @@ class Engine:
         self._lease_lock = threading.RLock()       # re-entrant: _lease checks holders while holding it
 
     def _mark_seen(self, agent_id: str, client_info) -> None:
-        """Any thread: an authenticated request from this agent arrived (the basis of 'Agent Connected')."""
-        name = ""
+        """Any thread: an authenticated request from this agent arrived (the basis of 'Agent Connected'). The client's
+        self-declared name and version are kept (shown as the connected client's identity, never trusted)."""
+        info = None
         if isinstance(client_info, dict):
-            name = str(client_info.get("name") or "")[:40]
+            info = client_info
         elif isinstance(client_info, str):          # the redacted JSON text of the client's clientInfo
             try:
                 import json as _json
                 v = _json.loads(client_info)
-                name = str(v.get("name") or "")[:40] if isinstance(v, dict) else ""
+                info = v if isinstance(v, dict) else {"name": client_info}
             except ValueError:
-                name = client_info[:40]
+                info = {"name": client_info}
+        name = str((info or {}).get("name") or "")[:40]
+        version = str((info or {}).get("version") or "")[:24]
         prev = self.seen.get(agent_id) or {}
-        self.seen = dict(self.seen, **{agent_id: {"last": time.time(), "client": name or prev.get("client", "")}})
+        self.seen = dict(self.seen, **{agent_id: {"last": time.time(), "client": name or prev.get("client", ""),
+                                                  "version": version or prev.get("version", "")}})
 
     def suspended(self) -> bool:
         return self.audit_failed or bool(self._suspended())

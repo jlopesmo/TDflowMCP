@@ -83,9 +83,12 @@ PROMPT = ("You are connected to a TouchDesigner project through the MCP server n
 
 
 def extract_claude_json(tell: str):
-    block = tell.split("- Claude Code", 1)[1].split("\n   - ", 1)[0]
-    m = re.search(r"JSON config entry: `(\{.*\})`", block)
-    return json.loads(m.group(1)) if m else None
+    """The manual fallback's JSON server entry (owner D22: Claude Code itself is configured automatically)."""
+    for line in tell.splitlines():
+        m = re.search(r'`(\{"mcpServers".*\})`', line)
+        if m:
+            return json.loads(m.group(1))
+    return None
 
 
 def cp_onboard(data, pid):
@@ -97,10 +100,11 @@ def cp_onboard(data, pid):
     secret = TOKENS["B"].split(".", 1)[1]
     T("connect.text_has_claude_json_with_placeholder", bool(cfg) and "${TDFLOW_TOKEN}" in json.dumps(cfg)
       and secret not in tell)
-    for shell in ("bash:", "zsh:", "PowerShell:"):
-        line = next((l for l in tell.splitlines() if l.strip().startswith(shell) and "claude mcp add" in l), "")
-        T(f"connect.{shell[:-1].lower()}_command_keeps_placeholder_literal", "'Authorization: Bearer ${TDFLOW_TOKEN}'" in line,
-          line=line)
+    # Owner D22: Claude Code is configured automatically (native suite); the manual fallback text names the variable
+    # through this platform's shell only, and never a token. (The registry's quoting rule is unit-tested.)
+    T("connect.manual_text_reads_the_token_into_the_variable", "$env:TDFLOW_TOKEN = " in tell
+      and "Read-Host -AsSecureString" in tell and "bash" not in tell.split("## Connect", 1)[1])
+    T("connect.manual_text_has_no_claude_add_command", "claude mcp add" not in tell)
     work = data["project_folder"]
     cfg_path = os.path.join(STATE["top"], "claude-mcp-config.json")
     with open(cfg_path, "w", encoding="utf-8") as f:

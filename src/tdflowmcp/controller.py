@@ -150,11 +150,10 @@ class Controller:
             self._launch_wanted = self._launch_wanted or launch
             return "pending"
         if self.state is CompState.STOPPING:
-            self.message = "Still stopping the previous listener. Pulse Open Setup again in a moment."
+            self.message = "Still stopping the previous listener. Try again in a moment."
             return "busy"
         if self.gate.state is bv.ListenerState.STUCK:
-            self.message = ("The previous listener socket did not close. Restart TouchDesigner before "
-                            "starting the Setup Assistant again.")
+            self.message = "The previous listener did not close. Restart TouchDesigner."
             return "stuck"
         if self.pending_port is not None:
             self.port, self.pending_port = self.pending_port, None
@@ -172,8 +171,7 @@ class Controller:
             self.gate.on_bind_error("PORT_IN_USE")
             self.portstatus = "in use by another process"
             self._owner_probe = self.d.probe_owner(self.port)
-            self._error("PORT_IN_USE", f"Port {self.port} is already in use. Close the other program or choose "
-                        "another Port, then pulse Open Setup. TDflowMCP never changes the port by itself.")
+            self._error("PORT_IN_USE", f"Port {self.port} is in use. Close the other app or change Port.")
             return "refused"
         t = self.d.make_transport(self.port, lambda: self.gate.state)
         try:
@@ -242,9 +240,8 @@ class Controller:
             ok = self._launch.result()
             self.launch_status = "launched" if ok else "failed"
             if self.state is CompState.SETUP:
-                self.message = (f"Setup Assistant opened in your browser: {self.url} (this computer only)." if ok else
-                                f"Setup is running, but the browser could not be opened automatically. "
-                                f"Open {self.url} yourself.")
+                self.message = ("Page opened in your browser" if ok else
+                                f"The browser could not be opened automatically. Open {self.url} yourself.")
             self._launch = None
         if self.state is CompState.SETUP and self._launch_wanted and self._launch is None:
             self._start_launch()                            # Open Setup pulsed again while serving
@@ -266,7 +263,7 @@ class Controller:
             self.state = CompState.SETUP
             self.portstatus = "this component"
             self._last_verify = now
-            self.message = f"Setup Assistant running at {self.url} (this computer only)."
+            self.message = "Listener on (local only)"
             if self._launch_wanted:
                 self._start_launch()
         elif act == "recheck_later":
@@ -335,17 +332,16 @@ class Controller:
             self._error("CLOSE_UNCONFIRMED", "The listener socket did not close. Restart TouchDesigner.")
         elif self.gate.error_code:
             code = self.gate.error_code
-            msg = {"BIND_UNVERIFIED": "The listener could not be verified as local-only and was closed. "
-                                      "Pulse Open Setup to try once more.",
+            msg = {"BIND_UNVERIFIED": "Not verified as local-only, so it was closed. Retry Enable MCP.",
                    "PORT_IN_USE": f"Another process started listening on port {self.port}; the listener was closed.",
-                   "TRANSPORT_FAILED": "The listener stopped unexpectedly. Turn on Enable MCP (or pulse Open Setup) to start it again."}
+                   "TRANSPORT_FAILED": "Listener stopped. Turn Enable MCP on to retry."}
             self._error(code, msg.get(code, "The listener was closed."))
         else:
             self.state, self.error_code = CompState.OFF, ""
             if self._close_reason == "port_changed":
-                self.message = f"Port changed to {self.port}. Turn on Enable MCP (or pulse Open Setup) to start on the new port."
+                self.message = f"Port changed to {self.port}. Turn Enable MCP on."
             elif self._close_reason == "idle":
-                self.message = "Stopped after a long idle period. Turn on Enable MCP (or pulse Open Setup) to start again."
+                self.message = "Stopped after a long idle. Turn Enable MCP on."
             else:
                 self.message = "Listener off."
         self.portstatus = "not checked" if self.state is CompState.OFF else self.portstatus

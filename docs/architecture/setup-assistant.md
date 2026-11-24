@@ -1,6 +1,6 @@
 # Setup Assistant, component parameters, compatibility and troubleshooting
 
-**Status:** Design for owner-approved requirements P9–P12 and P14, **revised for the first-run UX (owner D21, 2026-11-23; implemented, §2)** ([ADR-0010](../decisions/0010-setup-assistant-and-component-parameters.md)). **The Phase 1A part is implemented** in the development build of `TDflowMCP.tox` (2026-11-22). It is verified in TouchDesigner 2025.32440 by the in-TD suite; see [Phase 1A component record](../research/2026-11-22-phase-1a-component.md). **The Phase 1B part (pairing, agent tokens, Enable MCP, Suspend Agents, agent and session information) is implemented** and verified by the Phase 1B in-TD acceptance suite. The 1C rows remain design only.
+**Status:** Design for owner-approved requirements P9–P12 and P14, **revised for the first-run UX (owner D21, 2026-11-23) and the one-click connection (owner D22, 2026-11-24, [ADR-0015](../decisions/0015-consent-based-client-connection.md)); implemented, §2** ([ADR-0010](../decisions/0010-setup-assistant-and-component-parameters.md)). **The Phase 1A part is implemented** in the development build of `TDflowMCP.tox` (2026-11-22). It is verified in TouchDesigner 2025.32440 by the in-TD suite; see [Phase 1A component record](../research/2026-11-22-phase-1a-component.md). **The Phase 1B part (pairing, agent tokens, Enable MCP, Suspend Agents, agent and session information) is implemented** and verified by the Phase 1B in-TD acceptance suite. The 1C rows remain design only.
 
 ## 1. Component states
 
@@ -30,33 +30,35 @@ The component **never listens until the user acts** (pulse or toggle). After the
 | Group | Parameter | Type | Behaviour |
 |---|---|---|---|
 | System | `Version` | Str, read-only | Component version (tool surface) |
-| | `Compatsummary` "System Check" | Str, read-only | Latest diagnostics, compact: `Ready · 8 pass · 3 later` / `Not ready · 1 fail …`. *Later* means a check needs a listener or a connection |
-| | `Rundiagnostics` | Pulse | Runs the checks **at any time** (also before an agent exists, after an error, while MCP is on). Never starts a listener, never creates the store, never installs or changes anything |
+| | `Compatsummary` "System Check" | Str, read-only | Latest diagnostics in about 26 characters (the default window's width): `Ready · 8 ok · 3 pending`, `Not ready: 1 fail, 1 warn`. Zero warn/fail counts are left out; View Diagnostics lists passed, warnings, failed and pending. *Pending* means a check needs a listener or a connection; it is never counted as passed. Shows `Running diagnostics…` while a manual run is under way (UX-01, owner D22) |
+| | `Rundiagnostics` | Pulse | Runs the checks **at any time** (also before an agent exists, after an error, while MCP is on). Never starts a listener, never creates the store, never installs or changes anything. Confirms completion in Next Step (`Checks done hh:mm:ss`) |
+| | `Lastcheck` "Last Check" | Str, read-only | Time of the last run and whether it was automatic or manual (D22) |
 | | `Status` | Str, read-only | `Off`, `Starting`, `Setup`, `Stopping`, `Enabled`, `Suspended`, `Error: <code>` |
 | | `Statusdetail` "Next Step" | Str, read-only | What is happening and what to do next ([§2.1](#21-readiness-and-next-step)) |
-| Connection | `Codingagent` "Coding Agent" | Menu | `Auto (Recommended)` (default), Claude Code, OpenAI Codex, Cursor, VS Code Copilot, Other MCP Client. Selects the instructions and Skills guidance, never the protocol or permissions. Saved in the project (not a secret) |
+| Connection | `Codingagent` "Coding Agent" | Menu | `Auto (Recommended)` (default), Claude Code, OpenAI Codex, Cursor, VS Code Copilot, Other MCP Client. Which agent Connect Agent connects and whose instructions are shown; Auto discovers read-only and asks when it finds several. Never the protocol or permissions. Saved in the project (not a secret) |
 | | `Agentaccess` "Agent Access" | Menu | Read Only (observer), Builder (default), Operator |
 | | `Allowedscope` "Allowed Scope" | Str | Scope for a new agent, default `/project1/**` (must lie inside Project Root) |
-| | `Connectagent` | Pulse | Guided setup ([§2.2](#22-connect-agent)) |
-| | `Copytoken` | Pulse | Copies the new agent token to the clipboard (within 2 minutes of creating it), kept out of Windows Clipboard History and Cloud Clipboard; cleared after a minute. The only way it leaves TDflowMCP |
-| | `Enablemcp` | Toggle | Off by default; turns MCP on only after the preconditions (§4) **and a fresh live loopback verification**. Never re-enabled silently after a reload |
+| | `Connectagent` | Pulse | The guided, consent-based connection ([§2.2](#22-connect-agent)) |
+| | `Enablemcp` | Toggle | Off by default; turns MCP on only after the preconditions (§4) **and a fresh live loopback verification**. Never re-enabled silently after a reload. Connect Agent turns it on only when the plan the user approved says so |
 | | `Suspendagents` | Toggle | Kill switch; audited |
 | Agent Handoff | `Tellagent` "Tell Your Coding Agent" | Str, read-only | State of the instructions (`Ready · v…`, `Repair: …`) |
 | | `Copytellagent` "Copy Instructions" / `Viewinstructions` "View Full Instructions" | Pulse | Clipboard / viewer of the client-specific instructions ([§6](#6-tell-your-coding-agent)) |
 | Management | `Connectedagents` | Str, read-only | Agents whose **authenticated** requests arrived in the last 2 minutes, with the client name (`Claude Code (5 s ago)`); `none yet (MCP is on)` / `none (MCP is off)`. A registered agent is not a connected agent |
 | | `Manageagents` | Pulse | Opens the parameter window on the Agents page |
-| | `Opendashboard` | Pulse | Opens the dashboard signed in (starts the listener if needed; one-click sign-in with a 5-s read-only warm-up, [security model §2.5](security-model.md#25-dashboard-and-setup-admin-sessions)) |
+| | `Opendashboard` | Pulse | Opens the dashboard (starts the listener if needed); TouchDesigner then asks to approve the sign-in, showing the page's code ([security model §2.5](security-model.md#25-dashboard-and-setup-admin-sessions)) |
 
 **Page Agents (native administration; the same backend as the dashboard)**
 
 | Parameter | Type | Behaviour |
 |---|---|---|
+| `Detectedclients` "Installed Agents" | Str, read-only | What discovery found, and whether setup is automatic: `Claude Code (CLI, VS Code extension; automatic) · OpenAI Codex CLI (CLI; manual)` |
 | `Agentsummary` "Agents" | Str, read-only | `2 agents · 1 connected` |
 | `Agentselect` "Agent" | Menu (filled at runtime) | Every agent by name (`(disabled)` when disabled); selecting one fills Scope with its first scope |
 | `Agentinfo` "Selected Agent" | Str, read-only | `On · Builder · 1 token · 1 scope · seen 5 s ago` |
 | `Agentscope` "Scope", `Addscope`, `Removescope` | Str, Pulse | Add an allow grant with the agent's role actions on Scope / remove the grant on Scope |
 | `Enableagent`, `Disableagent` | Pulse | Enable / disable the agent (its tokens stop working) |
-| `Rotatetoken` "New Token", `Revoketokens` | Pulse | Revoke the agent's tokens and create a new one (then Copy Token) / revoke them all |
+| `Repairconnection` "Repair Connection", `Disconnectagent` "Disconnect" | Pulse | For an agent Connect Agent set up: a new credential and a re-checked entry (plan shown first) / remove the entry (or restore the one it replaced), delete the credential, revoke the tokens, disable the agent (asks first) |
+| `Rotatetoken` "New Token", `Copytoken`, `Revoketokens` | Pulse | Manual fallback: revoke the agent's tokens and create a new one / copy it once to the clipboard (within 2 minutes; kept out of Windows Clipboard History and Cloud Clipboard; cleared after a minute) / revoke them all |
 | `Viewagents` | Pulse | A viewer listing every agent (never tokens) |
 | `Approvalsummary` "Pending Approvals" | Str, read-only | `1 waiting · oldest: Agent E · tdflow_set_parameters` |
 | `Viewapproval`, `Approverequest`, `Denyrequest` | Pulse | Show the oldest waiting request with its complete arguments in a viewer, then approve or deny **that** request (bound to its id and argument digest; nothing can be decided unseen). The viewer is cleared after the decision or 2 minutes |
@@ -65,15 +67,15 @@ The component **never listens until the user acts** (pulse or toggle). After the
 
 | Parameter | Type | Behaviour |
 |---|---|---|
-| `Opensetup`, `Webdashboard` "Open Dashboard" | Pulse | Open the Setup page / dashboard in the default browser, already signed in |
+| `Opensetup`, `Webdashboard` "Open Dashboard" | Pulse | Open the Setup page / dashboard in the default browser; approve the sign-in in the TouchDesigner dialog (same code as the page) |
 | `Websession` "Browser Session" | Str, read-only | Signed-in browser sessions and the time of the last sign-in |
 | `Setupurl` | Str, read-only | The Setup address while the listener runs |
 | `Pairingrequest`, `Approvepairing`, `Rejectpairing` | Str / Pulse | Pairing for a browser that opened a typed URL (§7) |
 | `Endbrowsersession` | Pulse | Sign every browser out |
 
-**Page Advanced** — unchanged controls, plus `Buildinfo` "Build" (TD build, Python, Skill version) and `Viewdiagnostics` "View Diagnostics" (the full report with fixes in a viewer). Unchanged: `Stopserver`, `Port`, `Portstatus`, `Projectroot`, `Datalocation`, `Datadir`, `Datastatus`, `Confirmmove`, `Claimproject`, `Createprojectmemory`, `Claimprojectmemory`, `Projectid`, `Loglevel` (behaviour as before: [Port](#3-compatibility-checks) never changes automatically; Confirm Move / Claim As New Project for moved projects; project memory pulses).
+**Page Advanced** — unchanged controls, plus `Buildinfo` "Build" (TD build, Python, Skill version), `Viewdiagnostics` "View Diagnostics" (the full report with fixes in a viewer) and `Viewconnection` "View Connection Details" (configuration file, MCP entry, helper, credential store, backups; no secrets; D22). Unchanged: `Stopserver`, `Port`, `Portstatus`, `Projectroot`, `Datalocation`, `Datadir`, `Datastatus`, `Confirmmove`, `Claimproject`, `Createprojectmemory`, `Claimprojectmemory`, `Projectid`, `Loglevel` (behaviour as before: [Port](#3-compatibility-checks) never changes automatically; Confirm Move / Claim As New Project for moved projects; project memory pulses).
 
-**Runtime viewer DATs** (`diagnostics`, `agents_view`, `approval_view`, like `tellagent`) hold no secrets. They are excluded from the embedded-hash check because their text changes at runtime.
+**Runtime viewer DATs** (`diagnostics`, `agents_view`, `approval_view`, `connect_view`, like `tellagent`) hold no secrets. They are excluded from the embedded-hash check because their text changes at runtime.
 
 ### 2.1 Readiness and Next Step
 `src/tdflowmcp/readiness.py` keeps four states apart:
@@ -85,20 +87,37 @@ The component **never listens until the user acts** (pulse or toggle). After the
 Next Step shows, in this order:
 1. a fresh note (for example a copy result);
 2. a controller message for 30 s after a transition (not in Setup);
-3. otherwise the readiness line, for example `Ready. Pulse Connect Agent.`, `Pulse Copy Token, then turn on Enable MCP.`, `Waiting for Claude Code to connect.`, `Claude Code connected. Ready.`, `Agents suspended. Turn off Suspend Agents to resume.` or `Not ready: port. See View Diagnostics (Advanced).`
+3. otherwise the readiness line, for example `Ready: pulse Connect Agent`, a Connect Agent stage (`Approve in the dialog.`, `Configuring Claude Code…`, `Start a Claude Code chat.`, `Connected · idle 5 min`, `No key: Repair Connection`, `Turn on Enable MCP.`), `Agent Connected — Ready`, `Agents suspended.` or `Not ready: port`.
+
+A Connect Agent step counts as newer than an older note (ties go to the step), so progress stays visible. Steps in progress or failed take precedence over `Agent Connected — Ready`. **Every line fits 26 characters,** the value width of TouchDesigner's default 416-px parameter window (visual review, D22; unit-tested). Details go to the viewers.
 
 Errors always show. Texts are short, because the default parameter window is about 400 px wide (visual review).
 
 ### 2.2 Connect Agent
-1. Run the checks; stop with the reason if the environment is not ready.
-2. Coding Agent: the selected client, or (Auto) the detected ones.
-3. Agent Access and Allowed Scope.
-4. Create the agent and token through the same backend as `/api/tokens` (audited first). If the store is not open yet it is opened (a user action) and creation continues when it is ready.
-5. The token waits in memory for Copy Token (2 minutes).
-6. The user turns on Enable MCP; **Connect Agent never enables MCP**.
-7. Connected Agents and Next Step report the real connection.
-
-**Automatic configuration of third-party agents is not offered:** TDflowMCP never writes coding-agent configuration ([§5](#5-guided-troubleshooting)), so the user follows the copyable instructions.
+Owner D22, [ADR-0015](../decisions/0015-consent-based-client-connection.md); implemented in `src/td_adapter/connection.py` and `src/tdflowmcp/connect.py`.
+1. **Checks.** Run the checks; stop with the reason if the environment is not ready.
+2. **Agent.** Coding Agent: the selected client, or (Auto) the discovered ones. With several, a TouchDesigner dialog asks which to connect.
+3. **Fallback.** A client without automatic setup (Codex, Cursor, Copilot, Other) gets an agent and a token for **Copy Token** (Agents page) and the short manual instructions.
+4. **Plan.** For Claude Code, TouchDesigner shows the plan in a dialog, with details in `connect_view`. The plan names:
+   - the agent and the interfaces found;
+   - `~/.claude.json` (user scope) and the exact change, plus the other servers that stay;
+   - the backup;
+   - access level and scope;
+   - the protected credential store;
+   - whether **Enable MCP** will be turned on;
+   - how to undo.
+5. **Approval.** Approve, or Cancel (nothing changes). Without a dialog, a second pulse within 2 minutes approves. The plan expires after 2 minutes.
+6. **Apply** (background thread):
+   - audit intent;
+   - create the agent and token, or rotate the existing agent's token (Repair);
+   - store the credential (DPAPI / Keychain);
+   - write the entry (backup, atomic, read back; `CONFIG_CHANGED` if the approved change no longer applies);
+   - record the connection in private settings;
+   - audit `ok`.
+   A failure revokes the new credential.
+7. **Enable MCP**, only if the approved plan said so; the usual live loopback verification runs.
+8. **Wait** for the agent's first authenticated request after this point (`Start a Claude Code chat.`; after 90 s without a request `No request: /mcp reconnect`). Then `Agent Connected — Ready`, with the client's own name and version under Connected Agents; audit `verified`.
+9. **After a restart:** Next Step says `Turn on Enable MCP.`, and Connect Agent then only asks to turn on MCP.
 
 ## 3. Compatibility checks
 
@@ -127,14 +146,26 @@ Each check yields `{id, result: pass|warn|fail|unknown, evidence, remediation_id
 
 ## 5. Guided troubleshooting
 
-`src/setup/troubleshooting.json` maps each check failure to: cause, how to confirm, step-by-step fix, and links to TouchDesigner documentation. Allowed automatic actions are limited to TDflowMCP-internal, reversible ones: re-run checks, and propose a different `Port` for the user to confirm. The listener is **never restarted automatically**, least of all after a failed bind verification; only the user's own `Opensetup` pulse may try again. TDflowMCP **never** installs or upgrades packages, changes TouchDesigner preferences or search paths, edits firewall/OS settings, writes coding-agent configuration of any kind, or kills processes. The only file writes are Skills files and, after the user migrated project memory to a folder of the project, its record files. Both require an explicit, paired, previewed confirmation ([agent integration §3](agent-integration.md#3-client-aware-installation-consent-first), [continuity §8](continuity-and-memory.md#8-phase-2a-increment-3-repository-mode-2026-11-23)).
+`src/setup/troubleshooting.json` maps each check failure to: cause, how to confirm, step-by-step fix, and links to TouchDesigner documentation. Allowed automatic actions are limited to TDflowMCP-internal, reversible ones: re-run checks, and propose a different `Port` for the user to confirm. The listener is **never restarted automatically**, least of all after a failed bind verification; only the user's own `Opensetup` pulse may try again. TDflowMCP **never** installs or upgrades packages, changes TouchDesigner preferences or search paths, edits firewall/OS settings, writes coding-agent configuration silently, or kills processes. The only file writes are:
+- the Claude Code connection entry, after the user approved the plan in TouchDesigner ([§2.2](#22-connect-agent));
+- Skills files;
+- after the user migrated project memory to a folder of the project, its record files.
+
+Each requires an explicit, previewed confirmation ([agent integration §3](agent-integration.md#3-client-aware-installation-consent-first), [continuity §8](continuity-and-memory.md#8-phase-2a-increment-3-repository-mode-2026-11-23)).
 
 ## 6. "Tell Your Coding Agent"
 
-Generated from current server state — never hand-edited — in four sections. **Client-aware (UX assignment):** the Connect section lists only the selected client, or with Auto the detected ones, or the generic "Other MCP client" instructions; it describes the TouchDesigner-only path (Connect Agent, Copy Token, Enable MCP) and the access level chosen for new agents. It is present before MCP is on:
+Generated from current server state — never hand-edited — in four sections. **Client- and platform-aware (D21, D22):**
+- The Connect section covers only the selected client, or with Auto the detected ones, or the generic "Other MCP client".
+- **Claude Code:** the automatic path (Connect Agent → Approve → a new chat), with no token step, and whether it is already set up for this project.
+- **Other clients:** a 4-step manual fallback in this platform's shell, stating why it is manual.
+- No "open the Setup page" step.
+- Authorized configuration (the user's approval in TouchDesigner) is distinguished from silent modification, which agents must not do.
+
+It is present before MCP is on:
 
 1. **Setup**: what TDflowMCP is, the component version, current state and which checks fail.
-2. **Connection** (1C): endpoint URL, a client- and shell-specific command whose `${TDFLOW_TOKEN}` placeholder stays literal (single quotes, user/local scope only; see [security model §10](security-model.md#10-setup-assistant-and-integration-safety)), and the expected Skills version.
+2. **Connection** (1C, revised D22): the automatic steps for Claude Code, or for a manual client the endpoint URL and a client- and shell-specific command whose `${TDFLOW_TOKEN}` placeholder stays literal (single quotes, user/local scope only; see [security model §10](security-model.md#10-setup-assistant-and-integration-safety)), and the expected Skills version.
 3. **Repair**: for each failing check, the instructions from troubleshooting — addressed to the agent, with the rule "do not install software or change configuration without asking the user".
 4. **Resume earlier work** (2A, **implemented**): fixed text plus the number of tasks and of tasks not marked done, and the instruction to call `tdflow_task_list`, then `tdflow_handoff_resume`, before changing anything. Nothing agent-chosen appears, not even task ids (review 9). The section refreshes when a record is written.
 

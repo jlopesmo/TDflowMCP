@@ -22,7 +22,8 @@ class TellAgentTests(unittest.TestCase):
         text = tellagent.build("Error", "PORT_IN_USE", 9480, "2025.32440", checks, TROUBLE, "0.1.0")
         self.assertIn("## Setup", text)
         self.assertIn("## Repair", text)
-        self.assertIn("MCP access is not enabled", text)
+        self.assertIn("MCP is not on yet", text)
+        self.assertIn("Connect Agent, then Approve", text)
         self.assertIn("Do not install software", text)
         self.assertIn(TROUBLE["entries"]["net.port.in_use"]["title"], text)
         self.assertIn("Listener error PORT_IN_USE", text)
@@ -33,6 +34,47 @@ class TellAgentTests(unittest.TestCase):
         text = tellagent.build("Off", "", 9480, "2025.32440", checks, TROUBLE)
         self.assertNotIn("someone", text)
         self.assertNotIn("secret-evidence", text)
+
+    def test_connect_section_is_client_and_platform_specific(self):
+        """UX-03/05/06/07 (owner D22): only the selected client and this platform; automatic setup for Claude Code
+        without any token step; a short manual fallback for clients that cannot fetch a credential."""
+        clients = json.loads((SRC / "integrations" / "clients.json").read_text(encoding="utf-8"))
+        auto = tellagent.build("Off", "", 9480, "2025.32440", [], TROUBLE, clients=clients, selected=["claude-code"],
+                               platform="win32", automatic=["claude-code"])
+        self.assertIn("## Connect Claude Code (automatic; not set up yet)", auto)
+        self.assertIn("Connect Agent, then Approve", auto)
+        self.assertNotIn("TDFLOW_TOKEN", auto)                       # no token handling at all
+        self.assertNotIn("Copy Token", auto)
+        self.assertNotIn("Codex", auto)                              # only the selected client
+        self.assertNotIn("Open Setup", auto)                         # UX-07: no legacy Setup-page step
+        self.assertNotIn("do not run configuration commands", auto)  # UX-06: no contradiction
+        self.assertIn("is authorized", auto)
+        done = tellagent.build("Enabled", "", 9480, "2025.32440", [], TROUBLE, clients=clients,
+                               selected=["claude-code"], platform="win32", automatic=["claude-code"],
+                               set_up=["claude-code"])
+        self.assertIn("already set up for this project", done)
+        man = tellagent.build("Off", "", 9480, "2025.32440", [], TROUBLE, clients=clients, selected=["codex"],
+                              platform="darwin")
+        self.assertIn("## Connect OpenAI Codex CLI (manual setup)", man)
+        self.assertIn("Copy Token", man)
+        self.assertIn("zsh", man)                                    # platform-aware shell
+        self.assertNotIn("PowerShell", man)
+        self.assertIn("codex mcp add tdflow --url http://127.0.0.1:9480/mcp --bearer-token-env-var TDFLOW_TOKEN", man)
+        self.assertLess(len(auto.splitlines()), 40)                  # UX-05: concise
+
+    def test_registry_commands_keep_the_placeholder_literal(self):
+        """Every shell command in the registry single-quotes ${TDFLOW_TOKEN} (literal in bash, zsh and PowerShell) or
+        names the variable only; no command embeds a token."""
+        clients = json.loads((SRC / "integrations" / "clients.json").read_text(encoding="utf-8"))
+        for c in clients["clients"]:
+            for shell, cmd in ((c.get("mcp") or {}).get("add_command") or {}).items():
+                self.assertTrue("'Authorization: Bearer ${TDFLOW_TOKEN}'" in cmd or "TDFLOW_TOKEN" in cmd
+                                and "Bearer" not in cmd, (c["id"], shell, cmd))
+        cc = next(c for c in clients["clients"] if c["id"] == "claude-code")
+        self.assertEqual(cc["automatic"]["platforms"], ["win32", "darwin"])
+        self.assertEqual(cc["automatic"]["verified_platforms"], ["win32"])
+        cop = next(c for c in clients["clients"] if c["id"] == "vscode-copilot")
+        self.assertNotIn("code", cop["detect"])                     # usability review: VS Code is not Copilot
 
     def test_one_line(self):
         self.assertTrue(tellagent.one_line("Off", "", []).startswith("Not checked"))
@@ -45,6 +87,8 @@ class TellAgentTests(unittest.TestCase):
 class SetupApiTests(unittest.TestCase):
     def test_well_known_is_minimal(self):
         self.assertEqual(json.loads(setupapi.well_known("0.1.0")), {"product": "TDflowMCP", "version": "0.1.0"})
+        self.assertEqual(json.loads(setupapi.well_known("0.1.0", "prj_0123456789abcdef"))["connect"],
+                         "prj_0123456789abcdef")
 
     def test_status_payload(self):
         checks = compat.run_checks(FACTS)

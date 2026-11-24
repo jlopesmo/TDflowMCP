@@ -1,6 +1,6 @@
 # TDflowMCP — Current state
 
-**Observed 2026-11-23 (re-verified after a PC restart), branch `dev`. Phase 1C (agent onboarding) is complete in the development build, together with the ADR-0006 audit worker and project-local storage** (owner D13). **Phase 2A increment 1 (project memory, checkpoints, verified handoffs) is implemented and verified in TD** (owner D17). A live Claude Code session connected using only the generated instructions, and the packaged component passes its in-TouchDesigner acceptance suites on **2025.32440**. Phases 1A and 1B are re-verified on the same build. **Phase 2A increments 2 and 3 are implemented and verified in TD** (restart persistence and identity; repository-mode memory with both remaining ADR-0013 gates), and the earlier unexplained hang is explained and handled (a minimized window). This file records evidence only. Plans live in the [roadmap](roadmap.md).
+**Observed 2026-11-23 (re-verified after a PC restart), branch `dev`; the one-click connection (1.0.0rc3, owner D22) was observed 2026-11-24.** Phase 1C (agent onboarding) is complete in the development build, together with the ADR-0006 audit worker and project-local storage** (owner D13). **Phase 2A increment 1 (project memory, checkpoints, verified handoffs) is implemented and verified in TD** (owner D17). A live Claude Code session connected using only the generated instructions, and the packaged component passes its in-TouchDesigner acceptance suites on **2025.32440**. Phases 1A and 1B are re-verified on the same build. **Phase 2A increments 2 and 3 are implemented and verified in TD** (restart persistence and identity; repository-mode memory with both remaining ADR-0013 gates), and the earlier unexplained hang is explained and handled (a minimized window). This file records evidence only. Plans live in the [roadmap](roadmap.md).
 
 ## Verified
 - **Repository:** private `jlopesmo/TDflowMCP`. `main` = `066dbd0` (Phase 0 foundation), **unchanged**. Development continues on `dev`.
@@ -112,6 +112,27 @@
   - **Web:** one-click sign-in for pages opened from TouchDesigner (single-use 30-s fragment ticket, 5-s read-only warm-up, fail-closed interception); pairing only for typed URLs.
   - **Verified in TD** on candidate `c11706ce…` and on the **packaged** `TDflowMCP-1.0.0rc2-132e8c3317` (tox `dfabfaca…`, commit `132e8c3`), including the TouchDesigner-only first run with a live Claude Code session and a restart from the saved project. [Review 18](../research/2026-11-23-first-run-ux.md#independent-review-18-security): 1 High, 3 Medium, all addressed.
 
+- **One-click agent connection (owner D22)** ([record](../research/2026-11-24-one-click-connection.md), [ADR-0015](../decisions/0015-consent-based-client-connection.md), Conditionally Accepted), version **1.0.0rc3**:
+  - **Connect Agent → Approve → start working** for Claude Code:
+    - Auto discovery (read-only) and a plan in a TouchDesigner dialog. The approval creates the identity, puts the credential in the OS-protected store (Windows DPAPI) and writes one user-scope `tdflow` entry with a fixed `headersHelper`.
+    - Enable MCP is turned on only when the approved plan says so; Next Step shows each stage.
+    - **Agent Connected — Ready** appears only after an authenticated request that follows the configuration.
+    - Repair Connection, Disconnect Agent (rollback), backups.
+  - **The helper releases the token only after the listener proves the project's connect key** (HMAC over a fresh nonce; review 19). No token is in any file, command line, environment variable, parameter, DAT or log.
+  - **Real-client validation** on candidate `57ad00af…`, with a disposable client home: the native suite passes 46/46 + 35/35.
+    - The configuration TDflowMCP wrote, used unmodified: Claude Code CLI 2.1.289 and the VS Code extension's engine 2.1.330 connect (`claude mcp list` ✔ Connected).
+    - A live session works without any token step (`RESULT role=builder created=yes outside=denied`).
+    - Suspend/resume; restart reconnects without setup; revocation (client reports HTTP 401); repair; a damaged client file fails cleanly; Disconnect removes exactly the entry.
+    - No plaintext token in any file, including the saved `.toe`.
+  - **The real dialog:** in TouchDesigner it opens, TouchDesigner stays responsive, and its button approves (`screens.*`).
+  - **Other agents** (Codex, Cursor, VS Code Copilot): a manual fallback, with the reason stated. The live onboarding suite now exercises that path with the generic client.
+  - **Browser:** the one-click ticket is retired. Pages opened from TouchDesigner pair through a TouchDesigner dialog with number matching (1B `web.*`).
+  - **UX-01–07:**
+    - diagnostics show Running… / Checks done / Last Check / counts;
+    - every status line fits the default 416-px parameter window (26 characters; unit-tested; visual review);
+    - client- and platform-specific instructions, with no Setup-page or contradictory steps.
+  - [Review 19](../research/2026-11-24-one-click-connection.md#independent-review-19-security): 0 High, 4 Medium (port-squatter token harvest, PowerShell transcription, PowerShell 7 parent, disconnect order), all addressed. A usability review's findings were addressed or recorded.
+
 ## Not implemented (nothing below exists)
 - **Withheld by design:**
   - raw Python execution with full `td` access (`tdflow_execute_python`): not built, and disabled by default if it ever is;
@@ -127,7 +148,10 @@
 
 ## Not observed / unverified
 - **CI:** no GitHub Actions run has been observed for any commit ([B3](roadmap.md#open-blockers-and-owner-actions)).
-- **Other clients:** Codex CLI, Cursor and VS Code Copilot connections are documented only, with no live test. Codex facts came from a summarised documentation fetch.
+- **Other clients:** Codex CLI, Cursor and VS Code Copilot connections are documented manual fallbacks only, with no live test. Client facts were re-checked against vendor documentation on 2026-11-24 ([client audit](../research/2026-11-24-one-click-connection.md#client-audit)).
+- **The owner's real profile with the Claude Code VS Code chat UI:** not executed by an agent. It requires the owner's own approval in TouchDesigner ([checklist](../operations/release-candidate-1.0.md)). The extension's engine is validated against the written configuration.
+- **macOS automatic setup** (Keychain, sh helper): implemented from documentation, **not validated**. Pre-existing: on macOS the private root is `~/TDflowMCP` with default permissions.
+- **Constrained Language Mode** (Windows PowerShell): the helper fails closed (no HMAC without .NET). Not tested on a CLM machine.
 - **Literal paths not reproduced in TD:** network, cloud-synced and read-only folders are unit-tested with injected classifiers. Windows junction rejection for Skills is unit-tested; the in-TD round-trip did not create junctions.
 - **Policy branch coverage:** not measured (no coverage tool installed).
 - **Hands-on TDMCP comparison:** needs TD 2025.33230+.
@@ -153,7 +177,8 @@
 - `a656c75`: **Phase 2B increment 2** (owner D20: background checks while minimized, permission editing, staged code-running changes), review 14. Pushed to `origin/dev` and observed with `git ls-remote` (`refs/heads/dev` = `a656c75…`, `refs/heads/main` = `066dbd0…`, so `main` is unchanged). Verified on candidate `2397613a…` built from the pre-commit tree. No package was built. This record was added by a later commit. CI: **not observed**.
 - `0dd5bfd`: **Phase 2B increment 1** (approvals with identical re-call, the operator role, the `/ui/` governance dashboard), review 13. Pushed to `origin/dev` and observed with `git ls-remote` (`refs/heads/dev` = `0dd5bfd…`, `refs/heads/main` = `066dbd0…`, so `main` is unchanged). Verified on candidate `84f76d69…` built from the pre-commit tree; a clean build of the commit (tox `788925fa…`, `source_dirty` false) has the same source digest `14dac47f…`. No package was built. This record was added by the follow-up commit. CI: **not observed**.
 
-## Next (owner direction D20: finish TDflowMCP)
+## Next (owner direction D22: one-click connection; D20: finish TDflowMCP)
+0. **1.0.0rc3** ([checklist](../operations/release-candidate-1.0.md)): the owner's acceptance on the real profile (Connect Agent, Approve, a new Claude Code chat in VS Code, restart, Disconnect Agent). **macOS** validation. Owner decision: OAuth 2.1, the route to automatic setup for Codex, Cursor and Copilot ([ADR-0015](../decisions/0015-consent-based-client-connection.md#alternatives)).
 1. **Phase 3 and 4:** done on `dev` (see above), except host-project source-first and file snapshots outside the project.
 2. **1.0 release candidate** `1.0.0rc1` (commit `348360a`, package `TDflowMCP-1.0.0rc1-348360a56b`, all suites pass on the packaged `.tox`): [checklist](../operations/release-candidate-1.0.md), awaiting the owner's acceptance. Dogfood round 3 (Phase 3/4 tools) passed.
 3. **ADR-0014 stage 1** (approved, D17), if it does not delay completion: isolated candidate build/test bound to the `.tox` hash, plus a manual promotion. Not started.

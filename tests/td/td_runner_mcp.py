@@ -49,14 +49,15 @@ def _native_flow(comp, ext, T, frames, until, checkpoint, calls):
     """UX assignment: the TouchDesigner-only workflow (no browser). Connect Agent creates the agent; Copy Token is the
     only way the token leaves TDflowMCP (the harness reads it from the clipboard, as a user would paste it); the
     Agents page rotates, disables and re-enables it; an approval is decided natively; Open Dashboard opens a
-    signed-in page (the harness redeems the ticket from the launched URL)."""
+    page that pairs through a TouchDesigner dialog (owner D22: no secret in the launched URL).
+    Codex is selected: it has no automatic setup, so this is the manual fallback (Copy Token)."""
     p = comp.par
-    p.Codingagent = "claude-code"
+    p.Codingagent = "codex"
     p.Agentaccess = "observer"
     p.Allowedscope = "/project1/fx/**"
     yield frames(3)
-    T("native.instructions_for_the_selected_client", "Claude Code (primary" in ext.tell_text
-      and "Cursor (" not in ext.tell_text and "Connect Agent" in ext.tell_text)
+    T("native.instructions_for_the_selected_client", "Connect OpenAI Codex CLI (manual setup)" in ext.tell_text
+      and "Cursor" not in ext.tell_text and "Copy Token" in ext.tell_text)
     p.Connectagent.pulse()
     yield until(lambda: ext.native.handoff is not None, 20, "native_handoff")
     yield frames(2)
@@ -113,32 +114,34 @@ def _native_flow(comp, ext, T, frames, until, checkpoint, calls):
     yield until(lambda: not ext.native.busy and comp.op("approval_view").text == "", 15, "native_decided")
     g = yield checkpoint("native_approved", {})
     n0 = len(calls)
+    dialogs = []
+    real_opener = ext.connector.dialog_opener
+    ext.connector.dialog_opener = lambda title, text, buttons, cb: (dialogs.append((title, text, buttons, cb)), True)[1]
     p.Opendashboard.pulse()
     yield until(lambda: len(calls) > n0, 15, "dashboard_launch")
     url = calls[-1]
-    T("web.DASHBOARD_URL_CARRIES_A_FRAGMENT_TICKET", url.startswith("http://127.0.0.1:9480/ui/#t="))
-    yield checkpoint("ticket", {"ticket": url.split("#t=", 1)[1]})
+    T("web.DASHBOARD_URL_CARRIES_NO_SECRET", url == "http://127.0.0.1:9480/ui/#pair", url=url)
+    g = yield checkpoint("web_pair_request", {})          # the page asks to pair, as app.js does on #pair
     yield frames(3)
-    T("web.signed_in_note", "Browser signed in" in p.Statusdetail.eval(), detail=p.Statusdetail.eval())
-    # Review: a ticket read off the browser's command line by another program and raced is detected.
-    n0 = len(calls)
-    p.Opendashboard.pulse()
-    yield until(lambda: len(calls) > n0, 15, "dashboard_launch2")
-    yield checkpoint("ticket_race", {"ticket": calls[-1].split("#t=", 1)[1]})
+    code = g.get("match_code") or "?"
+    shown = dialogs[-1] if dialogs else ("", "", [], None)
+    # Review 19: number matching: the dialog offers the real code among two decoys; the user picks the page's code.
+    T("web.SIGN_IN_DIALOG_MATCHES_THE_CODE", len(shown[2]) == 4 and shown[2][-1] == "Deny" and code in shown[2]
+      and len(set(shown[2])) == 4, buttons=shown[2])
+    if shown[3] and code in shown[2]:
+        shown[3](shown[2].index(code))                        # the user picks the code the page shows
+    yield until(lambda: ext.admin.active_sessions() > 0, 10, "web_pair_approved")
     yield frames(3)
-    yield frames(3)
-    T("web.INTERCEPTION_REPORTED_IN_TD", "used twice" in p.Statusdetail.eval() and ext.admin.active_sessions() == 0,
-      detail=p.Statusdetail.eval())
-    T("web.INTERCEPTION_SUSPENDS_AGENTS", p.Suspendagents.eval() and p.Status.eval() == "Suspended",
-      status=p.Status.eval())
-    p.Suspendagents = False                                   # the user reviewed it and resumes
-    yield until(lambda: p.Status.eval() == "Enabled", 15, "resume_after_interception")
-    n0 = len(calls)
-    p.Opendashboard.pulse()
-    yield until(lambda: len(calls) > n0, 15, "dashboard_launch3")
-    yield checkpoint("ticket_again", {"ticket": calls[-1].split("#t=", 1)[1]})
-    yield frames(3)
+    yield checkpoint("web_paired", {})
     T("web.browser_session_shown", "signed in" in p.Websession.eval(), session=p.Websession.eval())
+    n = len(dialogs)
+    yield checkpoint("web_pair_untriggered", {})          # a request nobody launched from TouchDesigner
+    yield frames(3)
+    T("web.NO_DIALOG_WITHOUT_A_LAUNCH", len(dialogs) == n and "Pending" in p.Pairingrequest.eval(),
+      pending=p.Pairingrequest.eval())
+    p.Rejectpairing.pulse()
+    yield frames(3)
+    ext.connector.dialog_opener = real_opener
 
 
 def run(comp, ext, T, frames, until, checkpoint, R, restart=False):
@@ -309,7 +312,7 @@ def _restart(comp, ext, T, frames, until, checkpoint, R):
     T("restart.audit_chain_ok", v["ok"] and v["checkpoints"] >= 1, verify=v)
     yield frames(3)
     labels = list(p.Agentselect.menuLabels)
-    T("restart.UX_AGENT_CREATED_IN_TD_PERSISTS", any("Claude Code (Read Only)" in x for x in labels), labels=labels)
+    T("restart.UX_AGENT_CREATED_IN_TD_PERSISTS", any("OpenAI Codex CLI (Read Only)" in x for x in labels), labels=labels)
     yield checkpoint("restart_enabled", {"pid": os.getpid()})
     comp.par.Enablemcp = False
     yield frames(5)

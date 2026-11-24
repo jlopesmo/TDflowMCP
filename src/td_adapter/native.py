@@ -100,7 +100,7 @@ class Native:
         ext = self.ext
         st, idn = ext.store, ext.identity
         if st is None or idn is None or not st.available:
-            ext._set_note("The audit store is not open yet. Pulse Connect Agent (or Open Setup) and try again.")
+            ext._set_note("Storage not open yet")
             return False
         if self.busy:
             ext._set_note("Still working on the previous action; try again in a moment.")
@@ -147,8 +147,7 @@ class Native:
         if h and now > h["expires"]:                    # never longer than HANDOFF_SECONDS, copied or not
             self.handoff = None
             if not h["copied_at"]:
-                ext._set_note("The new token was discarded (not copied within 2 minutes). Pulse New Token on the "
-                              "Agents page to make another one.")
+                ext._set_note("Token expired unused. Pulse New Token to make another.")
         v = self.viewed
         if v and now - v[2] > APPROVAL_VIEW_SECONDS:
             self.viewed = None
@@ -164,8 +163,12 @@ class Native:
 
     # ---- detection and selection --------------------------------------------------------------------
     def detect(self):
-        """Look the clients' command names up on PATH (never runs them)."""
-        self.detected = self.ext._m.tellagent.detect(self.ext.clients, shutil.which)
+        """Read-only discovery: command names on PATH (never run) plus known extension and configuration folders
+        (names only). No paths are kept."""
+        found = set(self.ext._m.tellagent.detect(self.ext.clients, shutil.which))
+        found |= set(self.ext.connector.discover())
+        order = [c["id"] for c in (self.ext.clients or {}).get("clients", [])]
+        self.detected = [i for i in order if i in found]
         return self.detected
 
     def selected(self):
@@ -180,6 +183,19 @@ class Native:
         best = sorted(ids, key=lambda i: 0 if reg.get(i, {}).get("support") == "primary" else 1)
         return self.ext._m.tellagent.display(self.ext.clients, best[0]) if best else "Coding agent"
 
+    def tell_clients(self):
+        """Whose instructions Tell Your Coding Agent shows: the selected client; under Auto the agent that can be set
+        up automatically (or the one connected), else every one found (usability review)."""
+        ids = self.selected()
+        ext = self.ext
+        if str(ext.ownerComp.par.Codingagent.eval()) != "auto" if hasattr(ext.ownerComp.par, "Codingagent") else True:
+            return ids
+        st = ext.connector.state or {}
+        if st.get("client") in ids:
+            return [st["client"]]
+        auto = [i for i in ids if ext.connector.automatic(i)]
+        return auto[:1] or ids
+
     def client_label(self):
         """Who the status line waits for: one named client, else (several found by Auto) 'your agent'."""
         ids = self.selected()
@@ -189,18 +205,45 @@ class Native:
 
     # ---- Connect Agent (TDflowMCP page) ---------------------------------------------------------------
     def connect(self):
-        """Guided flow: environment check, client, access, scope, credential, then the user enables MCP."""
-        ext, p = self.ext, self.ext.ownerComp.par
+        """Connect Agent (owner D22): environment check, then the agent. Clients that support it get the guided,
+        consent-based connection (``connection.Connector``); the others get a credential for the manual fallback."""
+        ext = self.ext
+        st = ext.connector.state
+        if st and st.get("stage") == "awaiting":           # a second pulse may be the approval (no dialog)
+            ext.connector.start([st["client"]])
+            return
         ext.RunDiagnostics()
         env = ext._m.readiness.environment(ext.checks)
         if env["state"] == "not_ready":
-            ext._set_note("Not connected: the environment is not ready. Pulse Run Diagnostics and fix the failing check "
-                          "first (details: View Diagnostics on the Advanced page).", 30)
+            ext._set_note("Not ready: see Diagnostics", 30)
             return
+        is_auto = str(ext.ownerComp.par.Codingagent.eval()) == "auto"
+        ids = [i for i in self.selected() if i != "other" or len(self.selected()) == 1]
+        if not ids or ids == ["other"] and is_auto:
+            ext._set_note("No agent found: pick one", 30)
+            return
+        auto = [i for i in ids if ext.connector.automatic(i)]
+        if is_auto and len(auto) == 1:
+            # Usability review: one agent can be set up automatically: recommend it without asking; the plan names
+            # the others (they need manual setup and are chosen in Coding Agent).
+            ext.connector.start(auto, also_found=[i for i in ids if i not in auto])
+            return
+        if len(ids) > 1:
+            ext.connector.start(ids)                        # the user chooses; manual ones fall back below
+            return
+        if auto:
+            ext.connector.start(auto)
+            return
+        self.connect_manual()
+
+    def connect_manual(self, cid=None):
+        """Manual fallback (clients without secure automatic provisioning): a credential for Copy Token."""
+        ext, p = self.ext, self.ext.ownerComp.par
         role = str(p.Agentaccess.eval()) if hasattr(p, "Agentaccess") else "builder"
         scope = str(p.Allowedscope.eval()).strip() if hasattr(p, "Allowedscope") else ""
         scope = scope or (ext._root_text + "/**")
-        name = f"{self.primary_label()} ({ROLE_LABELS.get(role, role)})"[:64]
+        label = ext._m.tellagent.display(ext.clients, cid) if cid else self.primary_label()
+        name = f"{label} ({ROLE_LABELS.get(role, role)})"[:64]
         ext.ensure_store()
         if ext.identity is None or ext.store is None or not ext.store.available:
             self.pending_connect = (name, role, scope)
@@ -214,13 +257,12 @@ class Native:
         def done(status, data):
             if status != 200 or not data.get("token"):
                 code = data.get("code") or data.get("error") or status
-                ext._set_note(f"No agent was created ({code}). Check Agent Access and Allowed Scope (it must be inside "
-                              f"{ext._root_text}).", 30)
+                ext._set_note(f"No agent created ({code}): scope must be inside {ext._root_text}."[:80], 30)
                 return
             a = data["agent"]
             self.handoff = {"token": data["token"], "agent_id": a["id"], "name": a["display_name"],
                             "expires": time.monotonic() + HANDOFF_SECONDS, "copied_at": None}
-            ext._set_note("Pulse Copy Token now (2 min), then turn on Enable MCP.", 60)
+            ext._set_note("Copy Token (Agents page)", 60)
             ext._refresh_tell()
         self._call("/api/tokens", {"display_name": name, "role": role, "scope": scope}, done)
 
@@ -228,19 +270,18 @@ class Native:
         ext, h = self.ext, self.handoff
         if not h or time.monotonic() > h["expires"]:
             self.handoff = None
-            ext._set_note("No new token to copy. Pulse Connect Agent, or New Token on the Agents page.")
+            ext._set_note("No token: pulse New Token")
             return
         try:
             ok = bool(self.clipboard_writer(h["token"]))
         except Exception:
             ok = False
         if not ok:
-            ext._set_note("Could not copy the token safely (outside clipboard history). Create it on the Setup page "
-                          "(Web page) instead.")
+            ext._set_note("Can't copy: use Open Setup")
             return
         h["copied_at"] = time.monotonic()
         self._clip = (hashlib.sha256(h["token"].encode("utf-8")).hexdigest(), h["copied_at"] + CLIPBOARD_CLEAR_SECONDS)
-        ext._set_note("Token copied (cleared in 1 min). Paste it as TDFLOW_TOKEN; see View Full Instructions.", 60)
+        ext._set_note("Token copied (1 min)", 60)
         ext._audit_async("admin", tool="token_handoff", agent_id=h["agent_id"], detail={"via": "clipboard"})
 
     # ---- Agents page ------------------------------------------------------------------------------------
@@ -337,7 +378,7 @@ class Native:
                 return
             self.handoff = {"token": data["token"], "agent_id": a["id"], "name": a["display_name"],
                             "expires": time.monotonic() + HANDOFF_SECONDS, "copied_at": None}
-            self.ext._set_note("New token made, old ones revoked. Pulse Copy Token (TDflowMCP page, 2 min).", 60)
+            self.ext._set_note("New token made, old ones revoked. Pulse Copy Token (2 min).", 60)
         self._call("/api/agents/rotate", {"agent_id": a["id"]}, done)
 
     def revoke_all(self):
@@ -402,7 +443,8 @@ class Native:
             return "none waiting"
         a = self.approvals[0]
         more = f" (+{len(self.approvals) - 1} more)" if len(self.approvals) > 1 else ""
-        return f"{len(self.approvals)} waiting · oldest: {a.get('agent_name') or a.get('agent_id')} · {a.get('tool')}{more}"[:200]
+        tool = str(a.get('tool') or "").replace("tdflow_", "")
+        return f"{len(self.approvals)} waiting: {a.get('agent_name') or a.get('agent_id')} · {tool}{more}"[:80]
 
     def view_approval(self):
         if not self.approvals:
@@ -415,12 +457,12 @@ class Native:
                 ["", "Targets:"] + [f"- {t}" for t in a.get("targets") or []] + \
                 ["", "Complete arguments (exactly what will run):", str(a.get("args") or "")]
         self._show("approval_view", "\n".join(lines))
-        self.ext._set_note("Review the request, then pulse Approve Request or Deny Request (2 min).", 30)
+        self.ext._set_note("Review, then approve/deny", 30)
 
     def decide(self, approve):
         """Review 18: only the request View Approval showed (same id and argument digest) is decided."""
         if not self.viewed:
-            self.ext._set_note("Pulse View Approval first: only a request you have seen can be decided.")
+            self.ext._set_note("Pulse View Approval first")
             return
         aid, sha, _ = self.viewed
         a = {"id": aid}

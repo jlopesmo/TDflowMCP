@@ -1,6 +1,6 @@
 {
   "schema": "tdflowmcp.troubleshooting/1",
-  "policy": "Diagnose and instruct only. TDflowMCP never installs software, never changes TouchDesigner/OS/coding-agent configuration, and never kills processes. allowed_actions may only contain TDflowMCP-internal, reversible actions.",
+  "policy": "Diagnose and instruct only. TDflowMCP never installs software, never changes TouchDesigner or OS configuration, changes a coding agent's configuration only through Connect Agent after the user approved the exact plan, and never kills processes. allowed_actions may only contain TDflowMCP-internal, reversible actions.",
   "entries": {
     "td.build.older": {
       "title": "TouchDesigner build is older than the oldest tested build",
@@ -80,7 +80,7 @@
       "confirm": "The evidence lists the reasons (non-loopback listener, non-loopback connection, or table unavailable).",
       "steps": [
         "Do not try to work around this check; it protects your project from other computers.",
-        "The listener stays closed. Check whether another tool changed TouchDesigner networking settings, then pulse Open Setup yourself to try once more; TDflowMCP never restarts it automatically."
+        "The listener stays closed. Check whether another tool changed TouchDesigner networking settings, then turn on Enable MCP yourself to try once more; TDflowMCP never restarts it automatically."
       ],
       "docs": [],
       "allowed_actions": [
@@ -93,7 +93,7 @@
       "confirm": "The evidence says whether the other listener responds like TDflowMCP (this answer is unverified).",
       "steps": [
         "Close the other TouchDesigner project or tool using the port, or choose a different Port and confirm it.",
-        "Update your coding agent's connection afterwards using Tell Your Coding Agent."
+        "Then pulse Repair Connection (Agents page) so Claude Code uses the new port; other agents: follow View Full Instructions."
       ],
       "docs": [],
       "allowed_actions": [
@@ -103,7 +103,7 @@
     },
     "fs.datadir.unwritable": {
       "title": "Runtime data directory is not writable",
-      "cause": "TDflowMCP stores tokens, policy and audit outside the project, in %LOCALAPPDATA%\\TDflowMCP.",
+      "cause": "TDflowMCP keeps credentials and keys in private per-user storage (%LOCALAPPDATA%\\TDflowMCP on Windows); the audit log is in .tdflowmcp next to the saved project, or in that private storage.",
       "confirm": "The evidence names the directory in %LOCALAPPDATA% form.",
       "steps": [
         "Make sure your user account can write to %LOCALAPPDATA%\\TDflowMCP.",
@@ -129,9 +129,9 @@
     "agent.clients.unsupported": {
       "title": "No supported coding agent selected",
       "cause": "The selected coding agents are not yet verified with TDflowMCP.",
-      "confirm": "See the client list in the Setup Assistant.",
+      "confirm": "See Installed Agents on the Agents page.",
       "steps": [
-        "Select Claude Code (primary), or use another client at your own risk."
+        "Set Coding Agent to Claude Code for automatic setup; other agents use the short manual steps (View Full Instructions)."
       ],
       "docs": [],
       "allowed_actions": [
@@ -181,7 +181,7 @@
       "confirm": "Read Data Status on the component's Advanced page.",
       "steps": [
         "If you moved or renamed this project (or changed Data Location), pulse Confirm Move: the audit log is verified and copied (or adopted if it moved with the project); the old copy is left untouched.",
-        "If this is a copy that should be a separate project, pulse Claim As New Project: it gets a new identity and an empty audit log, and agents need new tokens.",
+        "If this is a copy that should be a separate project, pulse Claim As New Project: it gets a new identity and an empty audit log, and agents need to be connected again (Connect Agent).",
         "Save the project afterwards so the component keeps its Project ID."
       ],
       "docs": [],
@@ -192,7 +192,7 @@
     "audit.integrity.failed": {
       "title": "The audit log failed verification",
       "cause": "The hash chain or a keyed checkpoint in private storage does not match the audit database. The database may have been edited, replaced or restored from an older copy.",
-      "confirm": "Open the Setup page: the Audit section shows which check failed.",
+      "confirm": "View Diagnostics (Advanced page) shows which check failed.",
       "steps": [
         "Do not delete anything: keep the .tdflowmcp folder for investigation.",
         "If you restored the project from a backup, restore the matching .tdflowmcp folder too, then run the checks again.",

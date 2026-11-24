@@ -102,7 +102,7 @@
     }
     $("pair-code").hidden = false;
     $("pair-code").textContent = r.data.match_code;
-    $("pair-status").textContent = "In TouchDesigner, check that Pairing Request shows " + r.data.match_code + ", then pulse Approve Pairing.";
+    $("pair-status").textContent = "In TouchDesigner, approve this sign-in if it shows " + r.data.match_code + " (the dialog, or Web page > Approve Pairing).";
     clearInterval(pairTimer);
     pairTimer = setInterval(pollPairing, 1500);
   }
@@ -117,16 +117,13 @@
     await refreshAdmin();
   }
 
-  // One-click sign-in: when TouchDesigner opened this page (Open Setup / Open Dashboard), the address carries a
-  // single-use, short-lived ticket in its fragment. It is removed from the address bar and history at once and
-  // redeemed with a POST; fragments are never sent to the server. Otherwise a still-valid session is resumed.
+  // Opened from TouchDesigner (Open Setup / Open Dashboard): the address carries no secret (owner D22; the rc2
+  // ticket on the browser's command line is retired). The page asks to pair at once; TouchDesigner shows the same
+  // code in a dialog and the user approves there. Otherwise a still-valid session of this tab is resumed.
   async function signIn() {
-    const m = /^#t=([A-Za-z0-9_-]{20,100})$/.exec(location.hash || "");
-    if (m) {
+    if (location.hash === "#pair") {
       history.replaceState(null, "", location.pathname);
-      const r = await api("POST", "/setup/api/pair/ticket", { ticket: m[1] });
-      if (r.ok && r.data && r.data.csrf) { await becomePaired(r.data.csrf); return; }
-      $("pair-status").textContent = "This sign-in link was already used or has expired. Pulse Open Setup in TouchDesigner again, or pair this browser below.";
+      await requestPairing();
       return;
     }
     // A reload of this tab keeps its session: the CSRF token is kept in this tab's sessionStorage (never in a

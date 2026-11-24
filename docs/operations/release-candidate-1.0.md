@@ -1,6 +1,21 @@
 # TDflowMCP 1.0 release candidate: changelog, compatibility and acceptance checklist
 
-**Current candidate: `1.0.0rc2`** (first-run UX redesign, owner D21). `1.0.0rc1` (`348360a`, package `TDflowMCP-1.0.0rc1-348360a56b`, tox `394e1043…`) is the baseline it replaces. That baseline is preserved in the validation index, and its owner acceptance found the setup confusing.
+**Current candidate: `1.0.0rc3`** (one-click agent connection, owner D22, [ADR-0015](../decisions/0015-consent-based-client-connection.md)). It replaces `1.0.0rc2` (`132e8c3`, package `TDflowMCP-1.0.0rc2-132e8c3317`, tox `dfabfaca…`); the owner's acceptance of rc2 found that first-time users still handled tokens, environment variables and MCP configuration. Commit and package hashes for rc3 are in the [validation index](../icm/validation-index.md) and [current state](../icm/current-state.md#commit-record).
+
+## Changes in rc3
+- **Connect Agent → Approve → start working** for Claude Code (CLI and VS Code extension):
+  - a consent dialog in TouchDesigner;
+  - one user-scope `tdflow` entry with a fixed `headersHelper`;
+  - the token only in the OS-protected store (Windows DPAPI; macOS Keychain, not validated);
+  - the helper releases it only after the listener proves the project's key;
+  - backup, rollback, Repair Connection and Disconnect Agent.
+- **Other agents** (Codex, Cursor, VS Code Copilot): a short manual fallback, with the reason stated.
+- **Diagnostics feedback:** Running…, Checks done, Last Check, counts.
+- **Status lines** fit the default parameter window (26 characters).
+- **Instructions** are client- and platform-specific; there are no Setup-page or contradictory steps.
+- **The browser one-click ticket is retired:** pages opened from TouchDesigner pair through a TouchDesigner dialog with number matching.
+- Independent security review 19 (0 High, 4 Medium, all addressed) and a usability review.
+- See the [record](../research/2026-11-24-one-click-connection.md).
 
 ## Changes in rc2
 - Automatic and manual diagnostics; four readiness states; four parameter pages; context-aware Next Step.
@@ -55,8 +70,10 @@
 | TouchDesigner (Windows 11) | **2025.32440** (declared minimum) | All in-TD suites pass | [validation index](../icm/validation-index.md) |
 | TouchDesigner newer builds (2025.33230+) | **not tested** (not installed) | — | — |
 | macOS / Linux | **not tested** | — | — |
-| Claude Code | **2.1.289** | Live onboarding and dogfood sessions pass | validation index |
-| Codex CLI, Cursor, VS Code Copilot | documented instructions only, **no live test** | — | [current state](../icm/current-state.md#not-observed--unverified) |
+| Claude Code CLI (Windows) | **2.1.289** | Automatic connection through the written user-scope entry (`claude mcp list` ✔ Connected); live session; restart, revoke, repair, disconnect | validation index |
+| Claude Code VS Code extension (Windows) | engine **2.1.330** (the extension's bundled binary) | Connects through the same written entry (`mcp list` ✔ Connected). **The chat UI itself: owner acceptance step, not executed by an agent** | validation index |
+| Claude Code on macOS | **not tested** | Automatic setup implemented from documentation only | — |
+| Codex CLI, Cursor, VS Code Copilot | manual fallback instructions only, **no live test** | — | [current state](../icm/current-state.md#not-observed--unverified) |
 | Python (component) | TouchDesigner's bundled 3.11.10 | Unit tests pass | validation index |
 | Python (tools, tests) | CPython 3.11.8 | Unit tests pass | validation index |
 
@@ -70,6 +87,18 @@ No other compatibility is claimed.
 - [x] Independent reviews for every security-sensitive increment (reviews 14–18), findings addressed.
 - [x] rc2: the TouchDesigner-only first run (drop-in → diagnostics → Connect Agent → Copy Token → Enable MCP → a live Claude Code session → Connected → Suspend/Resume → restart) passes on the candidate build (validation index).
 - [x] Real coding-agent dogfooding of the new tools (round 3 in the validation index; its one friction point fixed).
+- [x] rc3: the one-click connection on the candidate build. The real Claude Code CLI and the VS Code extension's engine connect using only the configuration TDflowMCP wrote, a live session works with no token step, and restart, revocation, repair, a failed setup and Disconnect all pass (validation index).
+- [x] rc3: independent security review 19 and the usability review, findings addressed (record).
+- [ ] **rc3 owner acceptance on the real profile:**
+  1. In a blank project, drop the packaged `.tox` and leave Auto.
+  2. Pulse Connect Agent and approve in the dialog.
+  3. Start a new chat in the Claude Code VS Code extension and ask it to call `tdflow_whoami`.
+  4. Check Agent Connected — Ready.
+  5. Restart both and reconnect.
+  6. Disconnect Agent.
+
+  This needs the owner's own approval in TouchDesigner, and is **not executed by an agent**.
+- [ ] **macOS:** automatic setup not validated (no Mac).
 - [ ] **CI evidence:** no GitHub Actions run has been observed (B3). Release procedure step 1 requires observed CI.
 - [ ] **Latest TD build:** not tested (release procedure step 1 asks for the minimum and the latest build).
 - [ ] Owner acceptance; then the owner's PR `dev → main`, tag, clean build from the tag and publication (not done by agents).

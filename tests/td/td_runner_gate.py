@@ -59,7 +59,13 @@ def unmatched_intents(events):
 
 
 def run(mode, comp, ext, T, frames, until, checkpoint, R):
-    if mode == "perf":
+    if mode != "native_screens":
+        # No real TouchDesigner dialog in automated runs: the native modes record dialogs and click their buttons;
+        # every other mode takes the no-dialog path (parameters), as before.
+        ext.connector.dialog_opener = lambda title, text, buttons, cb: False
+    if mode == "probe_dialog":
+        yield from probe_dialog(comp, ext, T, frames, until, checkpoint, R)
+    elif mode == "perf":
         yield from perf(comp, ext, T, frames, until, checkpoint, R)
     elif mode == "gate":
         yield from gate(comp, ext, T, frames, until, checkpoint, R)
@@ -356,8 +362,11 @@ def relocation(comp, ext, T, frames, until, checkpoint, R):
       status=d and d.status)
     comp.par.Enablemcp = True
     yield frames(20)
+    # The refusal comes once the listener is verified (Setup state); that can take longer than 20 frames after a
+    # reopen, so wait for it (MCP must never turn on meanwhile).
+    yield until(lambda: not comp.par.Enablemcp.eval() or comp.par.Status.eval() == "Enabled", 10, "move_refused")
     T("move.mcp_refused_until_confirmed", not comp.par.Enablemcp.eval() and comp.par.Status.eval() != "Enabled",
-      detail=comp.par.Statusdetail.eval())
+      detail=comp.par.Statusdetail.eval(), status=comp.par.Status.eval())
     T("move.status_explains", "Confirm Move" in comp.par.Datastatus.eval(), status=comp.par.Datastatus.eval())
     comp.par.Confirmmove.pulse()
     yield until(lambda: ext.worker is not None and ext.worker.available, 20, "confirm_move")
@@ -462,69 +471,254 @@ def bench(comp, ext, T, frames, until, checkpoint, R):
     T("bench.completed", bool(out.get("done")), **{k: v for k, v in out.items() if k != "done"})
 
 
-# ---- native: the first-run acceptance workflow without a browser (UX assignment, 2026-11-23) --------
+# ---- native: drop the .tox -> Check Ready -> Connect Agent -> Approve -> Start Working (owner D22, ADR-0015) --------
+TOKEN_SHAPE = __import__("re").compile(r"tdf_[A-Za-z0-9]{12}\.[A-Za-z0-9_\-]{43,}")
+
+
+def _dialogs(ext):
+    """Record TouchDesigner dialogs instead of opening them; the test clicks a button by calling the callback."""
+    rec = []
+    ext.connector.dialog_opener = lambda title, text, buttons, cb: (rec.append(
+        {"title": title, "text": text, "buttons": list(buttons), "cb": cb}), True)[1]
+    return rec
+
+
+def _stage(ext):
+    return (ext.connector.state or {}).get("stage")
+
+
+def _cfg(path):
+    with open(path, "rb") as f:
+        return f.read()
+
+
+def _no_token_in_component(comp):
+    hits = [p.name for p in comp.customPars if TOKEN_SHAPE.search(str(p.eval()))]
+    hits += [o.path for o in comp.findChildren(type=td.DAT) if TOKEN_SHAPE.search(o.text or "")]
+    return hits
+
+
+def _events(ext, until, tool):
+    rows = yield from store_op(ext, until, "events", "tool = ?", (tool,), 50)
+    return rows
+
+
+def _connect_and_pick(comp, ext, dialogs, frames, until, name):
+    """Pulse Connect Agent; when several agents were found, pick Claude Code in the chooser dialog."""
+    n = len(dialogs)
+    comp.par.Connectagent.pulse()
+    yield frames(2)
+    if len(dialogs) > n and dialogs[-1]["title"] == "Connect a coding agent":
+        dialogs[-1]["cb"](dialogs[-1]["buttons"].index("Claude Code"))
+    yield until(lambda: _stage(ext) in ("awaiting", "failed", "waiting"), 30, name)
+
+
 def native_onboard(comp, ext, T, frames, until, checkpoint, R):
-    """Blank project -> drop-in -> automatic checks -> manual Run Diagnostics -> Coding Agent Auto -> Connect Agent ->
-    Copy Token -> Enable MCP -> a real Claude Code session -> Connected Agents -> Suspend / resume. No browser and no
-    pairing at any step."""
+    """The primary acceptance scenario, with a disposable client home (TDFLOW_CLIENT_HOME) standing in for the user's
+    profile: automatic and manual diagnostics, Auto, Connect Agent, review, cancel, approve, the agent's first real
+    request, operators created in the authorized network, a denied change outside it, Suspend / resume, save."""
     M.fixtures()
     p = comp.par
+    home = os.environ["TDFLOW_CLIENT_HOME"]
+    cfg = os.path.join(home, ".claude.json")
+    original = _cfg(cfg)
+    dialogs = _dialogs(ext)
     yield frames(10)
-    T("first_run.AUTOMATIC_DIAGNOSTICS", p.Compatsummary.eval().startswith(("Ready", "Partly", "Not ready")) and bool(ext.checks),
-      summary=p.Compatsummary.eval())
+    T("first_run.AUTOMATIC_DIAGNOSTICS", p.Compatsummary.eval().startswith(("Ready", "Partly", "Not ready"))
+      and bool(ext.checks) and "(automatic)" in p.Lastcheck.eval(), summary=p.Compatsummary.eval(),
+      last=p.Lastcheck.eval())
     T("first_run.NOTHING_LISTENS_OR_IS_CREATED", p.Status.eval() == "Off" and ext.ctl.transport is None
       and ext.worker is None)
-    T("first_run.environment_ready_next_step", "Connect Agent" in p.Statusdetail.eval(), detail=p.Statusdetail.eval())
-    before = ext.checks_at
+    T("first_run.environment_ready_next_step", p.Statusdetail.eval() == "Ready: pulse Connect Agent",
+      detail=p.Statusdetail.eval())
     p.Rundiagnostics.pulse()
-    yield frames(3)
-    T("first_run.MANUAL_DIAGNOSTICS_ANY_TIME", ext.checks_at > before and p.Compatsummary.eval().startswith(("Ready", "Partly", "Not ready")))
+    yield frames(1)
+    T("first_run.RUN_DIAGNOSTICS_SHOWS_RUNNING", p.Compatsummary.eval() == "Running diagnostics…",
+      summary=p.Compatsummary.eval())
+    yield until(lambda: "Checks done" in p.Statusdetail.eval(), 5, "diag_done")
+    sc = p.Compatsummary.eval()
+    rep = comp.op("diagnostics").text
+    T("first_run.MANUAL_DIAGNOSTICS_COMPLETE_WITH_COUNTS", "Checks done" in p.Statusdetail.eval()
+      and "(manual)" in p.Lastcheck.eval() and " ok" in sc and len(sc) <= 26
+      and all(w in rep for w in ("Passed ", "warnings ", "failed ", "pending ")), detail=p.Statusdetail.eval(),
+      summary=sc)
+    T("first_run.PENDING_NEVER_COUNTED_AS_PASSED", [c.result for c in ext.checks if c.id == "net.bind"] == ["unknown"],
+      checks={c.id: c.result for c in ext.checks})
     T("first_run.AUTO_FINDS_CLAUDE_CODE_WITHOUT_RUNNING_IT", "claude-code" in ext.native.detected
-      and p.Codingagent.eval() == "auto", detected=ext.native.detected)
+      and p.Codingagent.eval() == "auto" and "Claude Code (auto)" in p.Detectedclients.eval()
+      and len(p.Detectedclients.eval()) <= 80, detected=ext.native.detected, installed=p.Detectedclients.eval())
+    several = len(ext.native.selected()) > 1
+    R["several_detected"] = ext.native.detected
     p.Agentaccess = "builder"
     p.Allowedscope = "/project1/fx/**"
-    p.Connectagent.pulse()
-    yield until(lambda: ext.native.handoff is not None, 30, "native_connect")
-    T("first_run.AGENT_CREATED", ext.native.handoff is not None, detail=p.Statusdetail.eval())
-    T("first_run.mcp_not_enabled_silently", not p.Enablemcp.eval() and p.Status.eval() == "Off")
-    p.Copytoken.pulse()
-    yield frames(3)
-    p.Enablemcp = True
-    yield until(lambda: p.Status.eval() == "Enabled", 30, "native_enable")
-    yield frames(3)
-    T("first_run.ENABLED_AND_WAITING", p.Status.eval() == "Enabled" and "Waiting for" in p.Statusdetail.eval(),
+    yield frames(2)
+    T("first_run.instructions_need_no_token", "Connect Claude Code (automatic" in ext.tell_text
+      and "TDFLOW_TOKEN" not in ext.tell_text.split("## Connect Claude Code", 1)[1].split("## ", 1)[0])
+    # 1. Review, then cancel: nothing changes.
+    n = len(dialogs)
+    yield from _connect_and_pick(comp, ext, dialogs, frames, until, "connect_plan")
+    d = dialogs[-1]
+    text = d["text"]
+    if several:
+        # Usability review: one agent can be set up automatically, so Auto recommends it without asking and names
+        # the others (manual setup) in the plan.
+        T("connect.AUTO_RECOMMENDS_THE_AUTOMATIC_AGENT", len(dialogs) == n + 1 and d["title"] == "Connect Claude Code"
+          and "Also found:" in text, titles=[x["title"] for x in dialogs[n:]])
+    T("connect.CONSENT_SHOWS_THE_PLAN", all(x in text for x in (
+        "~/.claude.json", "other-server", "TURNED ON", "Undo", "Builder", "/project1/fx/**",
+        "protected storage", "backup", "Then start a new Claude Code chat")) and
+      d["buttons"] == ["Approve", "Cancel"], text=text, buttons=d["buttons"])
+    T("connect.consent_has_no_secret_or_user_path", not TOKEN_SHAPE.search(text) and home not in text)
+    T("connect.REVIEW_SHOWN_IN_NEXT_STEP", p.Statusdetail.eval() == "Approve in the dialog.",
       detail=p.Statusdetail.eval())
-    T("first_run.registered_is_not_connected", "none" in p.Connectedagents.eval(), connected=p.Connectedagents.eval())
-    T("first_run.NO_BROWSER_SESSION_USED", ext.admin.active_sessions() == 0)
-    g = yield checkpoint("native_onboard", {"project_folder": str(td.project.folder), "tell": ext.tell_text},
+    T("connect.NOTHING_CHANGED_BEFORE_APPROVAL", _cfg(cfg) == original and len(ext.identity.agents) == 0
+      and not p.Enablemcp.eval())
+    d["cb"](1)                                                   # Cancel
+    yield frames(2)
+    T("connect.CANCEL_CHANGES_NOTHING", ext.connector.state is None and _cfg(cfg) == original
+      and len(ext.identity.agents) == 0 and "Cancelled" in p.Statusdetail.eval(), detail=p.Statusdetail.eval())
+    # 2. Approve.
+    yield from _connect_and_pick(comp, ext, dialogs, frames, until, "connect_plan2")
+    seen = []
+    lines = []
+    dialogs[-1]["cb"](0)                                         # Approve (the plan turns on Enable MCP)
+
+    def progressed():
+        seen.append(_stage(ext))
+        lines.append(p.Statusdetail.eval())
+        return _stage(ext) in ("waiting", "failed")
+    yield until(progressed, 40, "connect_configure")
+    yield frames(3)
+    T("connect.VISIBLE_PROGRESS", "configuring" in seen and _stage(ext) == "waiting"
+      and any(x.startswith("Configuring Claude Code") for x in lines) and all(len(x) <= 26 for x in lines),
+      stages=sorted(set(map(str, seen))), long=[x for x in set(lines) if len(x) > 26],
+      failed=(ext.connector.state or {}).get("line"))
+    T("connect.MCP_ENABLED_ONLY_BY_THE_APPROVAL", p.Enablemcp.eval() and p.Status.eval() == "Enabled",
+      status=p.Status.eval())
+    T("connect.CONFIGURED_IS_NOT_CONNECTED", p.Statusdetail.eval() in (
+        "Start a Claude Code chat.", "Save, then start a chat.")
+      and "none" in p.Connectedagents.eval(), detail=p.Statusdetail.eval(), connected=p.Connectedagents.eval())
+    T("connect.connect_view_cleared_after_approval", comp.op("connect_view").text == "")
+    now = __import__("json").loads(_cfg(cfg).decode("utf-8"))
+    old = __import__("json").loads(original.decode("utf-8"))
+    entry = now["mcpServers"]["tdflow"]
+    T("connect.ENTRY_WRITTEN_EVERYTHING_ELSE_PRESERVED",
+      entry.get("url") == "http://127.0.0.1:9480/mcp" and "TDflowMCP" in entry.get("headersHelper", "")
+      and {k: v for k, v in now.items() if k != "mcpServers"} == {k: v for k, v in old.items() if k != "mcpServers"}
+      and now["mcpServers"]["other-server"] == old["mcpServers"]["other-server"])
+    T("connect.NO_TOKEN_IN_THE_CONFIG_OR_COMPONENT", not TOKEN_SHAPE.search(_cfg(cfg).decode("utf-8"))
+      and not _no_token_in_component(comp), hits=_no_token_in_component(comp))
+    rec = ext.connector.records.get("claude-code") or {}
+    vault_file = os.path.join(ext._private_root(), "connect", "claude-code", rec.get("pid", "x") + ".dpapi")
+    T("connect.CREDENTIAL_IN_THE_PROTECTED_STORE", os.path.isfile(vault_file)
+      and not TOKEN_SHAPE.search(open(vault_file, encoding="ascii").read()))
+    nonce = "0123456789abcdef" * 2
+    T("connect.LISTENER_PROVES_THE_PROJECT_KEY", bool(ext._connect_key) and ext._route_proof(type("C", (), {
+        "path": "/.well-known/tdflowmcp-proof/" + nonce})()).status == 200)
+    wk = __import__("json").loads(ext._static_assets()["/.well-known/tdflowmcp"][1])
+    T("connect.WELL_KNOWN_NAMES_THIS_PROJECT", wk.get("connect") == ext.storage.project_id, wk=wk)
+    ev = yield from _events(ext, until, "client_connect")
+    T("connect.AUDITED_INTENT_BEFORE_OUTCOME", [e["outcome"] for e in reversed(ev)] == ["cancelled", "intent", "ok"],
+      outcomes=[e["outcome"] for e in reversed(ev)])
+    R["connect_record"] = {k: rec.get(k) for k in ("client", "agent_id", "shown_path", "action", "created_key")}
+    g = yield checkpoint("connect_live", {"project_folder": str(td.project.folder), "pid": ext.storage.project_id},
                          seconds=900)
     yield frames(5)
-    T("first_run.CLAUDE_CODE_CONNECTED", "Claude Code" in p.Connectedagents.eval(), connected=p.Connectedagents.eval())
-    T("first_run.status_says_connected", "Claude Code connected" in p.Statusdetail.eval(), detail=p.Statusdetail.eval())
-    T("first_run.edit_applied", abs(opacity() - 0.25) < 1e-6, opacity=opacity())
+    yield until(lambda: _stage(ext) == "connected", 10, "connect_verified")
+    T("connect.SAVE_REMINDER_AFTER_THE_FLOW", "Save the project now." in p.Statusdetail.eval()
+      or p.Statusdetail.eval() == "Agent Connected — Ready", detail=p.Statusdetail.eval())
+    ext._note_until = 0.0                                        # the reminder times out (15 s)
+    yield frames(3)
+    T("connect.AGENT_CONNECTED_READY", p.Statusdetail.eval() == "Agent Connected — Ready",
+      detail=p.Statusdetail.eval())
+    T("connect.ACTUAL_CLIENT_IDENTITY_SHOWN", __import__("re").search(r"Claude Code \d+\.\d+", p.Connectedagents.eval())
+      is not None, connected=p.Connectedagents.eval())
+    ev = yield from _events(ext, until, "client_connect")
+    T("connect.VERIFIED_ONLY_AFTER_A_REAL_REQUEST", any(e["outcome"] == "verified" for e in ev))
+    made = td.op("/project1/fx/probe1")
+    T("work.AGENT_CREATED_AN_OPERATOR_IN_SCOPE", made is not None, ops=[o.name for o in td.op("/project1/fx").children])
+    T("work.OUT_OF_SCOPE_UNCHANGED", td.op("/project1/out1") is not None and td.op("/project1/probe_outside") is None)
+    denied = yield from store_op(ext, until, "events", "outcome = ? AND token_id IS NOT NULL", ("denied",), 50)
+    T("work.DENIAL_AUDITED", len(denied) >= 1 or g.get("denied_by_server"), denied=len(denied))
     p.Suspendagents = True
     yield frames(5)
-    T("first_run.SUSPEND", p.Status.eval() == "Suspended" and "suspended" in p.Statusdetail.eval().lower(),
-      detail=p.Statusdetail.eval())
-    yield checkpoint("native_suspended", {})
+    T("first_run.SUSPEND", p.Status.eval() == "Suspended", status=p.Status.eval())
+    yield checkpoint("connect_suspended", {})
     p.Suspendagents = False
     yield frames(5)
     T("first_run.RESUME", p.Status.eval() == "Enabled")
-    yield checkpoint("native_resumed", {})
+    yield checkpoint("connect_resumed", {})
     R["native"] = g
     p.Enablemcp = False
     yield frames(5)
     toe = os.path.join(str(td.project.folder), str(td.project.name))
     drv = td.op("/project1/test_driver/drive")
-    drv.par.active = False                    # the reopened project must not double-drive the runner
-    td.project.save()                         # the user saves (same file)
+    drv.par.active = False
+    td.project.save()
     drv.par.active = True
     R["native_toe"] = toe
 
 
+def probe_dialog(comp, ext, T, frames, until, checkpoint, R):
+    """Diagnostic: how TouchDesigner's pop-up dialog is reached in this build (no product code involved)."""
+    info = {}
+    for expr in ("td.op.TDResources", "td.op.TDResources.PopDialog", "td.op('/sys/TDResources')",
+                 "td.op('/sys/TDResources/popDialog')", "td.op('/sys/TDResources').op('popDialog')"):
+        try:
+            v = eval(expr, {"td": td})
+            info[expr] = f"{type(v).__name__}: {getattr(v, 'path', '')} {[n for n in dir(v) if 'pen' in n][:12]}"
+        except Exception as e:
+            info[expr] = f"ERR {type(e).__name__}: {e}"[:200]
+    pop = td.op("/sys/TDResources/popDialog")
+    try:
+        info["exts"] = [str(e) for e in pop.extensions]
+        info["ext_names"] = [n for n in dir(pop.ext) if not n.startswith("_")][:20]
+    except Exception as e:
+        info["exts"] = f"ERR {type(e).__name__}: {e}"
+    got = []
+    for label, fn in (("pop.OpenDefault", lambda: pop.OpenDefault),
+                      ("ext.PopDialogExt.OpenDefault", lambda: pop.ext.PopDialogExt.OpenDefault)):
+        try:
+            f = fn()
+            info[label] = str(f)[:120]
+            f(text="probe text", title="Probe", buttons=["One", "Two", "Cancel"], callback=lambda i: got.append(i),
+              escButton=3, escOnClickAway=False, enterButton=3)
+            info[label + " call"] = "ok"
+            break
+        except Exception as e:
+            info[label] = f"ERR {type(e).__name__}: {e}"[:300]
+    yield frames(10)
+    for label, fn in (("OnButtonClicked(1)", lambda: pop.ext.PopDialogExt.OnButtonClicked(1)),
+                      ("OnButtonClicked(1) via pop", lambda: pop.OnButtonClicked(1))):
+        try:
+            fn()
+            info[label] = "ok"
+            break
+        except Exception as e:
+            info[label] = f"ERR {type(e).__name__}: {e}"[:300]
+    yield frames(5)
+    info["callback_got"] = [repr(x)[:300] for x in got]
+    try:
+        import inspect
+        info["onbutton_sig"] = str(inspect.signature(pop.ext.PopDialogExt.OnButtonClicked))
+    except Exception as e:
+        info["onbutton_sig"] = f"ERR {e}"
+    try:
+        import inspect
+        info["sig"] = str(inspect.signature(pop.ext.PopDialogExt.OpenDefault))[:400]
+    except Exception as e:
+        info["sig"] = f"ERR {type(e).__name__}: {e}"[:200]
+    try:
+        info["methods"] = [n for n in dir(pop.ext.PopDialogExt) if not n.startswith("_")][:40]
+    except Exception as e:
+        info["methods"] = f"ERR {e}"
+    R["probe"] = info
+    yield frames(2)
+
+
 def native_screens(comp, ext, T, frames, until, checkpoint, R):
     """Visual review: each custom parameter page in TouchDesigner's own parameter window, in three states (fresh,
-    agent created, MCP enabled). The harness captures only this process's windows."""
+    reviewing a connection, connected and MCP enabled), plus the real Connect Agent dialog."""
     M.fixtures()
     p = comp.par
     yield frames(10)
@@ -536,13 +730,26 @@ def native_screens(comp, ext, T, frames, until, checkpoint, R):
             yield frames(15)
             yield checkpoint(f"screen_{stage}_{page}".replace("-", "_"), {"stage": stage, "page": page})
     yield from shots("1-fresh")
-    p.Connectagent.pulse()
-    yield until(lambda: ext.native.handoff is not None, 30, "screens_connect")
-    yield frames(5)
-    yield from shots("2-agent-created")
-    p.Copytoken.pulse()
-    p.Enablemcp = True
-    yield until(lambda: p.Status.eval() == "Enabled", 30, "screens_enable")
+    p.Codingagent = "claude-code"
+    p.Connectagent.pulse()                                   # the real TouchDesigner dialog opens
+    yield until(lambda: _stage(ext) == "awaiting", 30, "screens_plan")
+    yield frames(20)
+    T("screens.REAL_DIALOG_OPENED", ext.connector.dialog is not None, dialog=ext.connector.dialog)
+    yield checkpoint("screen_2-dialog", {"stage": "2-dialog", "page": "dialog"})
+    before = ext.checks_at
+    p.Rundiagnostics.pulse()                                 # TouchDesigner keeps working while the dialog is open
+    yield until(lambda: ext.checks_at > before, 10, "pulse_with_dialog")
+    T("screens.PULSES_WORK_WHILE_A_DIALOG_IS_OPEN", ext.checks_at > before)
+    comp.currentPage = "TDflowMCP"
+    yield from shots("2-review")
+    pop = td.op("/sys/TDResources/popDialog")
+    try:
+        pop.ext.PopDialogExt.OnButtonClicked(1)               # the real dialog's first button: Approve
+    except Exception:
+        ext.connector.approve()
+    yield until(lambda: _stage(ext) in ("waiting", "failed"), 40, "screens_connect")
+    T("screens.REAL_DIALOG_APPROVE_CONNECTS", _stage(ext) == "waiting", stage=_stage(ext),
+      line=(ext.connector.state or {}).get("line"))
     yield frames(10)
     yield from shots("3-enabled")
     p.Enablemcp = False
@@ -550,35 +757,93 @@ def native_screens(comp, ext, T, frames, until, checkpoint, R):
 
 
 def native_restart(comp, ext, T, frames, until, checkpoint, R):
-    """Launch 2 of the native workflow: TouchDesigner restarted from the saved project."""
+    """Launch 2: TouchDesigner restarted from the saved project. Reconnect without repeating setup; revocation,
+    repair, a failed setup, and Disconnect (rollback)."""
     p = comp.par
+    home = os.environ["TDFLOW_CLIENT_HOME"]
+    cfg = os.path.join(home, ".claude.json")
+    dialogs = _dialogs(ext)
     yield frames(10)
     T("restart.MCP_OFF_AFTER_REOPEN", not p.Enablemcp.eval() and p.Status.eval() == "Off", status=p.Status.eval())
-    T("restart.AUTOMATIC_DIAGNOSTICS_AGAIN", p.Compatsummary.eval().startswith(("Ready", "Partly", "Not ready")),
-      summary=p.Compatsummary.eval())
+    T("restart.AUTOMATIC_DIAGNOSTICS_AGAIN", "(automatic)" in p.Lastcheck.eval())
     T("restart.CHOICES_PERSIST", p.Codingagent.eval() == "auto" and p.Agentaccess.eval() == "builder"
       and p.Allowedscope.eval() == "/project1/fx/**")
-    p.Enablemcp = True
-    yield until(lambda: p.Status.eval() == "Enabled", 30, "restart_enable")
+    before = _cfg(cfg)
+    yield from _connect_and_pick(comp, ext, dialogs, frames, until, "restart_plan")
+    T("restart.SET_UP_STATE_KNOWN", (ext.connector.state or {}).get("intact") is True
+      and dialogs[-1]["buttons"] == ["Enable MCP", "Cancel"], buttons=dialogs[-1]["buttons"],
+      state={k: v for k, v in (ext.connector.state or {}).items() if k in ("stage", "intact", "line")})
+    n_agents = len(ext.identity.agents)
+    dialogs[-1]["cb"](0)
+    yield until(lambda: p.Status.eval() == "Enabled" and _stage(ext) == "waiting", 30, "restart_enable")
+    T("restart.NO_REPEATED_SETUP", _cfg(cfg) == before and len(ext.identity.agents) == n_agents)
+    yield checkpoint("restart_live", {})
+    yield until(lambda: _stage(ext) == "connected", 10, "restart_verified")
+    T("restart.CONNECTED_AGAIN", p.Statusdetail.eval() == "Agent Connected — Ready", detail=p.Statusdetail.eval())
+    aid = ext.connector.records["claude-code"]["agent_id"]
+    ext.native.refresh_menu()
+    p.Agentselect = aid
     yield frames(3)
-    labels = list(p.Agentselect.menuLabels)
-    T("restart.AGENT_PERSISTS", any("Claude Code (Builder)" in x for x in labels), labels=labels)
-    T("restart.NOT_CONNECTED_UNTIL_IT_TALKS", "none" in p.Connectedagents.eval(), connected=p.Connectedagents.eval())
-    yield checkpoint("native_restart", {})
-    yield frames(5)
-    T("restart.CONNECTED_AGAIN", "none" not in p.Connectedagents.eval(), connected=p.Connectedagents.eval())
+    p.Revoketokens.pulse()
+    yield until(lambda: not ext.native.busy and not [t for t in ext.identity.tokens.values()
+                                                     if t.agent_id == aid and not t.revoked_at], 15, "revoke")
+    yield checkpoint("restart_revoked", {})
+    ext.connector.state = None
+    p.Repairconnection.pulse()
+    yield until(lambda: _stage(ext) in ("awaiting", "failed"), 30, "repair_plan")
+    T("repair.PLAN_REUSES_THE_AGENT", "gets a new key" in dialogs[-1]["text"] and dialogs[-1]["buttons"][0] == "Approve",
+      text=dialogs[-1]["text"][:300])
+    dialogs[-1]["cb"](0)
+    yield until(lambda: _stage(ext) in ("waiting", "connected", "failed"), 30, "repair_apply")
+    T("repair.SAME_AGENT_NEW_CREDENTIAL", len(ext.identity.agents) == n_agents and [
+        t for t in ext.identity.tokens.values() if t.agent_id == aid and not t.revoked_at])
+    yield checkpoint("restart_repaired", {})
+    # A failed, interrupted setup leaves nothing behind.
+    good = _cfg(cfg)
+    with open(cfg, "w", encoding="utf-8") as f:
+        f.write("{ not valid json")
+    ext.connector.state = None
+    p.Repairconnection.pulse()
+    yield until(lambda: _stage(ext) == "failed", 30, "failed_plan")
+    T("failure.INVALID_CONFIG_FAILS_CLEANLY", p.Statusdetail.eval() == "Claude settings damaged"
+      and _cfg(cfg) == b"{ not valid json" and len(ext.identity.agents) == n_agents, detail=p.Statusdetail.eval())
+    with open(cfg, "wb") as f:
+        f.write(good)
+    # Disconnect = rollback: exactly our entry goes; whatever the client wrote meanwhile stays.
+    pre = __import__("json").loads(_cfg(cfg).decode("utf-8"))
+    ext.connector.state = None
+    p.Disconnectagent.pulse()
+    yield frames(2)
+    T("disconnect.ASKS_FIRST", dialogs[-1]["buttons"] == ["Disconnect", "Cancel"])
+    dialogs[-1]["cb"](0)
+    yield until(lambda: "claude-code" not in ext.connector.records, 20, "disconnect")
+    yield frames(3)
+    rec_pid = ext.storage.project_id
+    post = __import__("json").loads(_cfg(cfg).decode("utf-8"))
+    pre["mcpServers"].pop("tdflow", None)
+    T("disconnect.EXACTLY_THE_ENTRY_REMOVED", post == pre and "other-server" in post["mcpServers"])
+    T("disconnect.CREDENTIAL_DELETED_TOKENS_REVOKED_AGENT_DISABLED",
+      not os.path.exists(os.path.join(ext._private_root(), "connect", "claude-code", rec_pid + ".dpapi"))
+      and not [t for t in ext.identity.tokens.values() if t.agent_id == aid and not t.revoked_at]
+      and not ext.identity.agents[aid].enabled)
+    ev = yield from _events(ext, until, "client_disconnect")
+    T("disconnect.AUDITED", [e["outcome"] for e in reversed(ev)] == ["intent", "ok"])
+    yield checkpoint("restart_disconnected", {})
     p.Enablemcp = False
     yield frames(5)
 
 
 # ---- onboard: generated text -> live Claude Code session; Skills round-trip ----------------------
 def onboard(comp, ext, T, frames, until, checkpoint, R):
+    """Owner D22: Claude Code is set up automatically elsewhere (native suite); this suite keeps the manual fallback
+    honest: Other MCP Client, configured only from the generated text plus the TDFLOW_TOKEN variable."""
     M.fixtures()
+    comp.par.Codingagent = "other"
     yield frames(5)
     yield from open_and_pair(comp, ext, T, frames, until, checkpoint)
     yield from enable(comp, until, "onboard_enable")
     T("onboard.enabled", comp.par.Status.eval() == "Enabled", detail=comp.par.Statusdetail.eval())
-    T("onboard.tellagent_has_connect_section", "## Connect your coding agent" in ext.tell_text and
+    T("onboard.tellagent_has_connect_section", "## Connect Other MCP client (manual setup)" in ext.tell_text and
       "${TDFLOW_TOKEN}" in ext.tell_text)
     g = yield checkpoint("onboard", {"project_folder": str(td.project.folder)})
     T("onboard.claude_code_edit_applied", abs(opacity() - 0.25) < 1e-6, opacity=opacity())
@@ -596,6 +861,7 @@ def onboard(comp, ext, T, frames, until, checkpoint, R):
 # ---- dogfood: real Claude Code sessions doing realistic work (owner priority, 2026-11-22) ---------
 def dogfood(comp, ext, T, frames, until, checkpoint, R):
     M.fixtures()
+    comp.par.Codingagent = "other"                 # the harness configures its client from the manual text
     fx = td.op("/project1/fx")
     out = fx.create(td.nullTOP, "out")
     fx.op("level1").inputConnectors[0].connect(fx.op("noise1"))

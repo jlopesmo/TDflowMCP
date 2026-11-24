@@ -111,6 +111,12 @@
     },
     "tdflowmcp_td.native": {
       "path": "src/td_adapter/native.py"
+    },
+    "tdflowmcp.connect": {
+      "path": "src/tdflowmcp/connect.py"
+    },
+    "tdflowmcp_td.connection": {
+      "path": "src/td_adapter/connection.py"
     }
   },
   "dats": {
@@ -178,6 +184,11 @@
       "text": "",
       "runtime": true,
       "note": "Runtime view of one approval request (cleared after the decision)"
+    },
+    "connect_view": {
+      "text": "",
+      "runtime": true,
+      "note": "Runtime connection plan / details shown by Connect Agent and View Connection Details (no secrets)"
     }
   },
   "callbacks": {
@@ -212,14 +223,23 @@
       "label": "System Check",
       "readonly": true,
       "default": "not run",
-      "help": "Latest diagnostics: Environment Ready or not, and pass / warn / fail / not yet verified counts"
+      "help": "Latest diagnostics: Ready / Not ready with passed, warning, failed and pending counts. Pending checks need a listener or a connection and are never counted as passed"
     },
     {
       "page": "TDflowMCP",
       "name": "Rundiagnostics",
       "type": "Pulse",
       "label": "Run Diagnostics",
-      "help": "Run the system checks now (any time; safe: never starts the listener, never installs or changes anything). Details: View Diagnostics on the Advanced page"
+      "help": "Run the system checks now (always available; safe: never starts the listener, never installs or changes anything). Shows Running…, then the result. Details: View Diagnostics (Advanced)"
+    },
+    {
+      "page": "TDflowMCP",
+      "name": "Lastcheck",
+      "type": "Str",
+      "label": "Last Check",
+      "readonly": true,
+      "default": "not run yet",
+      "help": "When the checks last ran (automatic on load, or manual)"
     },
     {
       "page": "TDflowMCP",
@@ -245,7 +265,7 @@
       "name": "Codingagent",
       "type": "Menu",
       "label": "Coding Agent",
-      "help": "Which coding agent you connect. Auto looks up known clients on this computer (never runs them) and tailors the instructions; it never changes the agent's configuration",
+      "help": "Which coding agent to connect. Auto looks for installed agents (names and folders only; it never runs them) and asks if it finds several",
       "default": "auto",
       "menu": [
         "auto",
@@ -296,14 +316,7 @@
       "name": "Connectagent",
       "type": "Pulse",
       "label": "Connect Agent",
-      "help": "Guided setup: checks the environment, creates the agent's credentials (Coding Agent, Agent Access, Allowed Scope) and prepares the instructions. Does not enable MCP"
-    },
-    {
-      "page": "TDflowMCP",
-      "name": "Copytoken",
-      "type": "Pulse",
-      "label": "Copy Token",
-      "help": "Copy the new agent token to the clipboard once (within 2 minutes of creating it). It is never stored in the project; the clipboard is cleared after a minute"
+      "help": "Connect your coding agent: checks the environment, shows exactly what will change, and after you approve sets up the agent's identity, protected credential and configuration (Claude Code), turns on MCP if you approved that, and waits for the agent's first request"
     },
     {
       "page": "TDflowMCP",
@@ -350,7 +363,7 @@
       "name": "Connectedagents",
       "type": "Str",
       "label": "Connected Agents",
-      "help": "Agents whose authenticated requests TDflowMCP has seen in the last 2 minutes (registered agents that are not talking do not count)",
+      "help": "Agents whose authenticated requests arrived in the last 2 minutes, with the client's own name and version. A configured or registered agent that has not talked does not count",
       "readonly": true,
       "default": "none",
       "section": true
@@ -367,7 +380,17 @@
       "name": "Opendashboard",
       "type": "Pulse",
       "label": "Open Dashboard",
-      "help": "Open the dashboard in your browser, already signed in (starts the local listener if needed)"
+      "help": "Open the dashboard in your browser (starts the local listener if needed). TouchDesigner then asks you to approve the sign-in; the page shows the same code"
+    },
+    {
+      "page": "Agents",
+      "name": "Detectedclients",
+      "type": "Str",
+      "label": "Installed Agents",
+      "readonly": true,
+      "default": "not checked yet",
+      "section": true,
+      "help": "Coding agents found on this computer (names and folders only; never run): auto = set up by Connect Agent, manual = Copy Token and the instructions"
     },
     {
       "page": "Agents",
@@ -376,7 +399,8 @@
       "label": "Agents",
       "readonly": true,
       "default": "0 agent(s)",
-      "help": "Number of agents and signed-in browser sessions"
+      "help": "Number of agents and how many are connected (an authenticated request in the last 2 minutes)",
+      "section": true
     },
     {
       "page": "Agents",
@@ -390,8 +414,7 @@
       ],
       "menu_labels": [
         "(no agents yet)"
-      ],
-      "section": true
+      ]
     },
     {
       "page": "Agents",
@@ -401,6 +424,13 @@
       "help": "Role, state, scopes, tokens and last request of the selected agent",
       "readonly": true,
       "default": "No agent selected"
+    },
+    {
+      "page": "Agents",
+      "name": "Viewagents",
+      "type": "Pulse",
+      "label": "View Agents",
+      "help": "Open a list of all agents (never shows tokens)"
     },
     {
       "page": "Agents",
@@ -440,10 +470,33 @@
     },
     {
       "page": "Agents",
+      "name": "Repairconnection",
+      "type": "Pulse",
+      "label": "Repair Connection",
+      "help": "For an agent set up by Connect Agent: give it a new credential and re-check its configuration (shows the plan first)",
+      "section": true
+    },
+    {
+      "page": "Agents",
+      "name": "Disconnectagent",
+      "type": "Pulse",
+      "label": "Disconnect Agent",
+      "help": "For an agent set up by Connect Agent: remove its configuration entry (or restore the one it replaced), delete its stored credential and revoke its tokens (asks first)"
+    },
+    {
+      "page": "Agents",
       "name": "Rotatetoken",
       "type": "Pulse",
       "label": "New Token",
-      "help": "Revoke the selected agent's tokens and create a new one (then pulse Copy Token on the TDflowMCP page)"
+      "help": "Manual fallback: revoke the agent's tokens and make a new one for Copy Token",
+      "section": true
+    },
+    {
+      "page": "Agents",
+      "name": "Copytoken",
+      "type": "Pulse",
+      "label": "Copy Token",
+      "help": "Manual fallback: copy a token made with New Token (or by Connect Agent for a client without automatic setup) to the clipboard once, within 2 minutes; kept out of Clipboard History and cleared after a minute"
     },
     {
       "page": "Agents",
@@ -451,13 +504,6 @@
       "type": "Pulse",
       "label": "Revoke Tokens",
       "help": "Revoke all tokens of the selected agent"
-    },
-    {
-      "page": "Agents",
-      "name": "Viewagents",
-      "type": "Pulse",
-      "label": "View Agents",
-      "help": "Open a list of all agents (never shows tokens)"
     },
     {
       "page": "Agents",
@@ -495,14 +541,14 @@
       "name": "Opensetup",
       "type": "Pulse",
       "label": "Open Setup",
-      "help": "Open the Setup page in your browser, already signed in (starts the local listener)"
+      "help": "Open the Setup page in your browser; approve the sign-in in TouchDesigner (same code)"
     },
     {
       "page": "Web",
       "name": "Webdashboard",
       "type": "Pulse",
       "label": "Open Dashboard",
-      "help": "Open the dashboard in your browser, already signed in"
+      "help": "Open the dashboard in your browser; approve the sign-in in TouchDesigner (same code)"
     },
     {
       "page": "Web",
@@ -568,6 +614,13 @@
       "type": "Pulse",
       "label": "View Diagnostics",
       "help": "Open the full diagnostics report with fixes"
+    },
+    {
+      "page": "Advanced",
+      "name": "Viewconnection",
+      "type": "Pulse",
+      "label": "View Connection Details",
+      "help": "Technical details of each connection: configuration file, MCP entry, credential store, backups (no secrets)"
     },
     {
       "page": "Advanced",

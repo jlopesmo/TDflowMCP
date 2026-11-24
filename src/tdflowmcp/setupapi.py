@@ -1,7 +1,7 @@
 """Read-only Setup Assistant API payloads (setup-assistant §7, Phase 1A). Pure Python, no `td`.
 
 ``GET /setup/api/status`` and ``GET /setup/api/tellagent`` are built here from data the TD adapter
-collected on the main thread. ``/.well-known/tdflowmcp`` carries only product and version (§8.1).
+collected on the main thread. ``/.well-known/tdflowmcp`` carries product, version and the non-secret connect id (§8.1).
 """
 from __future__ import annotations
 
@@ -12,8 +12,14 @@ from tdflowmcp import PHASE, TOOL_SURFACE_VERSION, __version__
 from tdflowmcp.compat import CheckResult, summary
 
 
-def well_known(version: str = __version__) -> bytes:
-    return json.dumps({"product": "TDflowMCP", "version": version}, separators=(",", ":")).encode("utf-8")
+def well_known(version: str = __version__, connect: str = "") -> bytes:
+    """Unauthenticated, loopback only. ``connect`` is the project's non-secret storage id (also its Projectid
+    parameter), present once the store is open: Claude Code's headersHelper uses it to pick this project's credential
+    (ADR-0015). It grants nothing."""
+    body = {"product": "TDflowMCP", "version": version}
+    if connect:
+        body["connect"] = connect
+    return json.dumps(body, separators=(",", ":")).encode("utf-8")
 
 
 def status(ctl: Mapping, td_build: str, checks: Sequence[CheckResult], troubleshooting: Mapping,

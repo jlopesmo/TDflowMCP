@@ -2,16 +2,20 @@
 
 TDflowMCP is a TouchDesigner component that lets a coding agent (Claude Code, and others) work in your project
 through MCP. It works within the permissions you grant and keeps a tamper-evident audit log. It runs only on this
-computer (127.0.0.1) and never installs software or changes your agent's configuration for you.
+computer (127.0.0.1). It never installs software, and it changes your agent's configuration only after you approve
+the exact change in TouchDesigner.
 
 **This is a release candidate.** Use it in projects you can afford to experiment with.
 
 ## Requirements
 - TouchDesigner **2025.32440** or newer. Older builds get a warning and may enable MCP only if every security
   self-test passes.
-- A coding agent with Streamable HTTP MCP support. Claude Code is tested. Codex CLI, Cursor and VS Code (GitHub
-  Copilot) are listed from their documentation and are not tested yet; any other MCP client works with the generic
-  instructions.
+- A coding agent with Streamable HTTP MCP support.
+  - **Claude Code** (CLI or the VS Code extension) is set up automatically and is tested on Windows. macOS automatic
+    setup is implemented but not tested yet.
+  - Codex, Cursor and VS Code (GitHub Copilot) use a short manual setup. They are listed from their documentation and
+    are not tested yet.
+  - Any other MCP client works with the generic instructions.
 
 ## 1. Check the download
 Compare the SHA-256 of `TDflowMCP.tox` with `SHA256SUMS` (and with `TDflowMCP.json`):
@@ -23,48 +27,63 @@ Compare the SHA-256 of `TDflowMCP.tox` with `SHA256SUMS` (and with `TDflowMCP.js
 2. Drag `TDflowMCP.tox` into your project (for example into `/project1`). Use **one** TDflowMCP component per
    project.
 3. The component checks the environment by itself. The **TDflowMCP** page shows the result in **System Check**
-   (for example `Ready · 8 pass · 3 later`) and what to do in **Next Step**.
+   (for example `Ready · 8 ok · 3 pending`), when they ran in **Last Check**, and what to do in
+   **Next Step**.
    - These checks never start a listener, create files, install anything or start an agent.
    - Checks that need a listener or a connection (the loopback-only binding, the security self-test, the agent
-     connection) show as *later*. They run when you turn on Enable MCP.
-   - Pulse **Run Diagnostics** at any time to check again. **View Diagnostics** on the **Advanced** page shows
-     every check with its fix.
+     connection) show as *pending*. They run when MCP is turned on, and are never counted as passed.
+   - Pulse **Run Diagnostics** at any time to check again. It shows *Running diagnostics…*, then the result.
+     **View Diagnostics** on the **Advanced** page shows every check with its fix.
 
-## 3. Connect your coding agent (all in TouchDesigner)
+## 3. Connect your coding agent
 On the **TDflowMCP** page:
-1. **Coding Agent:** leave **Auto (Recommended)**. TDflowMCP looks up the known agents on this computer (it
-   never runs them) and tailors the instructions. You can also pick one explicitly.
+1. **Coding Agent:** leave **Auto (Recommended)**. TDflowMCP looks for installed agents. It only looks at names and
+   folders and never runs them.
 2. **Agent Access:**
    - **Read Only**: the agent can look.
    - **Builder**: it can also change operators in its scope.
    - **Operator**: it can also *ask you* to approve code-running changes.
 3. **Allowed Scope:** the operators it may work on, for example `/project1/**`.
-4. Pulse **Connect Agent**. TDflowMCP creates the agent's credentials. **Enable MCP is not turned on for you.**
-5. Pulse **Copy Token** within two minutes. The token goes to the clipboard (kept out of Windows Clipboard History and
-   Cloud Clipboard) and is never stored in the project; the clipboard is cleared after a minute.
-6. In the terminal that starts your agent, paste it when asked:
-   - bash / zsh: `read -rs TDFLOW_TOKEN && export TDFLOW_TOKEN`
-   - PowerShell (5.1 and 7): `$env:TDFLOW_TOKEN = [Net.NetworkCredential]::new('', (Read-Host -AsSecureString 'TDflowMCP token')).Password`
-7. Pulse **Copy Instructions** (or **View Full Instructions**) and follow the "Connect your coding agent" part,
-   or give the text to your agent. For Claude Code:
+4. Pulse **Connect Agent**. If several agents are installed, choose which one.
+5. **Review and approve.** A TouchDesigner dialog shows exactly what will happen:
+   - the agent's identity and permissions;
+   - the one entry added to Claude Code's settings (`~/.claude.json`); your other servers stay unchanged;
+   - that a backup is kept;
+   - that the credential stays in your account's protected store;
+   - that **Enable MCP** will be turned on;
+   - how to undo.
 
-   ```
-   claude mcp add --transport http --scope user tdflow http://127.0.0.1:9480/mcp --header 'Authorization: Bearer ${TDFLOW_TOKEN}'
-   ```
+   Choose **Approve**, or **Cancel** (nothing changes).
+6. Next Step shows the progress, then **Start a Claude Code chat.** Start a new conversation in the
+   VS Code extension or a new `claude` session in a terminal (or run `/mcp` and reconnect `tdflow`).
+7. When the agent's first request arrives, Next Step says **Agent Connected — Ready**, and **Connected Agents** shows
+   the client and its version. A configured agent that has not talked is never shown as connected.
 
-   Keep the single quotes: the configuration then stores the text `${TDFLOW_TOKEN}`, not your token.
-8. Turn on **Enable MCP**. Each time, it re-verifies that the listener is reachable only from this computer. If a
-   precondition fails, it turns itself off again and gives the reason.
-9. Start your agent. **Connected Agents** shows it once its first authenticated request arrives, and Next Step
-   says so (for example `Claude Code connected. Ready.`). A registered agent that has not talked is never shown
-   as connected.
+There is no token to copy and nothing to type: Claude Code fetches the credential for this project by itself.
+
+**After restarting TouchDesigner,** MCP is off as always. Next Step says *Turn on Enable MCP.*;
+turn it on (or pulse Connect Agent and approve). Nothing is set up again.
+
+**Other agents (Codex, Cursor, VS Code Copilot, others).** These read their credential from an environment variable
+when they start, so they need one paste:
+1. Set **Coding Agent** to your agent, then pulse Connect Agent.
+2. On the **Agents** page, pulse **Copy Token** (within two minutes; kept out of Windows Clipboard History and cleared
+   after a minute). On macOS Copy Token is not available; use Open Setup (Web page) to create and copy a token.
+3. Follow **View Full Instructions**: one command in the terminal that starts the agent, and one to register the
+   server.
+4. Turn on **Enable MCP**.
+
+**Undo:** Agents page, select the agent, then **Disconnect**. It removes the entry (or restores the one it replaced),
+deletes the stored credential and revokes the agent's tokens. **Repair Connection** gives it a new credential if
+something went wrong.
 
 ## 4. Manage agents without a browser
 Pulse **Manage Agents** (or open the **Agents** page):
 - pick an agent;
 - **Add Scope** / **Remove Scope**;
 - **Enable Agent** / **Disable Agent**;
-- **New Token** (revokes its older tokens; then Copy Token);
+- **Repair Connection** / **Disconnect** (agents set up by Connect Agent);
+- **New Token** and **Copy Token** (manual setup; New Token revokes its older tokens);
 - **Revoke Tokens**;
 - **View Agents**.
 
@@ -73,9 +92,8 @@ request, then **Approve Request** or **Deny Request**.
 
 ## 5. The web pages (optional)
 On the **Web** page (or with **Open Dashboard** on the main page):
-- **Open Setup** and **Open Dashboard** open the page in your browser **already signed in**. TouchDesigner hands it
-  a one-time sign-in that expires after 30 seconds and cannot be reused. For its first five seconds the page can show
-  information but not change anything.
+- **Open Setup** and **Open Dashboard** open the page in your browser. TouchDesigner then asks you to approve the
+  sign-in and shows a code; approve only if the page shows the same code. Nothing secret travels in the address.
 - The dashboard shows the same agents, permissions, approvals and activity, with searchable logs and reports.
   Changes made there and in TouchDesigner are the same changes.
 - If you type the Setup address into a browser yourself, that browser must pair: compare the code under
@@ -116,7 +134,9 @@ the files; it never runs Git.
 - **Project folder:** `.tdflowmcp/<project name>/` next to the `.toe` holds the audit log, sessions and DAT
   snapshots. This folder is git-ignored automatically (it contains a `.gitignore` with `*`).
 - **Private per-user storage** (`%LOCALAPPDATA%\TDflowMCP` on Windows) holds credentials, the audit key and the
-  keyed checkpoints. They never go into the project folder, a parameter or a DAT.
+  keyed checkpoints. The connection credential is Windows-protected (DPAPI) there; on macOS it goes to the Keychain.
+  None of this goes into the project folder, a parameter or a DAT. Backups of an agent configuration file that
+  Connect Agent changed are kept there too (the last five).
 - **Fallback:** unsaved projects, read-only folders, network drives and cloud-synced folders (OneDrive, Dropbox, …)
   automatically use private storage instead. **Data Status** on the **Advanced** page says why.
 - **Moved, renamed or copied a project?** MCP stays off until you choose on the **Advanced** page:
@@ -126,6 +146,7 @@ the files; it never runs Git.
   Save the project afterwards.
 
 ## Removing TDflowMCP
-Delete the component. Your project's `.tdflowmcp/` folder and the private storage remain until you delete them
-yourself, because they hold the audit history. Remove agent configuration with your agent's own commands (for
-Claude Code: `claude mcp remove tdflow`).
+First pulse **Disconnect** for each connected agent (Agents page). That removes the Claude Code entry and the
+stored credential. Then delete the component. Your project's `.tdflowmcp/` folder and the private storage remain
+until you delete them yourself, because they hold the audit history. Manual connections are removed with the agent's
+own commands (for example `codex mcp remove tdflow`).
