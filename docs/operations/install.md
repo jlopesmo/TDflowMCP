@@ -61,8 +61,10 @@ On the **TDflowMCP** page:
 
 There is no token to copy and nothing to type: Claude Code fetches the credential for this project by itself.
 
-**After restarting TouchDesigner,** MCP is off as always. Next Step says *Turn on Enable MCP.*;
-turn it on (or pulse Connect Agent and approve). Nothing is set up again.
+**After restarting TouchDesigner,** MCP is off as always and the agents are not loaded yet. The Agents page says
+*1 agent · not loaded*, not zero. Next Step says *Turn on Enable MCP.*: turn it on (or pulse Connect Agent and
+approve), then start a new Claude Code chat or reconnect `tdflow` with `/mcp`. Nothing is set up again, and the same
+agent and key are used.
 
 **Other agents (Codex, Cursor, VS Code Copilot, others).** These read their credential from an environment variable
 when they start, so they need one paste:

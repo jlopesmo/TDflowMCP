@@ -133,6 +133,23 @@
     - client- and platform-specific instructions, with no Setup-page or contradictory steps.
   - [Review 19](../research/2026-11-24-one-click-connection.md#independent-review-19-security): 0 High, 4 Medium (port-squatter token harvest, PowerShell transcription, PowerShell 7 parent, disconnect order), all addressed. A usability review's findings were addressed or recorded.
 
+- **rc4: the owner's restart finding, automated acceptance, corrections (owner D23)** ([record](../research/2026-11-24-rc4-restart-and-acceptance.md)), version **1.0.0rc4**:
+  - **Root cause:** a misleading interface over intact data, not data loss.
+    - After reopening, storage stays closed until a user action, and the UI reported the unopened registry as `0 agents` / `Ready: pulse Connect Agent`.
+    - The owner's project data was inspected read-only (copies; names and counts only): 5 agents, 5 unrevoked tokens, the connection record, the DPAPI key, 80 audit events and the `tdflow` entry, all intact.
+    - The new restart scenario reproduces the owner's exact screen on the rc3 package.
+  - **Fix (UX-09):**
+    - A read-only startup inspection of this project's private folder: the credential store, a non-secret `summary.json` with enabled agents and connected clients, and key files. It opens and creates nothing.
+    - What the user sees: `Turn on Enable MCP.`, `1 agent · not loaded`, `(not loaded yet)`, and `Data: confirm (Advanced)` while a move or copy decision waits.
+  - **UX-08:** TouchDesigner's dialog is widened to 480 px while a TDflowMCP dialog is open and restored exactly afterwards. That is verified in TD: the closing window writes its size back, so the restore is checked and retried.
+  - **[Review 20](../research/2026-11-24-rc4-restart-and-acceptance.md#independent-review-20-storage-identity-startup-credentials):** 3 Medium, all addressed:
+    - the hint now needs an enabled agent;
+    - a waiting storage decision is shown;
+    - an unsaved project carrying a saved project's identity is `COPIED` (pre-existing).
+
+    Also: a pending connection record before the key is stored, and Repair never reuses a disabled agent.
+  - **Automated acceptance** (native suite, four TouchDesigner launches with a disposable client home and real Claude Code clients): first run, restart, second restart, abrupt kill and recovery. The A–G matrix is in the record.
+
 ## Not implemented (nothing below exists)
 - **Withheld by design:**
   - raw Python execution with full `td` access (`tdflow_execute_python`): not built, and disabled by default if it ever is;
@@ -179,7 +196,7 @@
 - `0dd5bfd`: **Phase 2B increment 1** (approvals with identical re-call, the operator role, the `/ui/` governance dashboard), review 13. Pushed to `origin/dev` and observed with `git ls-remote` (`refs/heads/dev` = `0dd5bfd…`, `refs/heads/main` = `066dbd0…`, so `main` is unchanged). Verified on candidate `84f76d69…` built from the pre-commit tree; a clean build of the commit (tox `788925fa…`, `source_dirty` false) has the same source digest `14dac47f…`. No package was built. This record was added by the follow-up commit. CI: **not observed**.
 
 ## Next (owner direction D22: one-click connection; D20: finish TDflowMCP)
-0. **1.0.0rc3** ([checklist](../operations/release-candidate-1.0.md)): the owner's acceptance on the real profile (Connect Agent, Approve, a new Claude Code chat in VS Code, restart, Disconnect Agent). **macOS** validation. Owner decision: OAuth 2.1, the route to automatic setup for Codex, Cursor and Copilot ([ADR-0015](../decisions/0015-consent-based-client-connection.md#alternatives)).
+0. **1.0.0rc4** ([checklist](../operations/release-candidate-1.0.md)): the owner's remaining acceptance steps on the real profile. The restart finding is explained and fixed; everything else is automated. **macOS** validation. Owner decision: OAuth 2.1, the route to automatic setup for Codex, Cursor and Copilot ([ADR-0015](../decisions/0015-consent-based-client-connection.md#alternatives)).
 1. **Phase 3 and 4:** done on `dev` (see above), except host-project source-first and file snapshots outside the project.
 2. **1.0 release candidate** `1.0.0rc1` (commit `348360a`, package `TDflowMCP-1.0.0rc1-348360a56b`, all suites pass on the packaged `.tox`): [checklist](../operations/release-candidate-1.0.md), awaiting the owner's acceptance. Dogfood round 3 (Phase 3/4 tools) passed.
 3. **ADR-0014 stage 1** (approved, D17), if it does not delay completion: isolated candidate build/test bound to the `.tox` hash, plus a manual promotion. Not started.

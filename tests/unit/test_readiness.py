@@ -59,6 +59,19 @@ class ReadinessTests(unittest.TestCase):
         self.assertEqual((r["stage"], r["line"]), ("connected", "Agent Connected — Ready"))
         self.assertLessEqual(len(r["line"]), R.MAX_LINE)
 
+    def test_a_reopened_project_is_not_reported_as_empty(self):
+        """rc4 (UX-09, the owner's rc3 restart finding): storage stays closed after reopening, but existing agents are
+        'not loaded', never 'no agents'; Next Step says to turn on Enable MCP, not to connect a new agent."""
+        c = checks()
+        r = R.evaluate({"checks": c, "store_open": False, "agents_enabled": 0, "not_loaded": True})
+        self.assertEqual((r["stage"], r["line"]), ("set_up_off", "Turn on Enable MCP."))
+        r = R.evaluate({"checks": c, "store_open": False, "agents_enabled": 0})
+        self.assertEqual(r["line"], "Ready: pulse Connect Agent")             # a project never connected
+        r = R.evaluate({"checks": c, "not_loaded": True, "suspended": True})
+        self.assertEqual(r["stage"], "suspended")                              # the kill switch still wins
+        r = R.evaluate({"checks": c, "store_open": False, "storage_needs_user": True, "not_loaded": False})
+        self.assertEqual((r["stage"], r["line"]), ("storage_confirm", "Data: confirm (Advanced)"))   # review 20 (2)
+
     def test_every_status_line_fits_the_default_parameter_window(self):
         """UX-02 / D22 visual review: the default 416-px parameter window shows about 26 characters of a value."""
         import sys

@@ -39,6 +39,7 @@ if not hasattr(_REGISTRY, "closing"):
 MAX_ADMIN_BODY = 16 * 1024
 STORE_OPEN_TIMEOUT = 10.0
 CONFIRM_TIMEOUT = 3.0               # durable confirmation of an administrative action
+SUMMARY_NAME = "summary.json"       # rc4: non-secret summary in the project's private folder (agents, clients)
 
 
 class StorageNeedsUser(Exception):
@@ -147,6 +148,8 @@ class TDflowMCPExt:
         self._pair_dialog_until = 0.0            # Open Setup / Open Dashboard: the page's pairing request pops a dialog
         self._mcp_on_wall = 0.0                  # wall time MCP was last turned on
         self._connect_key = None                 # this project's connect key (hex; private storage), for the proof
+        self.prior = {"store": False, "agents": None, "clients": [], "pid": ""}   # rc4 (UX-09): before loading
+        self._summary_written = None
         if ownerComp.par.Enablemcp.eval():          # never re-enable silently after a reload
             ownerComp.par.Enablemcp.val = False
         self.suspended = bool(ownerComp.par.Suspendagents.eval())
@@ -324,8 +327,11 @@ class TDflowMCPExt:
             st.bind_project(d.project_id)
         v = st.verify()
         if d.status != "OVERRIDE":
-            self._m.storage.Registry(inp["private_root"]).put(d.project_id, "" if d.status == "UNSAVED" else inp["toe"],
-                                                              d.data_dir)
+            reg = self._m.storage.Registry(inp["private_root"])
+            toe = inp["toe"]
+            if d.status == "UNSAVED":            # review 20: keep a registered .toe (copy detection depends on it)
+                toe = (reg.load().get(d.project_id) or {}).get("toe", "")
+            reg.put(d.project_id, toe, d.data_dir)
         return {"verify": v, "settings": {"diagnostic_log": st.get_setting("diagnostic_log", "0"),
                                          "code_mode": st.get_private_setting("code_mode", "0"),
                                          "connections": st.get_private_setting("connections", "{}"),
@@ -541,12 +547,92 @@ class TDflowMCPExt:
         except Exception:
             self.native.detected = []
         self.checks = self._m.compat.run_checks(self._facts(full))
+        self.prior = self._inspect_prior()
         self.checks_at = time.monotonic()
         self.checks_wall, self.checks_how = time.strftime("%H:%M:%S"), how
         self._write_diagnostics()
         self._refresh_tell()
         self._publish()
         return self.checks
+
+    def _inspect_prior(self):
+        """rc4 (UX-09, owner acceptance of rc3): after a project is reopened, storage stays closed until the user acts
+        (no listener, no files). That is not the same as having no agents. Read-only: this project's private folder
+        (named by the saved Projectid, or, when the .toe was not saved after the id was assigned, by the one registry
+        entry for this .toe, as the storage decision would) is checked for the credential store, the non-secret
+        summary the component keeps there (enabled agents, connected clients) and connection key files. Nothing is
+        opened, created or changed; a moved or copied project is still decided when the store opens."""
+        S = self._m.storage
+        none = {"store": False, "agents": None, "clients": [], "pid": ""}
+        if self.store is not None and self.store.available or os.environ.get("TDFLOW_DATADIR"):
+            return none
+        p = self.ownerComp.par
+        pid = str(p.Projectid.val) if hasattr(p, "Projectid") else ""
+        root = self._private_root()
+        try:
+            if not S.valid_id(pid):                  # review 20 (6): an id assigned but not saved
+                folder, name = str(td.project.folder or ""), str(td.project.name or "")
+                toe = os.path.join(folder, name) if folder and name else ""
+                mine = [k for k, v in S.Registry(root).load().items()
+                        if toe and os.path.exists(toe) and S.same_project_file(v.get("toe", ""), toe)]
+                pid = mine[0] if len(mine) == 1 else ""
+            if not S.valid_id(pid):
+                return none
+            priv = S.private_dir_for(root, pid)
+            if not os.path.isfile(os.path.join(priv, self._m.store.CRED_DB_NAME)):
+                return none
+            agents, clients = None, []
+            try:
+                with open(os.path.join(priv, SUMMARY_NAME), encoding="utf-8") as f:
+                    summ = json.loads(f.read(4096))
+                agents = int(summ.get("agents_enabled"))
+                clients = [c for c in summ.get("clients") or [] if c in self._m.connection.SLOTS]
+            except (OSError, ValueError, TypeError, AttributeError):
+                # Projects connected before rc4 have no summary: a connection key file means a connection was made.
+                clients = [cid for cid, slot in self._m.connection.SLOTS.items()
+                           if os.path.isfile(os.path.join(root, "connect", slot, pid + ".dpapi"))]
+                agents = None                        # unknown count (shown as "not loaded")
+        except OSError:
+            return none
+        return {"store": True, "agents": agents, "clients": clients, "pid": pid}
+
+    def _storage_failed(self):
+        w = self.worker
+        return w is not None and w.ready.is_set() and not w.available
+
+    def _not_loaded(self):
+        """This project has a credential store that is simply not loaded yet: never reported as 'no agents'."""
+        return bool(self.prior.get("store")) and self.identity is None and not self._storage_failed()
+
+    def _not_loaded_line(self):
+        n = self.prior.get("agents")
+        return "not loaded (MCP off)" if n is None else f"{n} agent{'' if n == 1 else 's'} · not loaded"
+
+    def _set_up_off(self):
+        """Not loaded, and known to have at least one enabled agent: Next Step says to turn on Enable MCP."""
+        n = self.prior.get("agents")
+        return self._not_loaded() and ((n or 0) >= 1 or (n is None and bool(self.prior.get("clients"))))
+
+    def _write_summary(self):
+        """Keep the non-secret summary (enabled agents, connected clients) in this project's private folder, so a
+        reopened project can say what it has without opening its store. Background thread; only after the store
+        opened (a user action)."""
+        d, idn = self.storage, self.identity
+        if d is None or idn is None or d.status == "OVERRIDE" or not getattr(d, "private_dir", ""):
+            return
+        summ = {"agents_enabled": sum(1 for a in idn.agents.values() if a.enabled),
+                "clients": sorted(self.connector.records)}
+        if summ == self._summary_written:
+            return
+        self._summary_written = summ
+        path = os.path.join(d.private_dir, SUMMARY_NAME)
+
+        def write():
+            tmp = path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(dict(summ, schema="tdflowmcp.summary/1"), f)
+            os.replace(tmp, path)
+        self._bg(write)
 
     def _request_diagnostics(self):
         """Run Diagnostics pulse (UX-01): System Check shows 'Running…' at once; the checks run on the next frame and
@@ -612,7 +698,9 @@ class TDflowMCPExt:
                         "agents_enabled": enabled, "mcp_on": self.mcp_on, "suspended": self.suspended,
                         "error_code": self.ctl.error_code, "connected": self._connected_rows(), "now": time.time(),
                         "client": self.native.client_label(), "handoff": bool(self.native.handoff),
-                        "connect_line": self.connector.stage_line(), "connect_urgent": self.connector.urgent()})
+                        "connect_line": self.connector.stage_line(), "connect_urgent": self.connector.urgent(),
+                        "not_loaded": self._set_up_off(),
+                        "storage_needs_user": bool(self._storage_failed() and self.worker.failed == "StorageNeedsUser")})
         r["summary"] = {"Environment Ready": r["environment"]["state"], "MCP Ready": r["mcp"]["state"],
                         "MCP Enabled": "yes" if r["mcp_enabled"] else "no",
                         "Agent Connected": "yes" if r["agent_connected"] else "no"}
@@ -685,7 +773,8 @@ class TDflowMCPExt:
                                                  access=access, platform=sys.platform,
                                                  automatic=[i for i in self.native.tell_clients()
                                                             if self.connector.automatic(i)],
-                                                 set_up=self.connector.connected_clients())
+                                                 set_up=self.connector.connected_clients()
+                                                 or (self.prior.get("clients") if self._set_up_off() else []))
         dat = self.ownerComp.op("tellagent")
         if dat is not None and dat.text != self.tell_text:
             dat.text = self.tell_text
@@ -714,11 +803,17 @@ class TDflowMCPExt:
             N.copy_token()
         elif n == "Manageagents":
             self._manage_agents()
+            if self._not_loaded():
+                self.ensure_store(restart=True)         # a user action: load this project's agents (no listener)
         elif n == "Viewdiagnostics":
             self.RunDiagnostics()
             N._show("diagnostics", self.ownerComp.op("diagnostics").text)
         elif n == "Viewagents":
-            N.view_agents(self._seen())
+            if self._not_loaded():
+                self.ensure_store(restart=True)
+                self._set_note("Loading agents… pulse again")
+            else:
+                N.view_agents(self._seen())
         elif n in ("Addscope", "Removescope"):
             N.scope(n == "Addscope")
         elif n in ("Enableagent", "Disableagent"):
@@ -1061,7 +1156,7 @@ class TDflowMCPExt:
             self.mcp_on = True
             self._mcp_on_wall = time.time()          # 'connected · idle' counts only requests since this point
             if not self.connector.state:             # Connect Agent shows its own next step
-                self._set_note("MCP on. Waiting for agent")
+                self._set_note("MCP on. Waiting for agent", 4)   # brief: the readiness line follows
 
         def verified(res):
             if not res[0].get("ok"):
@@ -2120,6 +2215,8 @@ class TDflowMCPExt:
             self._ux_at = now
             rd = self._readiness()
             self._ready_line = rd["line"]
+            if self.identity is not None:
+                self._write_summary()
             self.native.refresh_menu()
             conn = rd["connected"]
             seen = self._seen()
@@ -2133,7 +2230,8 @@ class TDflowMCPExt:
                 "Websession": (f"{self.admin.active_sessions()} signed in" + (
                     f" (last sign-in {self.admin.last_browser_auth})" if self.admin.last_browser_auth else ""))
                 if self.admin.active_sessions() else "none",
-                "Agentsummary": f"{n_agents} agent{'' if n_agents == 1 else 's'} · {len(conn)} connected",
+                "Agentsummary": (self._not_loaded_line() if self._not_loaded() else
+                                 f"{n_agents} agent{'' if n_agents == 1 else 's'} · {len(conn)} connected"),
             }
         vals = dict(self._ux_vals)
         vals.update({
@@ -2166,6 +2264,10 @@ class TDflowMCPExt:
     # ---- lifecycle (main thread) ----------------------------------------------------------------
     def Shutdown(self, reason="exit"):
         """Stop the listener now (project exit, component deleted, extension re-initialised)."""
+        try:
+            self.connector.close_dialog()            # never leave TouchDesigner's shared dialog widened
+        except Exception:
+            pass
         if self.mcp_on:
             self._mcp_off("TDflowMCP is shutting down.")
         t = self.ctl.transport

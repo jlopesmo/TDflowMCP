@@ -301,7 +301,8 @@ class Native:
             return
         rows = self.agent_rows()
         names = [a["id"] for a in rows] or ["none"]
-        labels = [a["display_name"] + ("" if a["enabled"] else " (disabled)") for a in rows] or ["(no agents yet)"]
+        empty = "(not loaded yet)" if self.ext._not_loaded() else "(no agents yet)"   # rc4 (UX-09)
+        labels = [a["display_name"] + ("" if a["enabled"] else " (disabled)") for a in rows] or [empty]
         par = p.Agentselect
         if list(par.menuNames) != names or list(par.menuLabels) != labels:
             cur = str(par.eval())
@@ -320,7 +321,7 @@ class Native:
     def info_line(self, seen):
         a = self.selected_agent()
         if not a:
-            return "No agent selected"
+            return "Not loaded: pulse Manage Agents" if self.ext._not_loaded() else "No agent selected"
         live = [t for t in a["tokens"] if not t["revoked"]]
         last = seen.get(a["id"])
         when = f"seen {int(time.time() - last['last'])} s ago" if last else "not seen yet"

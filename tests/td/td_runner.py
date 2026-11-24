@@ -83,7 +83,8 @@ def sha_text(text):
 
 
 def load():
-    if MODE in ("memory_restart", "native_restart"):                 # the reopened saved .toe already contains the component
+    if MODE in ("memory_restart", "native_restart", "native_restart2", "native_recover"):
+        # The reopened saved .toe already contains the component (loading the .tox again would add a second one).
         return td.op("/project1/TDflowMCP")
     comp = td.op("/project1").loadTox(TOX)
     return comp

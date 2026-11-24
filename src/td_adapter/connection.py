@@ -30,6 +30,7 @@ import types
 import td
 
 CONSENT_SECONDS = 120.0
+DIALOG_WIDTH = 480             # UX-08: readable plan text (TouchDesigner's default dialog is 260 px)
 VIEW_SECONDS = 120.0           # connect_view is cleared after this (it is saved with the .toe: review 19, finding 14)
 RECHECK_SECONDS = 6.0
 SLOTS = {"claude-code": "claude-code"}
@@ -318,6 +319,8 @@ class Connector:
         rec = self.records.get(cid)
         idn = ext.identity
         agent = idn.agents.get(rec.get("agent_id")) if (rec and idn is not None) else None
+        if agent is not None and not agent.enabled:
+            agent = None                           # review 20: a disabled agent is not reused (a new one is created)
         live_tokens = [t for t in idn.tokens.values() if agent is not None and t.agent_id == agent.id and
                        not t.revoked_at] if idn is not None else []
         slot = SLOTS[cid]
@@ -422,6 +425,12 @@ class Connector:
             token = d.pop("token")
             res = None
             try:
+                # Review 20: record the connection as pending before the credential exists anywhere else, so a kill
+                # at any later point leaves something Repair Connection and Disconnect Agent can find.
+                pending = dict(old, client=cid, agent_id=aid, slot=slot, pid=pid, path=pl.path,
+                               shown_path=pl.shown_path, entry=pl.entry, pending=True,
+                               at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+                store.set_private_setting("connections", json.dumps(dict(self.records, **{cid: pending})))
                 vault.put(slot, pid, token, key)
                 token = None
                 res = C.apply_claude(pl, env, bdir)
@@ -443,6 +452,10 @@ class Connector:
                 # entry this run wrote (unless it was already there).
                 token = None
                 self._rollback(aid, new=not reuse, slot=slot, pid=pid, vault=vault)
+                try:                                   # the pending record goes too (the previous one stays)
+                    store.set_private_setting("connections", json.dumps(self.records))
+                except Exception:
+                    pass
                 if res is not None and res.get("action") in ("add", "create_file", "replace", "update"):
                     try:
                         C.remove_claude(pl.path, env, bdir, pl.entry, restore_entry=res.get("previous_entry"),
@@ -638,6 +651,14 @@ class Connector:
                     pass
 
     # ---- TouchDesigner dialog ---------------------------------------------------------------------------
+    def close_dialog(self):
+        """Put the shared dialog's width back (component shutdown or reinit with a dialog still open)."""
+        r = getattr(self, "_restore_dialog", None)
+        if r is not None:
+            r()
+            self._restore_dialog = None
+            self._restore_after = None
+
     def _open_dialog(self, title, text, buttons, on_choice):
         """TouchDesigner's own pop-up dialog (TDResources PopDialog). Returns False if it is unavailable."""
         try:
@@ -652,16 +673,76 @@ class Connector:
             except (TypeError, ValueError, AttributeError):
                 n = -1
             on_choice(n if 0 <= n < len(buttons) - 1 else None)      # the last button is always Cancel
+        # Review 20 (4): one TDflowMCP dialog at a time (TouchDesigner has one shared pop-up); the caller then takes
+        # its no-dialog path.
+        if self.dialog is not None:
+            return False
+        ra = getattr(self, "_restore_after", None)
+        if ra:                                       # a restore still pending from the last dialog: do it first
+            self._restore_after = None
+            ra[0]()
+        # UX-08 (rc4): TouchDesigner's dialog is 260 px wide, which wraps the plan awkwardly. It is widened while a
+        # TDflowMCP dialog is open and put back exactly (value, mode, expression) afterwards. It is TouchDesigner's
+        # own /sys component, not the project.
+        saved = None
         try:
-            pop.OpenDefault(text=text, title=title, buttons=list(buttons), callback=cb, escButton=len(buttons),
-                            escOnClickAway=False, enterButton=len(buttons))
+            par = pop.par.w
+            if float(par.eval()) < DIALOG_WIDTH:
+                mode = par.mode
+                modes = type(mode)                   # TouchDesigner's ParMode enum, taken from the value itself
+                saved = (mode, par.expr if mode == modes.EXPRESSION else None, par.val, modes)
         except Exception:
+            saved = None
+        if saved is not None:
+            try:
+                par.val = DIALOG_WIDTH
+                if saved[0] != saved[3].CONSTANT:
+                    par.mode = saved[3].CONSTANT
+            except Exception:
+                pass
+
+        def restore():
+            """Put the width back; True once it holds (the dialog's window writes its size back as it closes)."""
+            if saved is None:
+                return True
+            try:
+                par = pop.par.w
+                par.val = saved[2]
+                if saved[0] == saved[3].EXPRESSION:
+                    par.expr = saved[1]
+                par.mode = saved[0]
+                return par.mode == saved[0] and (saved[0] != saved[3].CONSTANT or par.eval() == saved[2])
+            except Exception:
+                return True
+        self._restore_dialog = restore
+
+        def cb_restore(info):
+            # The dialog finishes closing after its callback and re-applies the width it opened with, so the restore
+            # runs a few frames later (tick); it also runs at once if the component shuts down meanwhile.
+            self._restore_after = (restore, 3, 10)      # (restore, frames to wait, attempts left)
+            cb(info)
+        try:
+            pop.OpenDefault(text=text, title=title, buttons=list(buttons), callback=cb_restore,
+                            escButton=len(buttons), escOnClickAway=False, enterButton=len(buttons))
+        except Exception:
+            restore()
+            self._restore_dialog = None
             return False
         self.dialog = title
         return True
 
     # ---- every frame (main thread) ---------------------------------------------------------------------------
     def tick(self):
+        ra = getattr(self, "_restore_after", None)
+        if ra:
+            fn, n, tries = ra
+            if n > 0:
+                self._restore_after = (fn, n - 1, tries)
+            elif fn() or tries <= 1:
+                self._restore_after = None
+                self._restore_dialog = None
+            else:
+                self._restore_after = (fn, 5, tries - 1)    # re-check: the closing window may write its size back
         vu = getattr(self, "_view_until", None)
         if vu and time.monotonic() > vu:
             self._clear_view()

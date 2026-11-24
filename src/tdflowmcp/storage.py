@@ -37,7 +37,7 @@ README = ("TDflowMCP stores this project's audit log, session history and recove
           "Credentials, tokens and audit keys are NOT here (they stay in your per-user private storage).\n"
           "Everything in this folder is git-ignored. Do not edit these files; moving the project is\n"
           "handled by the component (Confirm Move).\n")
-_ID = re.compile(r"^prj_[A-Za-z0-9]{16}$")
+_ID = re.compile(r"^prj_[A-Za-z0-9]{16}\Z")      # \Z: no trailing newline (review 20)
 
 
 def new_project_id() -> str:
@@ -219,6 +219,11 @@ def resolve(toe_path: str, project_id: str, private_root: str, registry: Registr
         return Decision("COPIED", pid, data_dir, priv, "this TDflowMCP identity is not known on this computer",
                         False)
     prev_toe, prev_dd = known.get("toe", ""), known.get("data_dir", "")
+    if not saved and prev_toe and (exists(prev_toe) or _sibling_save_exists(prev_toe)):
+        # Review 20 (3): an unsaved project carrying the identity of a saved project that still exists (a pasted
+        # component, a .tox made from it): a copy, never that project's data.
+        return Decision("COPIED", pid, data_dir, priv, "this unsaved project carries the TDflowMCP identity of "
+                        "another project", False, prev_toe, prev_dd)
     if saved and prev_toe and not same_project_file(prev_toe, toe_path):
         if exists(prev_toe) or _sibling_save_exists(prev_toe):
             return Decision("COPIED", pid, data_dir, priv, "this .toe is a copy of another project that uses the "

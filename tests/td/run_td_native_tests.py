@@ -14,8 +14,15 @@ Real-client validation (not simulated): the configuration TDflowMCP wrote is use
 - a live ``claude -p`` session given the very same ``tdflow`` entry (``--mcp-config``, ``--strict-mcp-config``,
   restricted tools): it inspects, creates an operator in the authorized network and is refused outside it. No token
   is put in its environment: the helper fetches the credential.
-Then: Suspend / resume, save, restart, reconnect without repeating setup, revocation, repair, a failed setup and
-Disconnect (byte-identical rollback). Results: build/td-native-test-results.json (no secrets).
+Then: Suspend / resume and save (launch 1). rc4 (the owner's rc3 restart finding), launches 2-4:
+- **restart 1:** a fresh TouchDesigner process opens the saved project. Before anything is loaded, it shows MCP off,
+  "Turn on Enable MCP.", agents "not loaded" (never "0 agents"); no file was created or changed (snapshot). Enable MCP
+  alone loads the same agent; Claude Code reconnects with the same credential; a live session creates, connects,
+  updates and undoes; no duplicate agent or token; the audit chain continues. Save, clean exit;
+- **restart 2** after that successful reconnection: the same, then the harness ends TouchDesigner abruptly;
+- **recovery** after the abrupt end: identity, agent, credential and audit chain intact, reconnect; then revocation,
+  repair, a failed setup and Disconnect (rollback).
+Results: build/td-native-test-results.json (no secrets).
 """
 from __future__ import annotations
 
@@ -42,7 +49,15 @@ ORIGINAL = {"numStartups": 12, "theme": "dark", "tipsHistory": {"x": 3},
             "mcpServers": {"other-server": {"type": "http", "url": "http://127.0.0.1:9/mcp"}},
             "projects": {"F:/elsewhere": {"allowedTools": []}}}
 ALLOWED = ["mcp__tdflow__tdflow_whoami", "mcp__tdflow__tdflow_list_operators", "mcp__tdflow__tdflow_create_operator",
-           "mcp__tdflow__tdflow_set_parameters"]
+           "mcp__tdflow__tdflow_set_parameters", "mcp__tdflow__tdflow_get_parameters", "mcp__tdflow__tdflow_connect",
+           "mcp__tdflow__tdflow_undo"]
+PROMPT2 = ("You are connected to a TouchDesigner project through the MCP server named tdflow. 1) Call tdflow_whoami. "
+           "2) With tdflow_create_operator create a Level TOP named probe_level inside /project1/fx. 3) With "
+           "tdflow_connect connect the output of /project1/fx/noise1 to the first input of /project1/fx/probe_level. "
+           "4) Set parameter opacity of /project1/fx/probe_level to 0.5 with tdflow_set_parameters, then read it back "
+           "with tdflow_get_parameters. 5) Call tdflow_undo once to undo that last change, then read opacity again. "
+           "Finish with exactly one line: RESULT role=<role from whoami> set=<value read in step 4> "
+           "after_undo=<value read in step 5>")
 PROMPT = ("You are connected to a TouchDesigner project through the MCP server named tdflow. 1) Call tdflow_whoami. "
           "2) Call tdflow_list_operators for /project1/fx. 3) With tdflow_create_operator create a Constant TOP named "
           "probe1 inside /project1/fx. 4) With tdflow_create_operator try to create a Constant TOP named probe_outside "
@@ -97,8 +112,128 @@ def version(exe):
     return subprocess.run([exe, "--version"], capture_output=True, text=True, timeout=60).stdout.strip()
 
 
+def snapshot():
+    """Every file TDflowMCP or the client could touch: private root, project data folder, client home, the .toe."""
+    out = {}
+    roots = [STATE["private"], os.path.join(STATE["proj"], ".tdflowmcp"), STATE["home"]]
+    for r in roots:
+        for d, dirs, files in os.walk(r):
+            out[d] = ("dir", len(dirs) + len(files))              # a new or removed entry changes this too
+            for f in files:
+                fp = os.path.join(d, f)
+                try:
+                    st = os.stat(fp)
+                    out[fp] = (st.st_size, st.st_mtime_ns)
+                except OSError:
+                    pass
+    if STATE.get("toe") and os.path.exists(STATE["toe"]):
+        st = os.stat(STATE["toe"])
+        out[STATE["toe"]] = (st.st_size, st.st_mtime_ns)
+    return out
+
+
+def audit_events():
+    """Event count of the project's audit database, read from a copy (TouchDesigner has not opened it yet)."""
+    import sqlite3
+    dd = os.path.join(STATE["proj"], ".tdflowmcp")
+    for d, _, files in os.walk(dd):
+        if "tdflowmcp.sqlite" in files:
+            tmp = tempfile.mkdtemp(dir=STATE["top"])
+            for suf in ("", "-wal", "-shm"):
+                if os.path.exists(os.path.join(d, "tdflowmcp.sqlite" + suf)):
+                    shutil.copyfile(os.path.join(d, "tdflowmcp.sqlite" + suf),
+                                    os.path.join(tmp, "tdflowmcp.sqlite" + suf))
+            c = sqlite3.connect(os.path.join(tmp, "tdflowmcp.sqlite"))
+            n = c.execute("select count(*) from events").fetchone()[0]
+            c.close()
+            shutil.rmtree(tmp, ignore_errors=True)
+            return n
+    return 0
+
+
+def make_inspected(tag):
+    def cp(data, pid):
+        now = snapshot()
+        before = STATE["snap_before"]
+        new = sorted(os.path.relpath(f, STATE["top"]) for f in set(now) - set(before))
+        changed = sorted(os.path.relpath(f, STATE["top"]) for f in set(now) & set(before) if now[f] != before[f])
+        T(f"{tag}.REOPENING_CREATED_OR_CHANGED_NOTHING", not new and not changed, new=new[:5], changed=changed[:5])
+        vf = os.path.join(STATE["private"], "connect", "claude-code", STATE["pid"] + ".dpapi")
+        T(f"{tag}.CREDENTIAL_AND_STORE_STILL_THERE", os.path.isfile(vf) and os.path.isfile(
+            os.path.join(STATE["private"], "projects", STATE["pid"], "credentials.sqlite")))
+        n = audit_events()
+        T(f"{tag}.audit_events_present", n > 0, events=n)
+        if tag == "recover":                                  # review 20 (5): nothing durable was lost in the kill
+            T("recover.NO_AUDIT_EVENT_LOST_IN_THE_KILL", n >= (STATE.get("events_before_kill") or 1),
+              events=n, before_kill=STATE.get("events_before_kill"))
+        try:
+            with open(os.path.join(STATE["private"], "projects", STATE["pid"], "summary.json"), encoding="utf-8") as f:
+                summ = json.load(f)
+        except (OSError, ValueError):
+            summ = {}
+        T(f"{tag}.SUMMARY_KNOWS_THE_AGENT", summ.get("agents_enabled") == 1 and summ.get("clients") == ["claude-code"]
+          and not any(k in json.dumps(summ) for k in ("tdf_", "Bearer")), summary=summ)
+        return {"pid": STATE["pid"], "aid": STATE["aid"], "agents": STATE["agents"], "events": n}
+    return cp
+
+
+def make_live(tag):
+    def cp(data, pid):
+        T(f"{tag}.SAME_CREDENTIAL_REUSED", helper_token() == STATE.get("token"))
+        if STATE["live"]:
+            line = mcp_list(shutil.which("claude"), f"cli-{tag}")
+            T(f"{tag}.CLAUDE_CODE_RECONNECTS_WITHOUT_SETUP", "Connected" in line and "Failed" not in line, line=line)
+        else:
+            T(f"{tag}.helper_token_works", mt.ok(mt.MCP(STATE["token"]).call("tdflow_whoami")))
+        out = {}
+        if STATE["live"] and data.get("live"):
+            out = live_session(PROMPT2, f"{tag}-session")
+            rl = out.get("result_line", "")
+            T(f"{tag}.LIVE_SESSION_AFTER_RESTART", out.get("rc") == 0 and "role=builder" in rl and "set=0.5" in rl
+              and re.search(r"after_undo=1(\.0+)?\b", rl) is not None, line=rl)
+        return out
+    return cp
+
+
+def live_session(prompt, label):
+    e = entry()
+    mcfg = os.path.join(STATE["top"], f"tdflow-entry-{label}.json")
+    with open(mcfg, "w", encoding="utf-8") as f:
+        json.dump({"mcpServers": {"tdflow": e}}, f)
+    env = dict(os.environ)
+    env.pop("TDFLOW_TOKEN", None)
+    t0 = time.time()
+    rc, sout, serr = ob.run_claude(shutil.which("claude"), ["-p", prompt, "--mcp-config", mcfg, "--strict-mcp-config",
+                                                             "--allowedTools", *ALLOWED, *ob.ISOLATION,
+                                                             "--output-format", "stream-json", "--verbose"],
+                                   STATE["proj"], env, 600)
+    res = {}
+    for ln in sout.splitlines():
+        try:
+            m = json.loads(ln)
+        except ValueError:
+            continue
+        if m.get("type") == "result":
+            res = m
+    text = str(res.get("result", ""))
+    rl = next((x for x in text.splitlines() if x.strip().startswith("RESULT")), "")
+    secret = (STATE.get("token") or "x.\0").split(".", 1)[-1]
+    T(f"{label}.no_token_in_agent_output", secret not in sout and secret not in serr)
+    return {"rc": rc, "result_line": rl, "seconds": round(time.time() - t0, 1), "turns": res.get("num_turns")}
+
+
+def cp_restart2_kill(data, pid):
+    """An abrupt end: no save, no clean shutdown (the harness kills ITS OWN TouchDesigner process)."""
+    subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True)
+    g.STATE["killed_pid"] = pid
+    STATE["events_before_kill"] = data.get("events")
+    time.sleep(1.0)
+    return {}
+
+
 def cp_connect_live(data, pid):
     STATE["proj"] = data["project_folder"]
+    STATE["pid"] = data.get("pid")
     e = entry()
     T("live.config_written_by_tdflowmcp_is_used_unmodified", bool(e) and "headersHelper" in e)
     tok = helper_token()
@@ -162,16 +297,6 @@ def cp_connect_resumed(data, pid):
     return {}
 
 
-def cp_restart_live(data, pid):
-    T("restart.SAME_CREDENTIAL_AFTER_RESTART", helper_token() == STATE.get("token"))
-    if STATE["live"]:
-        line = mcp_list(shutil.which("claude"), "cli-after-restart")
-        T("restart.CLAUDE_CODE_RECONNECTS_WITHOUT_SETUP", "Connected" in line and "Failed" not in line, line=line)
-    else:
-        T("restart.helper_token_works", mt.ok(mt.MCP(STATE["token"]).call("tdflow_whoami")))
-    return {}
-
-
 def cp_restart_revoked(data, pid):
     r = mt.MCP(STATE["token"]).call("tdflow_whoami")
     T("revoke.REVOKED_CREDENTIAL_REFUSED", r.get("_http") == 401 or r.get("code") in ("UNAUTHORIZED", "AUTH"), r=r)
@@ -193,7 +318,24 @@ def cp_restart_repaired(data, pid):
     return {}
 
 
+def cp_restart_disconnected_summary():
+    path = os.path.join(STATE["private"], "projects", STATE["pid"], "summary.json")
+    summ = {}
+    for _ in range(20):                                       # written on a background thread after the change
+        try:
+            with open(path, encoding="utf-8") as f:
+                summ = json.load(f)
+            if summ.get("agents_enabled") == 0:
+                return summ
+        except (OSError, ValueError):
+            pass
+        time.sleep(0.25)
+    return summ
+
+
 def cp_restart_disconnected(data, pid):
+    summ = cp_restart_disconnected_summary()
+    T("disconnect.SUMMARY_SAYS_NO_AGENT", summ.get("agents_enabled") == 0 and summ.get("clients") == [], summary=summ)
     with open(cfg_path(), "rb") as f:
         now = f.read()
     if STATE["live"]:      # the real client rewrote its own state meanwhile (as it does); TD checks the exact removal
@@ -213,8 +355,12 @@ def cp_restart_disconnected(data, pid):
 
 HANDLERS = {"connect_live": cp_connect_live, "connect_suspended": cp_connect_suspended,
             "connect_resumed": cp_connect_resumed}
-RESTART = {"restart_live": cp_restart_live, "restart_revoked": cp_restart_revoked,
-           "restart_repaired": cp_restart_repaired, "restart_disconnected": cp_restart_disconnected}
+RESTART = {"restart_inspected": make_inspected("restart"), "restart_live": make_live("restart")}
+RESTART2 = {"restart2_inspected": make_inspected("restart2"), "restart2_live": make_live("restart2"),
+            "restart2_kill": cp_restart2_kill}
+RECOVER = {"recover_inspected": make_inspected("recover"), "recover_live": make_live("recover"),
+           "restart_revoked": cp_restart_revoked, "restart_repaired": cp_restart_repaired,
+           "restart_disconnected": cp_restart_disconnected}
 
 
 def main():
@@ -232,7 +378,7 @@ def main():
     raw = json.dumps(ORIGINAL, indent=2).encode("utf-8")
     with open(os.path.join(hm, ".claude.json"), "wb") as f:
         f.write(raw)
-    STATE.update(top=top, live=not a.no_live, home=hm, original_bytes=raw)
+    STATE.update(top=top, live=not a.no_live, home=hm, original_bytes=raw, private=os.path.join(top, "private"))
     proj = tempfile.mkdtemp(prefix="tdflow-native-project-")       # outside the repository
     STATE["proj"] = proj
     run_dir = os.path.join(top, "native")
@@ -242,13 +388,26 @@ def main():
     res = g.launch("native", tox, run_dir, proj, env, HANDLERS)
     toe = res.get("native_toe")
     T("restart.project_saved", bool(toe) and os.path.exists(toe))
-    res2 = {}
+    res2, res3, res4 = {}, {}, {}
+    STATE["aid"] = (res.get("connect_record") or {}).get("agent_id")
+    STATE["agents"] = 1
+    STATE["toe"] = toe
     if toe and os.path.exists(toe):
         secret = STATE.get("token", "").split(".", 1)[-1].encode()
         T("restart.NO_TOKEN_IN_THE_SAVED_PROJECT", bool(secret) and secret not in open(toe, "rb").read())
-        os.makedirs(os.path.join(top, "restart"))
-        res2 = g.launch("native_restart", tox, os.path.join(top, "restart"), proj, env, RESTART, deadline_s=500,
-                        toe=toe)
+        for mode, handlers, kill, sub in (("native_restart", RESTART, False, "restart"),
+                                          ("native_restart2", RESTART2, True, "restart2"),
+                                          ("native_recover", RECOVER, False, "recover")):
+            os.makedirs(os.path.join(top, sub))
+            STATE["snap_before"] = snapshot()
+            r = g.launch(mode, tox, os.path.join(top, sub), proj, env, handlers, deadline_s=700, toe=toe,
+                         expect_kill=kill)
+            if mode == "native_restart":
+                res2 = r
+            elif mode == "native_restart2":
+                res3 = r
+            else:
+                res4 = r
     shutil.rmtree(proj, ignore_errors=True)
     for path in glob.glob(os.path.join(top, "**", "*"), recursive=True):    # no plaintext token anywhere we wrote
         if os.path.isfile(path) and os.path.getsize(path) < 50_000_000:
@@ -259,8 +418,8 @@ def main():
                     T("leak.NO_PLAINTEXT_TOKEN_IN_ANY_FILE", False, file=os.path.relpath(path, top))
     if not [t for t in H["tests"] if t["name"] == "leak.NO_PLAINTEXT_TOKEN_IN_ANY_FILE"]:
         T("leak.NO_PLAINTEXT_TOKEN_IN_ANY_FILE", True)
-    in_td = (res.get("tests") or []) + (res2.get("tests") or [])
-    errs = (res.get("errors") or []) + (res2.get("errors") or [])
+    in_td = sum(((x.get("tests") or []) for x in (res, res2, res3, res4)), [])
+    errs = sum(((x.get("errors") or []) for x in (res, res2, res3, res4)), [])
     out = {"tox_sha256": g.hashlib.sha256(open(tox, "rb").read()).hexdigest(), "td_build": res.get("td_build"),
            "in_td": {"passed": sum(t["ok"] for t in in_td), "total": len(in_td), "tests": in_td, "errors": errs},
            "harness": {"passed": sum(t["ok"] for t in H["tests"]), "total": len(H["tests"]), "tests": H["tests"]},

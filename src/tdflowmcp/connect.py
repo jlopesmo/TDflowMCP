@@ -36,12 +36,12 @@ from typing import Callable, Dict, List, Optional, Sequence
 SERVER_NAME = "tdflow"
 VAULT_SERVICE = "TDflowMCP"
 HELPER_MARK = "TDflowMCP"                      # every helper command we write contains this (ownership test)
-PROJECT_RE = re.compile(r"^prj_[A-Za-z0-9]{16}$")
+PROJECT_RE = re.compile(r"^prj_[A-Za-z0-9]{16}\Z")
 TOKEN_RE = re.compile(r"^tdf_[A-Za-z0-9]{12}\.[A-Za-z0-9_\-]{43,128}$")
-KEY_RE = re.compile(r"^[0-9a-f]{64}$")
-NONCE_RE = re.compile(r"^[0-9a-f]{32}$")
+KEY_RE = re.compile(r"^[0-9a-f]{64}\Z")
+NONCE_RE = re.compile(r"^[0-9a-f]{32}\Z")
 PROOF_PREFIX = "/.well-known/tdflowmcp-proof/"
-SLOT_RE = re.compile(r"^[a-z][a-z0-9-]{1,31}$")
+SLOT_RE = re.compile(r"^[a-z][a-z0-9-]{1,31}\Z")
 MAX_CONFIG_BYTES = 32 * 1024 * 1024
 KEEP_BACKUPS = 5
 

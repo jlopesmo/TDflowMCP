@@ -24,6 +24,8 @@ import sqlite3
 import time
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+CRED_DB_NAME = "credentials.sqlite"      # private per-user credential store (agents, tokens, private settings)
+
 from tdflowmcp import approvals as APR
 
 SCHEMA_VERSION = 1
@@ -118,7 +120,7 @@ class Store:
         self.datadir = datadir
         self.private_dir = private_dir or datadir
         self.db_path = os.path.join(datadir, "tdflowmcp.sqlite")
-        self.cred_path = os.path.join(self.private_dir, "credentials.sqlite")
+        self.cred_path = os.path.join(self.private_dir, CRED_DB_NAME)
         self.key_path = os.path.join(self.private_dir, "audit.key")
         self.checkpoint_path = os.path.join(self.private_dir, "checkpoints.jsonl")
         self.conn: Optional[sqlite3.Connection] = None

@@ -1,6 +1,6 @@
 # TDflowMCP 1.0 release candidate: changelog, compatibility and acceptance checklist
 
-**Current candidate: `1.0.0rc3`** (one-click agent connection, owner D22, [ADR-0015](../decisions/0015-consent-based-client-connection.md)). It replaces `1.0.0rc2` (`132e8c3`, package `TDflowMCP-1.0.0rc2-132e8c3317`, tox `dfabfaca…`); the owner's acceptance of rc2 found that first-time users still handled tokens, environment variables and MCP configuration. Commit and package hashes for rc3 are in the [validation index](../icm/validation-index.md) and [current state](../icm/current-state.md#commit-record).
+**Current candidate: `1.0.0rc4`** (owner D23: the rc3 restart finding explained and fixed, automated acceptance, UX-08/UX-09, review 20; [record](../research/2026-11-24-rc4-restart-and-acceptance.md)). It follows `1.0.0rc3` (one-click agent connection, owner D22, [ADR-0015](../decisions/0015-consent-based-client-connection.md)), whose hands-on owner acceptance passed connection, real agent work and suspension, and found the restart display issue. It replaces `1.0.0rc2` (`132e8c3`, package `TDflowMCP-1.0.0rc2-132e8c3317`, tox `dfabfaca…`); the owner's acceptance of rc2 found that first-time users still handled tokens, environment variables and MCP configuration. Commit and package hashes for rc3 are in the [validation index](../icm/validation-index.md) and [current state](../icm/current-state.md#commit-record).
 
 ## Changes in rc3
 - **Connect Agent → Approve → start working** for Claude Code (CLI and VS Code extension):
@@ -90,15 +90,14 @@ No other compatibility is claimed.
 - [x] rc3: the package is built from a clean worktree of the candidate commit (`f033b72`, `dist/TDflowMCP-1.0.0rc3-f033b72d48`, tox SHA-256 `ffbb3ea1fa404d66…`, source digest `b137a685…`, zip `6d094b8b…`). Every suite (1A, 1B, gate, memory, onboarding, native one-click connection with live clients) and the visual review pass on the **packaged** `.tox` (validation index).
 - [x] rc3: the one-click connection on the candidate build. The real Claude Code CLI and the VS Code extension's engine connect using only the configuration TDflowMCP wrote, a live session works with no token step, and restart, revocation, repair, a failed setup and Disconnect all pass (validation index).
 - [x] rc3: independent security review 19 and the usability review, findings addressed (record).
-- [ ] **rc3 owner acceptance on the real profile:**
-  1. In a blank project, drop the packaged `.tox` and leave Auto.
-  2. Pulse Connect Agent and approve in the dialog.
-  3. Start a new chat in the Claude Code VS Code extension and ask it to call `tdflow_whoami`.
-  4. Check Agent Connected — Ready.
-  5. Restart both and reconnect.
-  6. Disconnect Agent.
+- [x] rc4: the full acceptance sequence A–G is automated with real TouchDesigner processes and real Claude Code clients, including restart, a second restart, an abrupt kill and recovery ([matrix](../research/2026-11-24-rc4-restart-and-acceptance.md#acceptance-matrix-automated)).
+- [x] rc3 owner acceptance (hands-on, 2026-11-24): connection, `tdflow_whoami` in the VS Code chat, operators created, Suspend/Resume. The restart finding was a display issue (rc4).
+- [ ] **rc4 owner check on the real profile** (optional; the parts automation cannot do, because they need the owner's own approval in TouchDesigner and the VS Code chat UI; **not executed by an agent**):
+  1. Replace the component in a copy of the rc3 test project with the rc4 `.tox`, or reopen the project with rc4 installed. Expected: Next Step `Turn on Enable MCP.`, Agents `not loaded (MCP off)` (that project predates the rc4 summary).
+  2. Turn on Enable MCP; in VS Code start a new Claude Code chat (or `/mcp` → reconnect `tdflow`) and call `tdflow_whoami`.
+  3. Save, restart TouchDesigner and VS Code, repeat step 2.
+  4. Optionally Disconnect Agent and check that `~/.claude.json` no longer has `tdflow`.
 
-  This needs the owner's own approval in TouchDesigner, and is **not executed by an agent**.
 - [ ] **macOS:** automatic setup not validated (no Mac).
 - [ ] **CI evidence:** no GitHub Actions run has been observed (B3). Release procedure step 1 requires observed CI.
 - [ ] **Latest TD build:** not tested (release procedure step 1 asks for the minimum and the latest build).

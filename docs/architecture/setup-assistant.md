@@ -44,7 +44,7 @@ The component **never listens until the user acts** (pulse or toggle). After the
 | Agent Handoff | `Tellagent` "Tell Your Coding Agent" | Str, read-only | State of the instructions (`Ready · v…`, `Repair: …`) |
 | | `Copytellagent` "Copy Instructions" / `Viewinstructions` "View Full Instructions" | Pulse | Clipboard / viewer of the client-specific instructions ([§6](#6-tell-your-coding-agent)) |
 | Management | `Connectedagents` | Str, read-only | Agents whose **authenticated** requests arrived in the last 2 minutes, with the client name (`Claude Code (5 s ago)`); `none yet (MCP is on)` / `none (MCP is off)`. A registered agent is not a connected agent |
-| | `Manageagents` | Pulse | Opens the parameter window on the Agents page |
+| | `Manageagents` | Pulse | Opens the parameter window on the Agents page; rc4: if this project's agents are not loaded yet, loads them (opens the store, a user action like Connect Agent; no listener) |
 | | `Opendashboard` | Pulse | Opens the dashboard (starts the listener if needed); TouchDesigner then asks to approve the sign-in, showing the page's code ([security model §2.5](security-model.md#25-dashboard-and-setup-admin-sessions)) |
 
 **Page Agents (native administration; the same backend as the dashboard)**
@@ -52,7 +52,7 @@ The component **never listens until the user acts** (pulse or toggle). After the
 | Parameter | Type | Behaviour |
 |---|---|---|
 | `Detectedclients` "Installed Agents" | Str, read-only | What discovery found, and whether setup is automatic: `Claude Code (CLI, VS Code extension; automatic) · OpenAI Codex CLI (CLI; manual)` |
-| `Agentsummary` "Agents" | Str, read-only | `2 agents · 1 connected` |
+| `Agentsummary` "Agents" | Str, read-only | `2 agents · 1 connected`. **rc4 (UX-09):** before the store is loaded (after reopening a project), `1 agent · not loaded` (from the non-secret summary) or `not loaded (MCP off)`, never `0 agents`; the agent menu shows `(not loaded yet)` |
 | `Agentselect` "Agent" | Menu (filled at runtime) | Every agent by name (`(disabled)` when disabled); selecting one fills Scope with its first scope |
 | `Agentinfo` "Selected Agent" | Str, read-only | `On · Builder · 1 token · 1 scope · seen 5 s ago` |
 | `Agentscope` "Scope", `Addscope`, `Removescope` | Str, Pulse | Add an allow grant with the agent's role actions on Scope / remove the grant on Scope |
@@ -88,6 +88,12 @@ Next Step shows, in this order:
 1. a fresh note (for example a copy result);
 2. a controller message for 30 s after a transition (not in Setup);
 3. otherwise the readiness line, for example `Ready: pulse Connect Agent`, a Connect Agent stage (`Approve in the dialog.`, `Configuring Claude Code…`, `Start a Claude Code chat.`, `Connected · idle 5 min`, `No key: Repair Connection`, `Turn on Enable MCP.`), `Agent Connected — Ready`, `Agents suspended.` or `Not ready: port`.
+
+**After reopening a project (rc4, UX-09; [record](../research/2026-11-24-rc4-restart-and-acceptance.md)).**
+- Storage stays closed until the user acts.
+- The automatic diagnostics inspect this project's private folder **read-only**: the credential store, a non-secret `summary.json` (enabled agents, connected clients, kept by the component once the store has opened) and connection key files. Nothing is opened, created or changed.
+- With at least one enabled agent, Next Step says `Turn on Enable MCP.`.
+- With a moved or copied project whose decision waits, it says `Data: confirm (Advanced)`.
 
 A Connect Agent step counts as newer than an older note (ties go to the step), so progress stays visible. Steps in progress or failed take precedence over `Agent Connected — Ready`. **Every line fits 26 characters,** the value width of TouchDesigner's default 416-px parameter window (visual review, D22; unit-tested). Details go to the viewers.
 

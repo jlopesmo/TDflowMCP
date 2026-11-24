@@ -98,6 +98,11 @@ def evaluate(f: Mapping) -> Dict:
             stage, line = "enabled_handoff", "Copy Token (Agents page)"
         else:
             stage, line = "enabled_waiting", "Waiting for the agent…"
+    elif f.get("storage_needs_user"):
+        stage, line = "storage_confirm", "Data: confirm (Advanced)"     # review 20 (2): a move/copy decision waits
+    elif f.get("not_loaded"):
+        # rc4 (UX-09): this project already has agents; they load when MCP is turned on (never "no agents").
+        stage, line = "set_up_off", "Turn on Enable MCP."
     elif int(f.get("agents_enabled") or 0) < 1:
         stage, line = "env_ready", "Ready: pulse Connect Agent"
     elif f.get("handoff"):

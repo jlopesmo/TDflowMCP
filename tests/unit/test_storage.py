@@ -80,6 +80,16 @@ class DecisionTests(Base):
         u = S.resolve(copy, S.new_project_id(), self.priv, self.reg, location=self.loc)
         self.assertEqual((u.status, u.usable), ("COPIED", False))           # identity unknown here
 
+    def test_unsaved_project_carrying_a_saved_projects_identity_is_a_copy(self):
+        """Review 20 (3): a component pasted (or a .tox made from it) into a new, unsaved project must not open the
+        saved project's data, also when that data lives in private storage."""
+        d = S.resolve(self.toe, "", self.priv, self.reg, mode="private", location=self.loc)
+        self.reg.put(d.project_id, self.toe, d.data_dir)
+        u = S.resolve(os.path.join(self.proj, "unsaved_new.toe"), d.project_id, self.priv, self.reg, mode="private",
+                      location=self.loc)
+        self.assertEqual((u.status, u.usable), ("COPIED", False))
+        self.assertFalse(S.valid_id(d.project_id + "\n"))                 # strict ids (no trailing newline)
+
     def test_new_id_and_copied_folder_suffix(self):
         nid = S.new_project_id()
         d = S.resolve(self.toe, "", self.priv, self.reg, new_id=nid, location=self.loc)

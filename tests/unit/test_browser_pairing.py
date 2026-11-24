@@ -62,6 +62,16 @@ class PairingTests(unittest.TestCase):
         with self.assertRaises(PermissionError):
             self.a.request()
 
+    def test_sessions_expire(self):
+        s, _ = self.a.request()
+        self.a.approve()
+        _, (sid, csrf) = self.a.poll(A._h(s))
+        self.assertIsNotNone(self.a.check("admin_session+csrf", hdrs(sid, csrf)))
+        self.c.t += self.a.session_seconds + 1
+        self.assertIsNone(self.a.check("admin_session+csrf", hdrs(sid, csrf)))    # expired: refused
+        self.assertIsNone(self.a.check("admin_session+csrf", hdrs(sid, "wrong")))
+        self.assertEqual(self.a.active_sessions(), 0)
+
     def test_one_session_at_a_time_and_logout(self):
         s1, _ = self.a.request()
         self.a.approve()
