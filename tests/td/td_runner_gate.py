@@ -573,7 +573,8 @@ def native_onboard(comp, ext, T, frames, until, checkpoint, R):
     T("connect.CONSENT_SHOWS_THE_PLAN", all(x in flat for x in (
         "~/.claude.json", "other servers kept", "Turns ON Enable MCP", "Undo", "Builder", "/project1/fx/**",
         "protected storage", "backup", "Then start a new Claude Code chat")) and
-      d["buttons"] == ["Approve", "Cancel"] and all(len(x) <= 25 for x in text.splitlines()),
+      d["buttons"] == ["Approve", "Cancel"] and all(len(x) <= 25 for x in sys.modules["tdflowmcp_td.connection"]
+                                                       .wrap_dialog(text).splitlines()),   # as the dialog shows it
       text=text, buttons=d["buttons"])
     T("connect.FULL_PLAN_IN_THE_VIEWER", all(x in full for x in ("other-server", "TURNED ON", "Disconnect Agent")),
       full=full[:300])
