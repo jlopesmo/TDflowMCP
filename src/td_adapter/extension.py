@@ -51,17 +51,18 @@ class TDflowMCPExt:
         self.manifest = ownerComp.op("loader").module.install_from_comp(ownerComp)
         from tdflowmcp import SKILL_VERSION, __version__, admin, auditworker, compat, controller, engine, identity, \
             policy, protocol, setupapi, skills, storage, store, tellagent, tools
-        from tdflowmcp import approvals, dashboard, memory, memrepo
+        from tdflowmcp import approvals, dashboard, memory, memrepo, readiness
         from tdflowmcp.net import bindverify, evidence, oslisteners, oswindow
         from tdflowmcp.net.pyhttp import EmbeddedHTTPTransport, MainStepError, Response, error
-        from tdflowmcp_td import tdops
+        from tdflowmcp_td import native, tdops
         self._m = types.SimpleNamespace(compat=compat, controller=controller, setupapi=setupapi, tellagent=tellagent,
                                         evidence=evidence, oslisteners=oslisteners, bindverify=bindverify,
                                         Transport=EmbeddedHTTPTransport, Response=Response, error=error, admin=admin,
                                         engine=engine, identity=identity, policy=policy, protocol=protocol,
                                         store=store, tools=tools, tdops=tdops, auditworker=auditworker,
                                         storage=storage, MainStepError=MainStepError, skills=skills,
-                                        memory=memory, memrepo=memrepo, oswindow=oswindow, approvals=approvals, dashboard=dashboard)
+                                        memory=memory, memrepo=memrepo, oswindow=oswindow, approvals=approvals, dashboard=dashboard,
+                                        readiness=readiness, native=native)
         self.skill_version = SKILL_VERSION
         self.version = __version__
         old = _REGISTRY.instances.get(ownerComp.id)
@@ -81,10 +82,13 @@ class TDflowMCPExt:
         self.frame_errors = 0
         self.last_frame_error = ""
         self.launcher = self._default_launcher          # replaceable by in-TD tests (must stay TD-free)
+        self._launch_target = "/setup/"
+        self._ticket_note = None                 # set on a handler thread, shown on the main thread
+        self._ux_at, self._ux_vals = -1e9, {}      # throttled readiness/agent lines (see _publish)
         self.clipboard_writer = self._default_clipboard  # main thread only
         self.tell_text = ""
         self.note, self._note_until, self._note_at = "", 0.0, 0.0
-        self._msg, self._msg_at = "", 0.0
+        self._msg, self._msg_at = None, -1e9         # the initial controller message is not "recent" (UX)
         self._static_facts = None
         self._published = {}
         self._dash = {}                  # main thread publishes; dashboard handler threads read (plain values)
@@ -131,9 +135,11 @@ class TDflowMCPExt:
             own_listeners=lambda port: oslisteners.read_listeners(port, os.getpid()),
             other_listeners=lambda port: oslisteners.other_listeners(port, os.getpid()),
             probe_owner=lambda port: c.Background(evidence.responds_like_tdflowmcp, port, name="tdflowmcp-probe"),
-            launch=lambda url: c.Background(self.launcher, url, name="tdflowmcp-browser"),
+            launch=lambda url: c.Background(self.launcher, self._launch_url(url), name="tdflowmcp-browser"),
         )
         self.ctl = c.Controller(deps, port=int(ownerComp.par.Port.eval()))
+        self.native = native.Native(self)
+        self._auto_diag = True                   # first frame: safe automatic checks (no listener, no store)
         if ownerComp.par.Enablemcp.eval():          # never re-enable silently after a reload
             ownerComp.par.Enablemcp.val = False
         self.suspended = bool(ownerComp.par.Suspendagents.eval())
@@ -165,7 +171,8 @@ class TDflowMCPExt:
                               not_cooking_after=2.0, paused_fn=paused, paused_verify=paused_verify,
                               paused_reverify_s=self.ctl.reverify_seconds, idle_seconds=self.ctl.idle_seconds,
                               paused_verify_timeout=self.ctl.evidence_timeout,
-                              route_handlers={"mcp": self._route_mcp, "api": self._route_api})
+                              route_handlers={"mcp": self._route_mcp, "api": self._route_api,
+                                              "pair": self._route_pair})
         t.set_static(self._static_assets())
         t.suspended = self.suspended
         return t
@@ -189,6 +196,14 @@ class TDflowMCPExt:
                     assets[info["serve"].rstrip("/")] = assets[info["serve"]]
         assets["/.well-known/tdflowmcp"] = ("application/json", self._m.setupapi.well_known(self.version))
         return assets
+
+    def _launch_url(self, url):
+        """Main thread, when the controller launches the browser after the bind gate passed. TouchDesigner opened
+        this page itself, so it carries a single-use, 60-second sign-in ticket in the URL fragment (never sent to the
+        server, so never in its logs or a Referer header; the page strips it from the address bar and history)."""
+        target = self._launch_target if self._launch_target in ("/setup/", "/ui/") else "/setup/"
+        self._launch_target = "/setup/"
+        return url.replace("/setup/", target, 1) + "#t=" + self.admin.issue_ticket()
 
     @staticmethod
     def _default_launcher(url):
@@ -470,14 +485,104 @@ class TDflowMCPExt:
             "datadir_writable": writable, "storage_status": status, "storage_reason": reason,
             "audit_verify": (w.open_info or {}).get("verify") if (w is not None and w.available) else None,
             "instances": sf["instances"], "selftest": sf["selftest"],
+            "clients": self._client_facts(),
         }
 
+    def _client_facts(self):
+        sel = set(self.native.selected())
+        found = set(self.native.detected)
+        out = {}
+        for c in (self.clients or {}).get("clients", []):
+            if c["id"] in sel or c["id"] in found:
+                out[c["id"]] = {"selected": c["id"] in sel, "support": c.get("support"), "found": c["id"] in found}
+        return out
+
     def RunDiagnostics(self, full=True):
+        """Safe at any time (also automatically on load): no listener, no store, no installs, no agent started.
+        Checks that need a listener or a connection stay 'not yet verified' until MCP is enabled."""
+        try:
+            self.native.detect()
+        except Exception:
+            self.native.detected = []
         self.checks = self._m.compat.run_checks(self._facts(full))
         self.checks_at = time.monotonic()
+        self._write_diagnostics()
         self._refresh_tell()
         self._publish()
         return self.checks
+
+    def _write_diagnostics(self):
+        R = self._m.readiness
+        names = [self._m.tellagent.display(self.clients, i) for i in self.native.detected]
+        text = R.report(self.checks, (self.troubleshooting or {}).get("entries", {}), names)
+        text += "\n\n" + "\n".join(f"{k}: {v}" for k, v in self._readiness()["summary"].items())
+        dat = self.ownerComp.op("diagnostics")
+        if dat is not None and dat.text != text:
+            dat.text = text
+
+    def _seen(self):
+        eng = self.engine
+        return dict(eng.seen) if eng is not None else {}
+
+    def _connected_rows(self):
+        eng, idn = self.engine, self.identity
+        if eng is None or idn is None:
+            return []
+        rows = []
+        for aid, v in dict(eng.seen).items():
+            a = idn.agents.get(aid)
+            if a is not None and a.enabled:
+                rows.append({"agent": a.display_name, "agent_id": aid, "client": self._client_display(v.get("client"))
+                             or a.display_name,
+                             "last": v["last"]})
+        return rows
+
+    def _client_display(self, name):
+        """The registry's display name for an MCP clientInfo name such as 'claude-code' (allowlisted text only)."""
+        n = str(name or "").lower()
+        for c in (self.clients or {}).get("clients", []):
+            if c["id"] != "other" and (c["id"] in n or c["id"].split("-")[0] in n):
+                return c.get("display", c["id"])
+        return ""
+
+    def _readiness(self):
+        R = self._m.readiness
+        idn = self.identity
+        enabled = sum(1 for a in idn.agents.values() if a.enabled) if idn is not None else 0
+        r = R.evaluate({"checks": [{"id": c.id, "result": c.result} for c in self.checks],
+                        "store_open": bool(self.store is not None and self.store.available),
+                        "agents_enabled": enabled, "mcp_on": self.mcp_on, "suspended": self.suspended,
+                        "error_code": self.ctl.error_code, "connected": self._connected_rows(), "now": time.time(),
+                        "client": self.native.client_label(), "handoff": bool(self.native.handoff)})
+        r["summary"] = {"Environment Ready": r["environment"]["state"], "MCP Ready": r["mcp"]["state"],
+                        "MCP Enabled": "yes" if r["mcp_enabled"] else "no",
+                        "Agent Connected": "yes" if r["agent_connected"] else "no"}
+        return r
+
+    def _open_browser(self, target):
+        """Open Setup / Open Dashboard: start the listener if needed (gate first); the page opens signed in."""
+        self._launch_target = target
+        self.ctl.apply_pending_port()
+        other = self._local_port_user(self.ctl.port)
+        if not other:
+            self.ensure_store(restart=True)       # opens in the background (sign-in and pairing need the audit)
+        self.RunDiagnostics()
+        if other:
+            self.ctl.refuse("PORT_IN_USE", other, "in use by this TouchDesigner process")
+        else:
+            self.ctl.open_setup()
+
+    def _manage_agents(self):
+        c = self.ownerComp
+        try:
+            c.openParameters()
+        except Exception:
+            pass
+        try:
+            c.currentPage = "Agents"
+        except Exception:
+            pass
+        self._set_note("Agents page: select an agent to change its scopes, tokens and state; approvals are at the bottom.")
 
     def _memory_ops(self):
         return self.tdops or self._m.tdops.TDAdapter(self.ownerComp, lambda: self._root_text, lambda: None)
@@ -513,9 +618,12 @@ class TDflowMCPExt:
 
     def _refresh_tell(self):
         ctl = self.ctl
+        p = self.ownerComp.par
+        access = str(p.Agentaccess.menuLabels[p.Agentaccess.menuIndex]) if hasattr(p, "Agentaccess") else ""
         self.tell_text = self._m.tellagent.build(self._state_value(), ctl.error_code, ctl.port, self.td_build,
                                                  self.checks, self.troubleshooting, self.version, self.clients,
-                                                 memory_lines=self._memory_lines())
+                                                 memory_lines=self._memory_lines(), selected=self.native.selected(),
+                                                 access=access)
         dat = self.ownerComp.op("tellagent")
         if dat is not None and dat.text != self.tell_text:
             dat.text = self.tell_text
@@ -529,19 +637,42 @@ class TDflowMCPExt:
     # ---- parameter callbacks (main thread) ------------------------------------------------------
     def OnPulse(self, par):
         n = par.name
+        self._ux_at = -1e9                           # recompute the status lines right after a user action
         t = self.ctl.transport
         if t is not None:
             t.touch_activity()                       # the user acted in TouchDesigner (idle stop, D20)
+        N = self.native
         if n == "Opensetup":
-            self.ctl.apply_pending_port()
-            other = self._local_port_user(self.ctl.port)
-            if not other:
-                self.ensure_store(restart=True)       # opens in the background (pairing needs the audit)
+            self._open_browser("/setup/")
+        elif n in ("Opendashboard", "Webdashboard"):
+            self._open_browser("/ui/")
+        elif n == "Connectagent":
+            N.connect()
+        elif n == "Copytoken":
+            N.copy_token()
+        elif n == "Manageagents":
+            self._manage_agents()
+        elif n == "Viewdiagnostics":
             self.RunDiagnostics()
-            if other:
-                self.ctl.refuse("PORT_IN_USE", other, "in use by this TouchDesigner process")
-            else:
-                self.ctl.open_setup()
+            N._show("diagnostics", self.ownerComp.op("diagnostics").text)
+        elif n == "Viewagents":
+            N.view_agents(self._seen())
+        elif n in ("Addscope", "Removescope"):
+            N.scope(n == "Addscope")
+        elif n in ("Enableagent", "Disableagent"):
+            N.set_enabled(n == "Enableagent")
+        elif n == "Rotatetoken":
+            N.rotate()
+        elif n == "Revoketokens":
+            N.revoke_all()
+        elif n == "Viewapproval":
+            N.view_approval()
+        elif n in ("Approverequest", "Denyrequest"):
+            N.decide(n == "Approverequest")
+        elif n == "Endbrowsersession":
+            self.admin.logout_all()
+            self._audit_async("admin", tool="logout_all", detail={"via": "touchdesigner"})
+            self._set_note("Every browser was signed out.")
         elif n == "Stopserver":
             self.ctl.stop("user")
         elif n == "Rundiagnostics":
@@ -563,6 +694,7 @@ class TDflowMCPExt:
 
     def OnValueChange(self, par, prev):
         n = par.name
+        self._ux_at = -1e9
         if n == "Port":
             self.ctl.set_port(int(par.eval()))
         elif n == "Enablemcp":
@@ -576,6 +708,8 @@ class TDflowMCPExt:
                 root = td.op(self.engine.policy.root) if self.engine is not None else None
                 if self.mcp_on and (root is None or not root.isCOMP):
                     self._mcp_off("Project Root is not an existing component; MCP was turned off.")
+        elif n == "Agentselect":
+            self.native.on_select()
         elif n == "Datalocation":
             if self.mcp_on:
                 self._mcp_off("Data Location changed, so MCP was turned off. Pulse Confirm Move to move the data.")
@@ -603,7 +737,7 @@ class TDflowMCPExt:
     def _create_memory(self):
         w = self.worker
         if w is None or not w.available:
-            self._set_note("Pulse Open Setup first: creating project memory is recorded in the audit log.", 20)
+            self._set_note("Pulse Connect Agent (or Open Setup) first: creating project memory is recorded in the audit log.", 20)
             return
         try:
             path, mid = self._memory_ops().create_memory(near=self.ownerComp)
@@ -618,7 +752,7 @@ class TDflowMCPExt:
         or edits outside TDflowMCP). Takes effect only once the claim event is durable."""
         w = self.worker
         if w is None or not w.available:
-            self._set_note("Pulse Open Setup first: claiming project memory is recorded in the audit log.", 20)
+            self._set_note("Pulse Connect Agent (or Open Setup) first: claiming project memory is recorded in the audit log.", 20)
             return
         M, R = self._m.memory, self._m.memrepo
         info = self._memory_ops().memory_info(with_dats=False)
@@ -810,7 +944,7 @@ class TDflowMCPExt:
             self.tdops.refresh_protected()
             t.mcp_enabled = True
             self.mcp_on = True
-            self._set_note(f"MCP enabled at http://127.0.0.1:{self.ctl.port}/mcp.")
+            self._set_note(f"MCP enabled. Waiting for {self.native.client_label()} to connect.")
 
         def verified(res):
             if not res[0].get("ok"):
@@ -886,6 +1020,13 @@ class TDflowMCPExt:
         try:
             CS = self._m.controller.CompState
             self._poll_pending()
+            tn, self._ticket_note = self._ticket_note, None
+            if tn:
+                self._set_note(tn, 120 if "twice" in tn else 20)
+            if self._auto_diag:                      # drop-in, project open, reinit: safe checks only
+                self._auto_diag = False
+                self.RunDiagnostics()
+            self.native.tick()
             w = self.worker
             if w is not None and w.ready.is_set():
                 if w.available and self.identity is None:
@@ -1019,6 +1160,8 @@ class TDflowMCPExt:
     def _dispatch_pair(self, job):
         R, E, A = self._m.Response, self._m.error, self._m.admin
         D = self._m.setupapi.dumps
+        if job.path == "/setup/api/pair/ticket":
+            return self._m.error(404, "NOT_FOUND")             # handled on a handler thread (_route_pair)
         pair_hash = str(job.principal)[len("pair:"):]
         if job.method == "POST":
             try:
@@ -1044,6 +1187,78 @@ class TDflowMCPExt:
         return R(200, D({"state": state, "match_code": pend["code"] if pend and state == "pending" else None}),
                  "application/json")
 
+    def _route_pair(self, ctx):
+        """Handler thread. Only the one-click ticket is handled here (pairing stays on the main thread): the attempt is
+        recorded durably before any session exists (review 18), so it can wait for the audit worker."""
+        if ctx.path != "/setup/api/pair/ticket":
+            return None
+        R, E, A, D = self._m.Response, self._m.error, self._m.admin, self._m.setupapi.dumps
+        st = self.store
+        if st is None or not st.available:
+            return E(503, "AUDIT_UNAVAILABLE")              # never a session the audit log does not know about
+        body = self._admin_body(ctx.body or b"") or {}
+        try:
+            st.append("admin", tool="browser_ticket", outcome="redeeming")
+        except self._m.store.AuditUnavailable:
+            return E(503, "AUDIT_UNAVAILABLE")
+        status, creds = self.admin.redeem_ticket(str(body.get("ticket", "")))
+        if status == "intercepted":
+            self._intercepted()
+            return E(401, "TICKET_INVALID")
+        if status == "rate_limited":
+            return E(429, "RATE_LIMITED", [("Retry-After", "60")])
+        if status != "ok":
+            self._audit_async("admin", tool="browser_ticket", outcome="refused", error_code="TICKET_INVALID")
+            self._ticket_note = "A browser presented an invalid or used sign-in link. Pulse Open Setup to sign in."
+            return E(401, "TICKET_INVALID")
+        sid, csrf = creds
+        self._audit_async("admin", tool="browser_ticket", outcome="ok")
+        self._ticket_note = "Browser signed in (opened from TouchDesigner, " + str(self.admin.last_browser_auth) + ")."
+        return R(200, D({"state": "approved", "csrf": csrf}), "application/json",
+                 (A.set_cookie(A.SESSION_COOKIE, sid, int(self.admin.session_seconds), "/"),))
+
+    def _intercepted(self):
+        """Handler thread. A used sign-in link came back seconds later: another program raced the page. Every admin
+        session already ended; fail closed on top (review 18): suspend all agents, revoke tokens and disable agents
+        created since that sign-in, and turn Code Mode off. Each step is audited; the user reviews the audit log."""
+        st, idn = self.store, self.identity
+        since = (self.admin.intercepted_at or time.time()) - 1
+        try:
+            st.append("admin", tool="browser_ticket", outcome="intercepted", error_code="TICKET_REUSED",
+                      detail={"since": since})
+        except Exception:
+            pass
+        self._dash_kill(True, st)                            # immediate, needs no frames; audited
+        revoked, disabled = [], []
+
+        def after(iso):
+            try:
+                return time.mktime(time.strptime(str(iso), "%Y-%m-%dT%H:%M:%SZ")) - time.timezone >= since
+            except (ValueError, OverflowError):
+                return True                                  # unreadable: treat as recent (fail closed)
+        try:
+            with self._admin_lock:
+                for t in list(idn.tokens.values()):
+                    if not t.revoked_at and after(t.created_at):
+                        st.append("admin", tool="revoke_token", detail={"token_id": t.token_id, "why": "intercepted"})
+                        idn.revoke(t.token_id)
+                        revoked.append(t.token_id)
+                for aid, created in list(idn.created.items()):
+                    if after(created) and idn.agents.get(aid) is not None and idn.agents[aid].enabled:
+                        st.append("admin", tool="agent_disable", agent_id=aid, detail={"why": "intercepted"})
+                        idn.set_enabled(aid, False)
+                        disabled.append(aid)
+                if getattr(self, "_code_mode", False):
+                    st.append("admin", tool="setting", detail={"code_mode": False, "why": "intercepted"})
+                    st.set_private_setting("code_mode", "0")
+                    self._code_mode = False
+                    if self.engine is not None:
+                        self.engine.code_mode = False
+        except Exception:
+            pass
+        self._ticket_note = ("A sign-in link was used twice, so another program may have read it. Browsers were signed "
+                             f"out, agents suspended, {len(revoked)} new token(s) revoked. Review the audit log.")
+
     # -- admin (paired session, handler thread) --
     def _admin_body(self, body):
         if len(body) > MAX_ADMIN_BODY:
@@ -1065,6 +1280,10 @@ class TDflowMCPExt:
         AU = self._m.store.AuditUnavailable
         st, idn = self.store, self.identity
         p, m = ctx.path, ctx.method
+        if m == "POST" and self.admin.warming(str(ctx.principal)):
+            # Review 18: a session born from a sign-in link changes nothing for its first seconds; the real page has
+            # redeemed by then, so a raced session is ended before it can act.
+            return E(409, "SESSION_STARTING")
         if p.startswith("/api/"):
             return self._dashboard_api(ctx, st, idn)
         if m == "GET" and p == "/setup/api/skills":
@@ -1241,8 +1460,13 @@ class TDflowMCPExt:
                     return ok({"sessions": st.sessions(limit=50)})
                 if p == "/api/agents":
                     agents = idn.public_list()
+                    seen, now = self._seen(), time.time()
                     for a in agents:
                         a["grants"] = st.grants_of(a["id"])
+                        v = seen.get(a["id"])          # the same source as Connected Agents in TouchDesigner
+                        a["last_seen_s"] = int(now - v["last"]) if v else None
+                        a["connected"] = bool(v and now - v["last"] <= self._m.readiness.CONNECTED_WITHIN_S
+                                              and a["enabled"])
                     return ok({"agents": agents, "project_root": self._root_text,
                                "roles": {r: sorted(v) for r, v in self._m.policy.ROLES.items()}})
                 if p == "/api/approvals":
@@ -1277,6 +1501,9 @@ class TDflowMCPExt:
                     cur = st.approval_get(aid)
                     if cur is None:
                         return refuse("APPROVAL_NOT_FOUND", "no such request", 404)
+                    want = body.get("args_sha256")
+                    if want is not None and want != cur["args_sha256"]:
+                        return refuse("APPROVAL_CHANGED", "this is not the request that was shown; view it again")
                     # The decision is in the audit log before it takes effect, with the digest it applies to.
                     st.append("admin", tool="approval_decide", approval_id=aid, agent_id=cur["agent_id"],
                               detail={"decision": decision, "args_sha256": cur["args_sha256"], "tool": cur["tool"]})
@@ -1297,6 +1524,25 @@ class TDflowMCPExt:
                     st.append("admin", tool="revoke_token", detail={"token_id": tid, "via": "dashboard"})   # durable first
                     done = idn.revoke(tid)
                 return ok({"revoked": done}, 200 if done else 404)
+            if p == "/api/agents/rotate":
+                # Native and web parity: revoke all of an agent's tokens and (unless revoke_only) issue one new token,
+                # shown once. Durable first.
+                aid = str(body.get("agent_id", ""))[:32]
+                if aid not in idn.agents:
+                    return refuse("NOT_FOUND", "no such agent", 404)
+                only = body.get("revoke_only") is True
+                with self._admin_lock:
+                    live = [t.token_id for t in idn.tokens.values() if t.agent_id == aid and not t.revoked_at]
+                    st.append("admin", tool="revoke_agent_tokens" if only else "rotate_token", agent_id=aid,
+                              detail={"revoke": live})
+                    failed = [tid for tid in live if not idn.revoke(tid)]
+                    if failed:
+                        return refuse("REVOKE_FAILED", "some tokens could not be revoked; nothing new was issued", 500)
+                    token = None if only else idn.issue_token(aid)
+                    if token:
+                        st.append("admin", tool="rotate_token", agent_id=aid, outcome="ok",
+                                  detail={"new_token_id": token.split(".", 1)[0][len("tdf_"):]})
+                return ok({"agent_id": aid, "token": token, "shown_once": bool(token), "revoked": live})
             if p == "/api/agents/state":
                 aid, enabled = str(body.get("agent_id", ""))[:32], body.get("enabled") is True
                 if aid not in idn.agents:
@@ -1776,12 +2022,20 @@ class TDflowMCPExt:
     def _status_detail(self):
         """One short line (owner UX correction): the latest note while it is fresh, else the state message."""
         now, msg = time.monotonic(), self.ctl.message
-        if msg != self._msg:
+        if self._msg is None:
+            self._msg = msg
+        elif msg != self._msg:
             self._msg, self._msg_at = msg, now
         fresh = bool(self.note) and now < self._note_until
         # The newer of the two wins; listener errors always win (they explain why nothing works).
         use_note = fresh and self._note_at >= self._msg_at and self.ctl.state is not self._m.controller.CompState.ERROR
-        text = " ".join(str(self.note if use_note else msg).split())
+        CS = self._m.controller.CompState
+        # A controller message explains a transition for 30 s (also a browser-launch failure); once MCP is on, the
+        # readiness line says more. Errors and transitions always show the controller's message.
+        recent_msg = (now - self._msg_at < 30 and not (self.ctl.state is CS.SETUP and self.mcp_on)) or \
+            self.ctl.state in (CS.ERROR, CS.STARTING, CS.STOPPING)
+        base = msg if (recent_msg and msg) else getattr(self, "_ready_line", msg)
+        text = " ".join(str(self.note if use_note else base).split())
         if len(text) > 160:                      # one item, never message + note (full details: Setup page)
             cut = text[:160]
             dot = cut.rfind(". ")
@@ -1792,18 +2046,40 @@ class TDflowMCPExt:
         p, ctl = self.ownerComp.par, self.ctl
         pend = self.admin.pending_view()
         n_agents = len(self.identity.agents) if self.identity else 0
-        vals = {
+        now = time.monotonic()
+        if now - self._ux_at >= 0.25:
+            # Readiness, the agent menu and the per-agent lines are recomputed at most 4 times a second (and at once
+            # after a pulse or a parameter change): the per-frame cost stays small (gate suite OnFrame budget).
+            self._ux_at = now
+            rd = self._readiness()
+            self._ready_line = rd["line"]
+            self.native.refresh_menu()
+            conn = rd["connected"]
+            seen = self._seen()
+            self._ux_vals = {
+                "Connectedagents": (", ".join(f"{r['client']} ({r['age_s']} s ago)" for r in conn[:3]) if conn else
+                                    ("none yet (MCP is on)" if self.mcp_on else "none (MCP is off)"))[:200],
+                "Agentinfo": self.native.info_line(seen),
+                "Approvalsummary": self.native.approval_line() if self.mcp_on else "none (MCP is off)",
+                "Websession": (f"{self.admin.active_sessions()} signed in" + (
+                    f" (last sign-in {self.admin.last_browser_auth})" if self.admin.last_browser_auth else ""))
+                if self.admin.active_sessions() else "none",
+                "Agentsummary": f"{n_agents} agent{'' if n_agents == 1 else 's'} · {len(conn)} connected",
+            }
+        vals = dict(self._ux_vals)
+        vals.update({
             "Status": self._state_value() + (f": {ctl.error_code}" if ctl.error_code else ""),
             "Statusdetail": self._status_detail(),
+            "Buildinfo": f"TD {self.td_build} · Py {sys.version_info[0]}.{sys.version_info[1]}.{sys.version_info[2]} · "
+                         f"Skill {self.skill_version}",
             "Setupurl": ctl.url if ctl.state is self._m.controller.CompState.SETUP else "",
             "Portstatus": ctl.portstatus,
-            "Compatsummary": self._m.compat.summary(self.checks) if self.checks else "not run",
+            "Compatsummary": self._m.readiness.system_line(self.checks) if self.checks else "not run",
             "Tellagent": self._m.tellagent.one_line(ctl.state.value, ctl.error_code, self.checks, self.version),
             "Pairingrequest": (f"Pending: {pend['code']} ({pend['wall']})" if pend and pend["state"] == "pending" else ""),
-            "Agentsummary": f"{n_agents} agent(s) · {self.admin.active_sessions()} admin session(s)",
             "Datadir": self._data_display(),
             "Datastatus": self._data_status(),
-        }
+        })
         for k, v in vals.items():
             if self._published.get(k) != v and hasattr(p, k):
                 getattr(p, k).val = v

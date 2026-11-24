@@ -137,8 +137,24 @@ class Engine:
         self.main = main or (lambda fn: fn())
         self.audit_failed = False                  # sticky: an outcome could not be recorded
         self.code_mode = False                     # ADR-0004: off until the user turns it on (dashboard)
+        self.seen: Dict[str, dict] = {}            # agent_id -> {last, client}: authenticated requests (UX: Connected)
         self.leases: Dict[str, dict] = {}          # Phase 4: scope -> {agent_id, expires} (memory; audited)
         self._lease_lock = threading.RLock()       # re-entrant: _lease checks holders while holding it
+
+    def _mark_seen(self, agent_id: str, client_info) -> None:
+        """Any thread: an authenticated request from this agent arrived (the basis of 'Agent Connected')."""
+        name = ""
+        if isinstance(client_info, dict):
+            name = str(client_info.get("name") or "")[:40]
+        elif isinstance(client_info, str):          # the redacted JSON text of the client's clientInfo
+            try:
+                import json as _json
+                v = _json.loads(client_info)
+                name = str(v.get("name") or "")[:40] if isinstance(v, dict) else ""
+            except ValueError:
+                name = client_info[:40]
+        prev = self.seen.get(agent_id) or {}
+        self.seen = dict(self.seen, **{agent_id: {"last": time.time(), "client": name or prev.get("client", "")}})
 
     def suspended(self) -> bool:
         return self.audit_failed or bool(self._suspended())
@@ -153,6 +169,8 @@ class Engine:
     # ---- MCP host for one caller ---------------------------------------------------------------
     def list_tools(self, token_id: str) -> List[dict]:
         agent = self.identity.agent_for_token(token_id)
+        if agent is not None:
+            self._mark_seen(agent.id, None)
         if agent is None or self.suspended():
             return []
         return [t.describe() for t in self.registry.all() if t.name in self.active
@@ -176,6 +194,7 @@ class Engine:
         if agent is None:
             return self._deny(base, "DENIED", "A0", "token revoked or agent disabled", None)
         base["agent_id"] = agent.id
+        self._mark_seen(agent.id, ci)
         with self._sess_lock:
             base["session_id"] = self.sessions.session_for(token_id, ci)
         if self.suspended():

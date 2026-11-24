@@ -82,7 +82,7 @@ def classify(path: str) -> str:
         return "well_known"
     if path == "/api/events":
         return "events"
-    if path in ("/setup/api/pair", "/setup/api/pair/status"):
+    if path in ("/setup/api/pair", "/setup/api/pair/status", "/setup/api/pair/ticket"):
         return "pair"
     if path.startswith("/setup/api/") or path.startswith("/api/"):
         return "api"
@@ -185,6 +185,11 @@ def decide(method: str, raw_path: str, headers: Mapping[str, str], state: Listen
             if origin != cfg.canonical_origin:
                 return d(False, 403, "BAD_ORIGIN")
             return d(True, 200, "OK", "pair")
+        if method == "POST" and path == "/setup/api/pair/ticket":
+            # One-click authorization: the ticket itself (in the body) is the credential; exact Origin required.
+            if origin != cfg.canonical_origin:
+                return d(False, 403, "BAD_ORIGIN")
+            return d(True, 200, "OK", "")
         if method == "GET" and path == "/setup/api/pair/status":
             if origin is not None and origin != cfg.canonical_origin:
                 return d(False, 403, "BAD_ORIGIN")

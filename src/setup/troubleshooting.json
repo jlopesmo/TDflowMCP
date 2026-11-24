@@ -8,7 +8,7 @@
       "confirm": "Compare the build shown on the component's Version/Status with 2025.32440.",
       "steps": [
         "Use TouchDesigner 2025.32440 or newer (TDflowMCP never installs it).",
-        "Open your project with that build and pulse Run checks again."
+        "Open your project with that build and pulse Run Diagnostics again."
       ],
       "docs": [
         "https://derivative.ca/download"

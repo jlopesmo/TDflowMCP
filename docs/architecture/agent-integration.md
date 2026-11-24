@@ -18,7 +18,16 @@
   "verified": { "client_version": null, "date": null, "evidence": null } }
 ```
 
-Support levels: `primary` (tested each release), `verified` (tested once, date recorded), `documented` (from vendor docs only), `unsupported`. A client is never shown as `verified` without a recorded test in `validation-index.md`. Example values above are **placeholders to verify**.
+**Selection and Auto (owner UX assignment D21, implemented).**
+- **The Coding Agent menu** (Auto, Claude Code, OpenAI Codex, Cursor, VS Code Copilot, Other MCP Client) picks which registry entries the instructions show. It never changes the protocol or permissions.
+- **Auto** looks up each entry's `detect` names on PATH with `shutil.which`. It never runs them and never reports paths.
+  - One found: that client.
+  - Several found: all of them, and the status says "your agent".
+  - None found: the generic `other` entry (any MCP client with Streamable HTTP and an Authorization header).
+- **Grok** is not listed: no compatible MCP client and configuration method has been verified, and a model is not a client.
+- **Several agents** each get their own identity, token, permissions and status.
+
+Support levels: `primary` (tested each release), `verified` (tested once, date recorded), `documented` (from vendor docs only), `generic` (the `other` entry), `unsupported`. A client is never shown as `verified` without a recorded test in `validation-index.md`. Example values above are **placeholders to verify**.
 
 ## 2. Skills bundle
 

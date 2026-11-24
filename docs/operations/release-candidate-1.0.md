@@ -1,6 +1,16 @@
 # TDflowMCP 1.0 release candidate: changelog, compatibility and acceptance checklist
 
-**Status:** candidate for the owner's acceptance (owner D20). This is **not a release**: nothing is merged to `main`, tagged or published. The release steps that remain are the owner's ([verification and release §4](verification-and-release.md#4-release-proposed)).
+**Current candidate: `1.0.0rc2`** (first-run UX redesign, owner D21). `1.0.0rc1` (`348360a`, package `TDflowMCP-1.0.0rc1-348360a56b`, tox `394e1043…`) is the baseline it replaces. That baseline is preserved in the validation index, and its owner acceptance found the setup confusing.
+
+## Changes in rc2
+- Automatic and manual diagnostics; four readiness states; four parameter pages; context-aware Next Step.
+- Coding Agent menu with Auto; Connect Agent; Copy Token.
+- Native management of agents, scopes, tokens and approvals; one-click browser sign-in; dashboard parity (connection column, New token).
+- Security review 18 addressed.
+- Install guide rewritten for the TouchDesigner-first flow.
+- See the [record](../research/2026-11-23-first-run-ux.md).
+
+**Status:** candidate for the owner's acceptance (owner D20, D21). This is **not a release**: nothing is merged to `main`, tagged or published. The release steps that remain are the owner's ([verification and release §4](verification-and-release.md#4-release-proposed)).
 
 ## Changelog (from the Phase 0 foundation on `main`, `066dbd0`)
 - **Component (1A):**
@@ -37,6 +47,7 @@
   - `tdflow_lease_scope`;
   - the Code Mode benchmark.
 - **Tool surface:** 29 tools, `tool_surface_version` 1 (all additions additive). Skill `tdflow-core` 1.5.
+- **First-run UX (rc2):** diagnostics, readiness, native administration, one-click sign-in (above).
 
 ## Compatibility matrix (tested only)
 | Component | Tested | Result | Evidence |
@@ -55,8 +66,9 @@ No other compatibility is claimed.
 - [x] Unit tests, doc checker and secret scan pass on the candidate commit.
 - [x] `.tox` built reproducibly from source (two builds, equal source digest).
 - [x] All in-TD suites (1A, 1B, gate, memory, onboarding) pass on 2025.32440.
-- [x] The package is built from a clean worktree of the candidate commit (`348360a`, `dist/TDflowMCP-1.0.0rc1-348360a56b`, tox SHA-256 `394e10439ed3f3cf…`), and all five suites pass on the **packaged** `.tox` (validation index).
-- [x] Independent reviews for every security-sensitive increment (reviews 14–17 in this phase), findings addressed.
+- [ ] rc2: the package is built from a clean worktree of the candidate commit, and all suites pass on the **packaged** `.tox` (validation index). (rc1: done for `348360a`, package `TDflowMCP-1.0.0rc1-348360a56b`, tox `394e10439ed3f3cf…`.)
+- [x] Independent reviews for every security-sensitive increment (reviews 14–18), findings addressed.
+- [x] rc2: the TouchDesigner-only first run (drop-in → diagnostics → Connect Agent → Copy Token → Enable MCP → a live Claude Code session → Connected → Suspend/Resume → restart) passes on the candidate build (validation index).
 - [x] Real coding-agent dogfooding of the new tools (round 3 in the validation index; its one friction point fixed).
 - [ ] **CI evidence:** no GitHub Actions run has been observed (B3). Release procedure step 1 requires observed CI.
 - [ ] **Latest TD build:** not tested (release procedure step 1 asks for the minimum and the latest build).

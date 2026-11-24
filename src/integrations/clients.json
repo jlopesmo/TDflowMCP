@@ -45,7 +45,10 @@
         "client_version": null,
         "date": null,
         "evidence": null
-      }
+      },
+      "detect": [
+        "claude"
+      ]
     },
     {
       "id": "codex",
@@ -66,7 +69,10 @@
         "client_version": null,
         "date": null,
         "evidence": null
-      }
+      },
+      "detect": [
+        "codex"
+      ]
     },
     {
       "id": "cursor",
@@ -94,7 +100,10 @@
         "client_version": null,
         "date": null,
         "evidence": null
-      }
+      },
+      "detect": [
+        "cursor"
+      ]
     },
     {
       "id": "vscode-copilot",
@@ -126,12 +135,40 @@
         "client_version": null,
         "date": null,
         "evidence": null
-      }
+      },
+      "detect": [
+        "code"
+      ]
+    },
+    {
+      "id": "other",
+      "display": "Other MCP client",
+      "support": "generic",
+      "docs": "",
+      "mcp": {
+        "transport": "streamable-http",
+        "config_file_note": "Any MCP client that supports Streamable HTTP and a custom Authorization header: server name tdflow, URL {url}, header Authorization: Bearer <token from the TDFLOW_TOKEN environment variable>. Follow your client's documentation.",
+        "json": {
+          "mcpServers": {
+            "tdflow": {
+              "type": "http",
+              "url": "{url}",
+              "headers": {
+                "Authorization": "Bearer ${TDFLOW_TOKEN}"
+              }
+            }
+          }
+        }
+      },
+      "skills": {},
+      "detect": [],
+      "verified": {}
     }
   ],
   "token_env": {
     "bash": "read -rs TDFLOW_TOKEN && export TDFLOW_TOKEN   # paste the token, press Enter (not echoed, not in history)",
     "zsh": "read -rs TDFLOW_TOKEN && export TDFLOW_TOKEN   # paste the token, press Enter (not echoed, not in history)",
     "powershell": "$env:TDFLOW_TOKEN = [Net.NetworkCredential]::new('', (Read-Host -AsSecureString 'TDflowMCP token')).Password   # this terminal only; Windows PowerShell 5.1 and 7"
-  }
+  },
+  "detect_policy": "Auto detection looks up the names in 'detect' on PATH (shutil.which). It never runs them and never reports paths; a found name is a hint, not proof that the client works."
 }

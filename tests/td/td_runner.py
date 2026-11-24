@@ -21,11 +21,18 @@ TOX = os.environ.get("TDFLOW_TOX", "")
 ROOT = os.environ.get("TDFLOW_SRC_ROOT", "")
 MODE = os.environ.get("TDFLOW_TEST_MODE", "full")
 MAIN = threading.main_thread()
-EXPECTED_PARS = ["Version", "Status", "Statusdetail", "Opensetup", "Setupurl", "Enablemcp", "Suspendagents",
-                 "Pairingrequest", "Approvepairing", "Rejectpairing", "Agentsummary", "Tellagent", "Copytellagent",
-                 "Viewinstructions", "Stopserver", "Rundiagnostics", "Compatsummary", "Port", "Portstatus",
+EXPECTED_PARS = ["Version", "Compatsummary", "Rundiagnostics", "Status", "Statusdetail", "Codingagent",
+                 "Agentaccess", "Allowedscope", "Connectagent", "Copytoken", "Enablemcp", "Suspendagents",
+                 "Tellagent", "Copytellagent", "Viewinstructions", "Connectedagents", "Manageagents",
+                 "Opendashboard", "Agentsummary", "Agentselect", "Agentinfo", "Agentscope", "Addscope",
+                 "Removescope", "Enableagent", "Disableagent", "Rotatetoken", "Revoketokens", "Viewagents",
+                 "Approvalsummary", "Viewapproval", "Approverequest", "Denyrequest", "Opensetup", "Webdashboard",
+                 "Websession", "Setupurl", "Pairingrequest", "Approvepairing", "Rejectpairing",
+                 "Endbrowsersession", "Buildinfo", "Viewdiagnostics", "Stopserver", "Port", "Portstatus",
                  "Projectroot", "Datalocation", "Datadir", "Datastatus", "Confirmmove", "Claimproject",
                  "Createprojectmemory", "Claimprojectmemory", "Projectid", "Loglevel"]
+EXPECTED_PAGES = ["TDflowMCP", "Agents", "Web", "Advanced"]
+READONLY_PARS = ["Version", "Compatsummary", "Status", "Statusdetail", "Tellagent", "Connectedagents", "Agentsummary", "Agentinfo", "Approvalsummary", "Websession", "Setupurl", "Pairingrequest", "Buildinfo", "Portstatus", "Datadir", "Datastatus", "Projectid"]
 
 R = {"mode": MODE, "tests": [], "harness": {}, "frames": [], "errors": []}
 S = {"gen": None, "wait": None, "label": "boot", "done": False}
@@ -73,7 +80,7 @@ def sha_text(text):
 
 
 def load():
-    if MODE == "memory_restart":                 # the reopened saved .toe already contains the component
+    if MODE in ("memory_restart", "native_restart"):                 # the reopened saved .toe already contains the component
         return td.op("/project1/TDflowMCP")
     comp = td.op("/project1").loadTox(TOX)
     return comp
@@ -91,19 +98,29 @@ def script():
     comp = load()
     yield frames(20)
     ext = comp.ext.TDflowMCPExt
-    if MODE.startswith(("gate", "perf", "onboard", "dogfood", "memory")):                 # audit-worker gate + 1B-vs-worker comparison
+    if MODE.startswith(("gate", "perf", "onboard", "dogfood", "memory", "native")):                 # audit-worker gate + 1B-vs-worker comparison
         ext.launcher = lambda url: True
         yield from __import__("td_runner_gate").run(MODE, comp, ext, T, frames, until, checkpoint, R)
         return
     T("load.component", comp is not None and comp.name == "TDflowMCP" and ext is not None)
     T("load.params", [p.name for p in comp.customPars] == EXPECTED_PARS, params=[p.name for p in comp.customPars])
     T("load.defaults", comp.par.Status.eval() == "Off" and comp.par.Port.eval() == 9480
-      and comp.par.Setupurl.eval() == "" and comp.par.Compatsummary.eval() == "not run",
-      status=comp.par.Status.eval(), port=comp.par.Port.eval())
+      and comp.par.Setupurl.eval() == "", status=comp.par.Status.eval(), port=comp.par.Port.eval())
+    # UX assignment: four pages; diagnostics run automatically on load, and safely (no listener, no store).
+    T("ux.PAGES", [pg.name for pg in comp.customPages] == EXPECTED_PAGES, pages=[pg.name for pg in comp.customPages])
+    T("ux.RUN_DIAGNOSTICS_ON_FIRST_PAGE", comp.par.Rundiagnostics.page.name == "TDflowMCP"
+      and comp.par.Connectagent.page.name == "TDflowMCP" and comp.par.Opensetup.page.name == "Web")
+    T("ux.AUTO_DIAGNOSTICS_ON_LOAD", comp.par.Compatsummary.eval().startswith(("Ready", "Partly", "Not ready")) and bool(ext.checks),
+      summary=comp.par.Compatsummary.eval())
+    T("ux.auto_diagnostics_open_nothing", ext.ctl.transport is None and ext.worker is None
+      and comp.par.Status.eval() == "Off", status=comp.par.Status.eval())
+    T("ux.unverified_checks_not_passed", all(c.result == "unknown" for c in ext.checks if c.id in ("net.bind", "fs.datadir",
+                                                                                          "audit.integrity")),
+      checks={c.id: c.result for c in ext.checks})
+    T("ux.next_step_is_context_aware", "Connect Agent" in comp.par.Statusdetail.eval()
+      or "not ready" in comp.par.Statusdetail.eval(), detail=comp.par.Statusdetail.eval())
     T("load.version", comp.par.Version.eval().startswith(ext.version), version=comp.par.Version.eval())
-    T("load.readonly", all(getattr(comp.par, n).readOnly for n in
-                           ("Version", "Status", "Statusdetail", "Setupurl", "Portstatus", "Compatsummary",
-                            "Tellagent", "Datadir", "Datastatus", "Projectid", "Pairingrequest", "Agentsummary")))
+    T("load.readonly", all(getattr(comp.par, n).readOnly for n in READONLY_PARS), readonly=READONLY_PARS)
     T("load.mcp_off_by_default", not comp.par.Enablemcp.eval() and not comp.par.Suspendagents.eval())
     man = json.loads(comp.op("manifest").text)
     mism = [n for n, m in man["modules"].items() if sha_text(comp.op("src").op(m["dat"]).text) != m["sha256"]]
@@ -144,7 +161,8 @@ def script():
     T("open.serving", comp.par.Status.eval() == "Setup", seconds=round(time.monotonic() - t0, 2),
       events=list(ext.ctl.events)[-4:])
     yield frames(15)
-    T("open.browser_launched_once_after_serving", len(calls) == 1 and calls[0]["url"] == "http://127.0.0.1:9480/setup/"
+    T("open.browser_launched_once_after_serving", len(calls) == 1 and calls[0]["url"].split("#")[0] == "http://127.0.0.1:9480/setup/"
+      and calls[0]["url"].split("#")[1].startswith("t=")
       and calls[0]["state"] == "Setup" and calls[0]["off_main"], calls=calls)
     T("open.setupurl", comp.par.Setupurl.eval() == "http://127.0.0.1:9480/setup/")
     T("open.portstatus", comp.par.Portstatus.eval() == "this component", portstatus=comp.par.Portstatus.eval())

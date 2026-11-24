@@ -68,7 +68,7 @@ def plan(out_tox: str) -> dict:
         callbacks[name] = dict(info, text=text, sha256=sha(text))
     params = json.loads(json.dumps(m["parameters"]).replace("{version}", f"{version} (tools {tool_surface})"))
     parts = sorted([("module", n, v["sha256"]) for n, v in modules.items()] +
-                   [("dat", n, v["sha256"]) for n, v in dats.items() if n != "tellagent"] +
+                   [("dat", n, v["sha256"]) for n, v in dats.items() if not v.get("runtime")] +
                    [("callback", n, v["sha256"]) for n, v in callbacks.items()] +
                    [("parameters", "", sha(json.dumps(params, sort_keys=True))),
                     ("active_tools", "", sha(json.dumps(sorted(m.get("active_tools", [])))))])
@@ -79,7 +79,7 @@ def plan(out_tox: str) -> dict:
         "active_tools": sorted(m.get("active_tools", [])),
         "modules": {n: {"dat": v["dat"], "sha256": v["sha256"], "package": v["package"], "path": v["path"]}
                     for n, v in modules.items()},
-        "dats": {n: {k: v for k, v in d.items() if k in ("serve", "content_type", "sha256", "path")}
+        "dats": {n: {k: v for k, v in d.items() if k in ("serve", "content_type", "sha256", "path", "runtime")}
                  for n, d in dats.items()},
         "callbacks": {n: {"type": c["type"], "sha256": c["sha256"]} for n, c in callbacks.items()},
     }

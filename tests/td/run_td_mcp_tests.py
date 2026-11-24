@@ -739,7 +739,118 @@ def cp_minimized(data, pid):
       and abs((r.get("previous") or {}).get("opacity", -1) - 0.10) < 1e-6, result=r)   # 0.11 never landed
 
 
+# ---- UX assignment: the TouchDesigner-only workflow and one-click browser sign-in --------------------------------
+def clipboard():
+    """Read the Windows clipboard as a user's paste would (the token never passes through test files)."""
+    r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", "Get-Clipboard"],
+                       capture_output=True, text=True, timeout=20)
+    return (r.stdout or "").strip()
+
+
+NATIVE = {}
+
+
+def cp_native_token(data, pid):
+    tok = clipboard()
+    NATIVE["token"] = tok
+    a = MCP(tok)
+    a.rpc("initialize", {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "claude-code", "version": "x"}})
+    w = a.call("tdflow_whoami")
+    T("native.TOKEN_FROM_TD_CONNECTS", ok(w) and w.get("role") == "observer"
+      and w.get("scopes", [{}])[0].get("scope") == "/project1/fx/**", role=w.get("role"))
+    T("native.observer_cannot_change", denied(a.call("tdflow_set_parameters", {"path": "/project1/fx/level1",
+                                                                              "values": {"opacity": 0.4}})))
+    return {"agent_id": w.get("agent_id")}
+
+
+def cp_native_rotated(data, pid):
+    new = clipboard()
+    T("native.ROTATED_OLD_TOKEN_REVOKED", MCP(NATIVE["token"]).rpc("tools/list")[0] == 401)
+    T("native.ROTATED_NEW_TOKEN_WORKS", new != NATIVE["token"] and ok(MCP(new).call("tdflow_whoami")))
+    NATIVE["token"] = new
+    return {}
+
+
+def cp_native_disabled(data, pid):
+    T("native.DISABLED_AGENT_REFUSED", MCP(NATIVE["token"]).rpc("tools/list")[0] == 401)
+    return {}
+
+
+def cp_native_approval_requested(data, pid):
+    E = MCP(TOKENS["E"])
+    NATIVE["args"] = {"path": "/project1/fx/level1", "expressions": {"opacity": "0.31 + 0.02"}}
+    r = E.call("tdflow_set_parameters", NATIVE["args"])
+    T("native.approval_requested", r.get("code") == "APPROVAL_REQUIRED", r=r)
+    return {"expr": "0.31 + 0.02"}
+
+
+def cp_native_approved(data, pid):
+    r = MCP(TOKENS["E"]).call("tdflow_set_parameters", NATIVE["args"])
+    T("native.APPROVED_IN_TD_RUNS", ok(r), r=r)
+    MCP(TOKENS["E"]).call("tdflow_undo")
+    return {}
+
+
+def cp_ticket(data, pid):
+    t = data.get("ticket", "")
+    h = {"X-TDflow-Request": "1", "Origin": O, "Content-Type": "application/json", "Sec-Fetch-Site": "same-origin"}
+    body = json.dumps({"ticket": t}).encode()
+    T("web.ticket_needs_exact_origin", base.req("POST", "/setup/api/pair/ticket", dict(h, Origin="http://evil.example"),
+                                                body)["status"] == 403)
+    r = base.req("POST", "/setup/api/pair/ticket", h, body)
+    sid = next((sc.split(";", 1)[0].split("=", 1)[1] for sc in r.get("headers", {}).get("set-cookie", [])
+                if sc.startswith("tdflow_admin=")), None)
+    j = base.jbody(r) or {}
+    T("web.ONE_CLICK_SIGN_IN", r["status"] == 200 and bool(sid) and bool(j.get("csrf")), status=r["status"])
+    cookie = {"Cookie": f"tdflow_admin={sid}"}
+    hp = dict(cookie, **{"X-TDflow-Request": "1", "X-TDflow-CSRF": j.get("csrf", ""), "Origin": O,
+                         "Content-Type": "application/json"})
+    w = base.req("POST", "/api/settings", hp, json.dumps({"diagnostic_log": False}).encode())
+    T("web.WARM_UP_NO_CHANGES_IN_THE_FIRST_SECONDS", w["status"] == 409 and base.code(w) == "SESSION_STARTING",
+      status=w["status"])
+    time.sleep(5.5)
+    w = base.req("POST", "/api/settings", hp, json.dumps({"diagnostic_log": False}).encode())
+    T("web.changes_allowed_after_the_warm_up", w["status"] == 200, status=w["status"])
+    T("web.no_session_resume_endpoint", base.req("GET", "/setup/api/session", dict(cookie, **{"X-TDflow-Request": "1"}))
+      ["status"] in (401, 403, 404))
+    ov = base.req("GET", "/api/overview", dict(cookie, **{"X-TDflow-Request": "1", "X-TDflow-CSRF": j.get("csrf", "")}))
+    T("web.SIGNED_IN_DASHBOARD_WORKS", ov["status"] == 200, status=ov["status"])
+    T("web.stale_harness_session_ended", admin("GET", "/api/overview")["status"] in (401, 403, 404))
+    STATE["cookies"]["tdflow_admin"], STATE["csrf"] = sid, j.get("csrf")   # one session at a time: adopt it
+    return {}
+
+
+def _redeem(t):
+    h = {"X-TDflow-Request": "1", "Origin": O, "Content-Type": "application/json", "Sec-Fetch-Site": "same-origin"}
+    r = base.req("POST", "/setup/api/pair/ticket", h, json.dumps({"ticket": t}).encode())
+    sid = next((sc.split(";", 1)[0].split("=", 1)[1] for sc in r.get("headers", {}).get("set-cookie", [])
+                if sc.startswith("tdflow_admin=")), None)
+    return r["status"], sid, (base.jbody(r) or {}).get("csrf")
+
+
+def cp_ticket_race(data, pid):
+    """Another program read the URL and was faster; then the real page presents the same ticket."""
+    st1, sid1, csrf1 = _redeem(data["ticket"])
+    T("web.race_first_redemption_works", st1 == 200 and bool(sid1))
+    st2, _, _ = _redeem(data["ticket"])
+    T("web.TICKET_REPLAY_REFUSED", st2 == 401)
+    ov = base.req("GET", "/api/overview", {"Cookie": f"tdflow_admin={sid1}", "X-TDflow-Request": "1",
+                                           "X-TDflow-CSRF": csrf1 or ""})
+    T("web.RACED_SESSION_ENDED", ov["status"] in (401, 403, 404), status=ov["status"])
+    return {}
+
+
+def cp_ticket_again(data, pid):
+    st, sid, csrf = _redeem(data["ticket"])
+    T("web.sign_in_again_after_interception", st == 200 and bool(sid))
+    STATE["cookies"]["tdflow_admin"], STATE["csrf"] = sid, csrf
+    return {}
+
+
 HANDLERS = {"setup_ready": cp_setup_ready, "pair_approved": cp_pair_approved, "enabled": cp_enabled,
+            "native_token": cp_native_token, "native_rotated": cp_native_rotated, "native_disabled": cp_native_disabled,
+            "native_approval_requested": cp_native_approval_requested, "native_approved": cp_native_approved,
+            "ticket": cp_ticket, "ticket_race": cp_ticket_race, "ticket_again": cp_ticket_again,
             "human_edited": cp_human_edited, "suspended": cp_suspended, "resumed": cp_resumed, "minimized": cp_minimized,
             "queue_block": cp_queue_block, "queue_checked": cp_queue_checked, "audit_down": cp_audit_down,
             "audit_up": cp_audit_up, "scan": cp_scan, "revoked": cp_revoked, "disabled": cp_disabled,

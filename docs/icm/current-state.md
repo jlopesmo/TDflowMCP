@@ -104,6 +104,13 @@
   - Code Mode benchmark measured (ADR-0004 gate): one script 1534 ms / 1978 bytes against 20 calls 1750 ms / 5613 bytes, plus one approval.
   - Skill **1.5**. Verified in TD on candidate `1b8657a0…`; [review 17](../research/2026-11-23-phase-4-extensions.md#independent-review-17): 5 Medium, all addressed. Not built: host-project source-first (TDXN interop evaluation).
 - **Tests** on candidate `8c829556…` (uncommitted tree): 403 unit tests; 1B 48/48 + 178/178; 1A 49/49 + 71/71; gate 46/46 + 48/48; memory 51/51 + 182/182; onboarding live 5/5 + 48/48.
+- **First-run UX redesign (owner D21)** ([record](../research/2026-11-23-first-run-ux.md)), version **1.0.0rc2**:
+  - **Diagnostics:** automatic on drop-in, project load and reinit (no listener, store or file), and manual from Run Diagnostics on the first page. Separate Environment Ready / MCP Ready / MCP Enabled / Agent Connected states.
+  - **Pages:** TDflowMCP, Agents, Web, Advanced. Next Step is context-aware.
+  - **Coding Agent:** Auto (lookup without execution).
+  - **TouchDesigner only:** Connect Agent and a clipboard-only token handoff kept out of Windows Clipboard History; native management of agents, scopes, tokens and approvals through the dashboard's backend.
+  - **Web:** one-click sign-in for pages opened from TouchDesigner (single-use 30-s fragment ticket, 5-s read-only warm-up, fail-closed interception); pairing only for typed URLs.
+  - **Verified in TD** on candidate `c11706ce…`, including the TouchDesigner-only first run with a live Claude Code session and a restart from the saved project. [Review 18](../research/2026-11-23-first-run-ux.md#independent-review-18-security): 1 High, 3 Medium, all addressed.
 
 ## Not implemented (nothing below exists)
 - **Withheld by design:**

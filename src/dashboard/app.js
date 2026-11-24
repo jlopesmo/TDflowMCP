@@ -1,6 +1,6 @@
 // TDflowMCP governance dashboard (Phase 2B, ADR-0005). A view and decision surface only: the component
 // enforces every rule. External script (the CSP forbids inline script). Server data is rendered with
-// textContent only. The CSRF token is kept in memory; a reload means pairing again.
+// textContent only. The CSRF token is kept in this tab's sessionStorage; a reload keeps the session while it is valid.
 "use strict";
 (function () {
   const $ = (id) => document.getElementById(id);
@@ -40,16 +40,43 @@
     clearInterval(pairTimer);
     pairTimer = setInterval(pollPairing, 1500);
   }
+  function becomePaired(token) {
+    clearInterval(pairTimer);
+    csrf = token;
+    try { sessionStorage.setItem("tdflow_csrf", token); } catch (e) { /* private mode: a reload means signing in again */ }
+    $("pair-box").hidden = true;
+    $("app").hidden = false;
+    document.body.dataset.paired = "true";
+    refreshAll();
+  }
+
+  // One-click sign-in (opened from TouchDesigner): a single-use ticket in the URL fragment, removed from the address
+  // bar and history at once and redeemed with a POST. Otherwise a still-valid session is resumed.
+  async function signIn() {
+    const m = /^#t=([A-Za-z0-9_-]{20,100})$/.exec(location.hash || "");
+    if (m) {
+      history.replaceState(null, "", location.pathname);
+      const r = await api("POST", "/setup/api/pair/ticket", { ticket: m[1] });
+      if (r.ok && r.data && r.data.csrf) { becomePaired(r.data.csrf); return; }
+      $("pair-status").textContent = "This sign-in link was already used or has expired. Pulse Open Dashboard in TouchDesigner again, or pair this browser below.";
+      return;
+    }
+    // A reload of this tab keeps its session: the CSRF token is kept in this tab's sessionStorage (never in a
+    // cookie or the URL), and the session cookie must still be valid (a 401 below ends it).
+    let saved = null;
+    try { saved = sessionStorage.getItem("tdflow_csrf"); } catch (e) { saved = null; }
+    if (saved) {
+      csrf = saved;
+      const probe = await api("GET", "/setup/api/agents");
+      if (probe.ok) { csrf = null; becomePaired(saved); } else { csrf = null; try { sessionStorage.removeItem("tdflow_csrf"); } catch (e) {} }
+    }
+  }
+
   async function pollPairing() {
     const r = await api("GET", "/setup/api/pair/status");
     const st = r.data && r.data.state;
     if (st === "approved" && r.data.csrf) {
-      clearInterval(pairTimer);
-      csrf = r.data.csrf;
-      $("pair-box").hidden = true;
-      $("app").hidden = false;
-      document.body.dataset.paired = "true";
-      refreshAll();
+      becomePaired(r.data.csrf);
     } else if (st === "rejected" || st === "expired" || st === "unknown") {
       clearInterval(pairTimer);
       $("pair-code").hidden = true;
@@ -58,6 +85,7 @@
   }
   function unpaired(msg) {
     csrf = null;
+    try { sessionStorage.removeItem("tdflow_csrf"); } catch (e) { /* nothing stored */ }
     $("app").hidden = true;
     $("pair-box").hidden = false;
     $("pair-code").hidden = true;
@@ -239,6 +267,16 @@
       const tg = el("button", a.enabled ? "Disable" : "Enable", "secondary small"); tg.type = "button";
       tg.addEventListener("click", async () => { await api("POST", "/api/agents/state", { agent_id: a.id, enabled: !a.enabled }); refreshAgents(); });
       act.append(tg);
+      const rot = el("button", "New token", "secondary small"); rot.type = "button";      // parity with TouchDesigner
+      rot.addEventListener("click", async () => {
+        const x = await api("POST", "/api/agents/rotate", { agent_id: a.id });
+        if (!x.ok || !x.data || !x.data.token) { $("token-status").textContent = "Not done: " + why(x) + "."; return; }
+        $("token-status").textContent = "New token for " + a.display_name + "; its older tokens were revoked.";
+        $("token-once").hidden = false;
+        $("token-value").textContent = x.data.token;
+        refreshAgents();
+      });
+      act.append(rot);
       const caps = (a.capabilities || []).includes("memory:repo:write") ? " + repository memory" : "";
       const perms = el("td");
       for (const g of a.grants || []) {
@@ -265,7 +303,10 @@
       });
       add.append(scope, acts, eff, go);
       perms.append(add);
-      tr.append(el("td", a.display_name), el("td", a.role + caps + (a.enabled ? "" : " (disabled)")), perms, toks, act);
+      const seen = (a.last_seen_s === null || a.last_seen_s === undefined) ? "not seen yet" :
+        (a.connected ? "connected (" + a.last_seen_s + " s ago)" : "last request " + a.last_seen_s + " s ago");
+      tr.append(el("td", a.display_name), el("td", a.role + caps + (a.enabled ? "" : " (disabled)")), el("td", seen),
+                perms, toks, act);
       tb.append(tr);
     }
   }
@@ -370,6 +411,7 @@
     $("s-diag").addEventListener("change", () => setSetting({ diagnostic_log: $("s-diag").checked }));
     $("s-cm").addEventListener("change", () => setSetting({ code_mode: $("s-cm").checked }));
     $("s-loc-apply").addEventListener("click", () => setSetting({ data_location: $("s-loc").value }));
+    signIn();
     tick();
   });
 })();

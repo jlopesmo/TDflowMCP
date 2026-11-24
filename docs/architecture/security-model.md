@@ -52,6 +52,35 @@ The Setup Assistant (1B+) and the Governance Dashboard (2B) share one admin cred
 
 The match code only prevents approving the wrong request. Holding it grants nothing, so it is safe in a saved parameter, in autosaves and on a shared screen.
 
+**One-click sign-in from TouchDesigner (owner UX assignment D21, 2026-11-23; [record](../research/2026-11-23-first-run-ux.md); hardened by review 18).** When the user pulses **Open Setup** or **Open Dashboard** inside TouchDesigner, the page it launches signs in without pairing:
+1. **The ticket.** After the bind gate passed, TouchDesigner creates a random 256-bit ticket: single use, valid 30 s, and only one outstanding (a new launch voids the old one). Only its SHA-256 is kept, in memory.
+2. **The fragment.** The ticket travels in the URL fragment (`/ui/#t=…`). Fragments are never sent to the server, so the ticket never appears in request logs or `Referer` headers. The page removes it from the address bar and history (`history.replaceState`) before redeeming it.
+3. **Redemption.** The page calls `POST /setup/api/pair/ticket` (exact Origin, `X-TDflow-Request`, same-origin fetch, canonical host). It is handled on a handler thread:
+   - the attempt is recorded durably **before** any session exists (`browser_ticket` `redeeming`), and refused with 503 while the audit store is unavailable;
+   - success gives the same admin session as pairing (HttpOnly SameSite=Strict cookie + CSRF token; one session at a time; 8 h).
+4. **Failed attempts.** Any attempt consumes the ticket, so a wrong, replayed or expired ticket fails and voids the outstanding one: tickets cannot be guessed. After 5 failed attempts in a minute, attempts are answered 429 without further records.
+5. **Warm-up.** For its first 5 s a ticket-born session may read but not change anything (`409 SESSION_STARTING`).
+6. **Interception.** If an already redeemed ticket comes back within 15 s, two parties had it. The server then fails closed:
+   - ends every admin session;
+   - suspends all agents (the kill switch, effective at once);
+   - revokes the tokens and disables the agents created since that sign-in, and turns Code Mode off;
+   - audits each step (`browser_ticket` `intercepted`, `revoke_token`, `agent_disable`, `setting`), and TouchDesigner says what happened.
+
+**Why the warm-up and interception response exist (review 18).** The browser's command line, and so the URL with its fragment, is visible to other processes of the same user until the ticket is used. "Malware on localhost" is in this threat model (§1). Such a process can race the page for the ticket. The real page redeems within a second or two of loading, so a raced session is detected inside its 5-s warm-up, before it can change anything, and everything it could have created since is revoked.
+
+**Residual risk (listed for the owner):**
+- If the real page never loads (the browser fails to open), a racing process keeps a session after the warm-up. Status Detail and **Browser Session** on the Web page show every sign-in, and **End Browser Session** ends it.
+- Manual pairing (above) has no such exposure and stays available for typed URLs.
+- A same-user process can in any case read the user's files and send input to TouchDesigner; TDflowMCP does not claim to stop it.
+
+**Reloads.** The page keeps its CSRF token in the tab's `sessionStorage`, never in a cookie or the URL, so reloading the same tab keeps the session while it is valid. There is no endpoint that hands out the CSRF token: a stolen cookie alone stays useless. **End Browser Session** signs every browser out.
+
+**Native administration.** The controls on the component's Agents and TDflowMCP pages call the **same** admin handler as the dashboard, with the principal `admin:touchdesigner`: someone at TouchDesigner, the trust that pairing approval already relies on.
+- The same validation, audit records and locks apply. Native actions are also recorded as `native_action` with `via: touchdesigner`.
+- That principal is never produced from an HTTP request: HTTP principals come only from the authenticator (`admin:<sid hash>`, `agent:<token id>`).
+- **Approvals:** Approve Request and Deny Request decide only the request that View Approval showed. The backend refuses a different argument digest (`APPROVAL_CHANGED`). The viewer is cleared after the decision or after 2 minutes, so agent arguments do not stay in a DAT that is saved with the project.
+- **Tokens:** a token created there (Connect Agent, New Token) stays in memory for at most 2 minutes and leaves it only through **Copy Token**. Copy Token writes it to the Windows clipboard with the formats that keep it out of Clipboard History and Cloud Clipboard and ask clipboard monitors to ignore it. If that is not possible, the copy is refused rather than made plainly. The clipboard is cleared after a minute if it still holds the token. The token is never written to a parameter, a DAT or a log.
+
 **Request rules:** because **cookies are not isolated by port** (SameSite treats other `127.0.0.1` ports as same-site), the cookie is never relied on alone. See the [per-route gate table](#81-per-route-gate-table). The canonical origin is `http://127.0.0.1:<port>`; requests to `localhost` are redirected to it.
 
 ### 2.6 OAuth 2.1

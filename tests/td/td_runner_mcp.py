@@ -45,6 +45,102 @@ def fixtures():
     return {"level_opacity": lvl.par.opacity.eval()}
 
 
+def _native_flow(comp, ext, T, frames, until, checkpoint, calls):
+    """UX assignment: the TouchDesigner-only workflow (no browser). Connect Agent creates the agent; Copy Token is the
+    only way the token leaves TDflowMCP (the harness reads it from the clipboard, as a user would paste it); the
+    Agents page rotates, disables and re-enables it; an approval is decided natively; Open Dashboard opens a
+    signed-in page (the harness redeems the ticket from the launched URL)."""
+    p = comp.par
+    p.Codingagent = "claude-code"
+    p.Agentaccess = "observer"
+    p.Allowedscope = "/project1/fx/**"
+    yield frames(3)
+    T("native.instructions_for_the_selected_client", "Claude Code (primary" in ext.tell_text
+      and "Cursor (" not in ext.tell_text and "Connect Agent" in ext.tell_text)
+    p.Connectagent.pulse()
+    yield until(lambda: ext.native.handoff is not None, 20, "native_handoff")
+    yield frames(2)
+    T("native.AGENT_CREATED_IN_TOUCHDESIGNER", ext.native.handoff is not None and "Copy Token" in p.Statusdetail.eval(),
+      detail=p.Statusdetail.eval())
+    p.Copytoken.pulse()
+    yield frames(3)
+    tok = td.ui.clipboard
+    leak = [x.name for x in comp.customPars if tok and tok in str(x.eval())] + \
+        [o.path for o in comp.findChildren(type=td.DAT) if tok and tok in o.text]
+    T("native.TOKEN_ONLY_ON_THE_CLIPBOARD", tok.startswith("tdf_") and not leak, leak=leak)
+    g = yield checkpoint("native_token", {})
+    yield frames(5)
+    T("native.CONNECTED_AGENTS_SHOWS_A_REAL_CONNECTION", "none" not in p.Connectedagents.eval(),
+      connected=p.Connectedagents.eval(), detail=p.Statusdetail.eval())
+    ext.native._clip = (ext.native._clip[0], 0.0)                # the clipboard is cleared after a minute
+    yield frames(3)
+    T("native.clipboard_cleared_after_a_minute", td.ui.clipboard != tok)
+    aid = g.get("agent_id")
+    ext.native.refresh_menu()
+    p.Agentselect = aid
+    yield frames(3)
+    T("native.AGENTS_PAGE_SHOWS_THE_AGENT", "Read Only" in p.Agentinfo.eval() and p.Agentscope.eval() == "/project1/fx/**",
+      info=p.Agentinfo.eval(), scope=p.Agentscope.eval())
+    p.Agentscope = "/project1/out1"
+    p.Addscope.pulse()
+    yield until(lambda: not ext.native.busy and any(gr.scope == "/project1/out1" for gr in ext.identity.agents[aid].grants),
+                15, "native_scope")
+    T("native.SCOPE_ADDED", any(gr.scope == "/project1/out1" for gr in ext.identity.agents[aid].grants))
+    p.Removescope.pulse()
+    yield until(lambda: not ext.native.busy and not any(gr.scope == "/project1/out1"
+                                                        for gr in ext.identity.agents[aid].grants), 15, "native_unscope")
+    T("native.SCOPE_REMOVED", not any(gr.scope == "/project1/out1" for gr in ext.identity.agents[aid].grants))
+    p.Rotatetoken.pulse()
+    yield until(lambda: ext.native.handoff is not None and not ext.native.busy and ext.native.handoff["token"] != tok,
+                15, "native_rotate")
+    p.Copytoken.pulse()
+    yield frames(3)
+    yield checkpoint("native_rotated", {})
+    p.Disableagent.pulse()
+    yield until(lambda: not ext.identity.agents[aid].enabled, 15, "native_disable")
+    yield checkpoint("native_disabled", {})
+    p.Enableagent.pulse()
+    yield until(lambda: ext.identity.agents[aid].enabled, 15, "native_enable")
+    T("native.ENABLE_DISABLE", ext.identity.agents[aid].enabled)
+    g = yield checkpoint("native_approval_requested", {})
+    yield until(lambda: bool(ext.native.approvals), 15, "native_approvals")
+    yield frames(2)
+    T("native.PENDING_APPROVAL_SHOWN", "waiting" in p.Approvalsummary.eval(), summary=p.Approvalsummary.eval())
+    p.Viewapproval.pulse()
+    yield frames(2)
+    T("native.APPROVAL_SHOWS_COMPLETE_ARGUMENTS", g.get("expr", "?") in comp.op("approval_view").text)
+    p.Approverequest.pulse()
+    yield until(lambda: not ext.native.busy and comp.op("approval_view").text == "", 15, "native_decided")
+    g = yield checkpoint("native_approved", {})
+    n0 = len(calls)
+    p.Opendashboard.pulse()
+    yield until(lambda: len(calls) > n0, 15, "dashboard_launch")
+    url = calls[-1]
+    T("web.DASHBOARD_URL_CARRIES_A_FRAGMENT_TICKET", url.startswith("http://127.0.0.1:9480/ui/#t="))
+    yield checkpoint("ticket", {"ticket": url.split("#t=", 1)[1]})
+    yield frames(3)
+    T("web.signed_in_note", "Browser signed in" in p.Statusdetail.eval(), detail=p.Statusdetail.eval())
+    # Review: a ticket read off the browser's command line by another program and raced is detected.
+    n0 = len(calls)
+    p.Opendashboard.pulse()
+    yield until(lambda: len(calls) > n0, 15, "dashboard_launch2")
+    yield checkpoint("ticket_race", {"ticket": calls[-1].split("#t=", 1)[1]})
+    yield frames(3)
+    yield frames(3)
+    T("web.INTERCEPTION_REPORTED_IN_TD", "used twice" in p.Statusdetail.eval() and ext.admin.active_sessions() == 0,
+      detail=p.Statusdetail.eval())
+    T("web.INTERCEPTION_SUSPENDS_AGENTS", p.Suspendagents.eval() and p.Status.eval() == "Suspended",
+      status=p.Status.eval())
+    p.Suspendagents = False                                   # the user reviewed it and resumes
+    yield until(lambda: p.Status.eval() == "Enabled", 15, "resume_after_interception")
+    n0 = len(calls)
+    p.Opendashboard.pulse()
+    yield until(lambda: len(calls) > n0, 15, "dashboard_launch3")
+    yield checkpoint("ticket_again", {"ticket": calls[-1].split("#t=", 1)[1]})
+    yield frames(3)
+    T("web.browser_session_shown", "signed in" in p.Websession.eval(), session=p.Websession.eval())
+
+
 def run(comp, ext, T, frames, until, checkpoint, R, restart=False):
     calls = []
     ext.launcher = lambda url: (calls.append(url), True)[1]
@@ -98,6 +194,7 @@ def run(comp, ext, T, frames, until, checkpoint, R, restart=False):
     comp.par.Suspendagents = False
     yield frames(3)
     yield checkpoint("resumed", {})
+    yield from _native_flow(comp, ext, T, frames, until, checkpoint, calls)
     last_seq = (yield from store_op(ext, until, "events", limit=1))[0]["seq"]
     yield checkpoint("queue_block", {})                   # harness sends a call 0.5 s after this answer
     time.sleep(2.0)                                       # the request is now queued (main thread blocked)
@@ -197,12 +294,20 @@ def _intent_pairs(events):
 
 
 def _restart(comp, ext, T, frames, until, checkpoint, R):
+    # UX assignment: state recovery after TouchDesigner restarts from the saved project.
+    p = comp.par
+    T("restart.UX_MCP_STAYS_OFF_AND_CHECKS_RAN", not p.Enablemcp.eval() and p.Status.eval() == "Off"
+      and p.Compatsummary.eval().startswith(("Ready", "Partly", "Not ready")), summary=p.Compatsummary.eval())
+    T("restart.UX_NOT_CONNECTED_YET", "none" in p.Connectedagents.eval(), connected=p.Connectedagents.eval())
     comp.par.Enablemcp = True
     yield until(lambda: comp.par.Status.eval() == "Enabled", 15, "enable_after_restart")
     T("restart.enabled_with_persisted_agents", comp.par.Status.eval() == "Enabled",
       status=comp.par.Status.eval(), detail=comp.par.Statusdetail.eval())
     v = yield from store_op(ext, until, "verify")
     T("restart.audit_chain_ok", v["ok"] and v["checkpoints"] >= 1, verify=v)
+    yield frames(3)
+    labels = list(p.Agentselect.menuLabels)
+    T("restart.UX_AGENT_CREATED_IN_TD_PERSISTS", any("Claude Code (Read Only)" in x for x in labels), labels=labels)
     yield checkpoint("restart_enabled", {"pid": os.getpid()})
     comp.par.Enablemcp = False
     yield frames(5)

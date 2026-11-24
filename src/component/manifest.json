@@ -105,6 +105,12 @@
     },
     "tdflowmcp.dashboard": {
       "path": "src/tdflowmcp/dashboard.py"
+    },
+    "tdflowmcp.readiness": {
+      "path": "src/tdflowmcp/readiness.py"
+    },
+    "tdflowmcp_td.native": {
+      "path": "src/td_adapter/native.py"
     }
   },
   "dats": {
@@ -134,6 +140,7 @@
     },
     "tellagent": {
       "text": "",
+      "runtime": true,
       "note": "Runtime copy of the Tell Your Coding Agent text (no secrets)"
     },
     "clients": {
@@ -156,6 +163,21 @@
       "path": "src/dashboard/app.js",
       "serve": "/ui/app.js",
       "content_type": "text/javascript; charset=utf-8"
+    },
+    "diagnostics": {
+      "text": "",
+      "runtime": true,
+      "note": "Runtime diagnostics report shown by View Diagnostics (no secrets, no absolute paths)"
+    },
+    "agents_view": {
+      "text": "",
+      "runtime": true,
+      "note": "Runtime agent list shown by View Agents (never tokens)"
+    },
+    "approval_view": {
+      "text": "",
+      "runtime": true,
+      "note": "Runtime view of one approval request (cleared after the decision)"
     }
   },
   "callbacks": {
@@ -181,7 +203,23 @@
       "label": "Version",
       "readonly": true,
       "default": "{version}",
-      "help": "Component version and tool-surface version"
+      "help": "Component version"
+    },
+    {
+      "page": "TDflowMCP",
+      "name": "Compatsummary",
+      "type": "Str",
+      "label": "System Check",
+      "readonly": true,
+      "default": "not run",
+      "help": "Latest diagnostics: Environment Ready or not, and pass / warn / fail / not yet verified counts"
+    },
+    {
+      "page": "TDflowMCP",
+      "name": "Rundiagnostics",
+      "type": "Pulse",
+      "label": "Run Diagnostics",
+      "help": "Run the system checks now (any time; safe: never starts the listener, never installs or changes anything). Details: View Diagnostics on the Advanced page"
     },
     {
       "page": "TDflowMCP",
@@ -190,32 +228,82 @@
       "label": "Status",
       "readonly": true,
       "default": "Off",
-      "help": "Controller state and error code"
+      "help": "Current state: Off, Setup, Enabled, Suspended or Error",
+      "section": true
     },
     {
       "page": "TDflowMCP",
       "name": "Statusdetail",
       "type": "Str",
-      "label": "Status Detail",
+      "label": "Next Step",
       "readonly": true,
-      "default": "Off. Pulse Open Setup to start the local Setup Assistant.",
-      "help": "One short sentence about what is happening (details: Setup page)"
+      "default": "Environment checks pending. Pulse Run Diagnostics.",
+      "help": "What is happening now and what to do next"
     },
     {
       "page": "TDflowMCP",
-      "name": "Opensetup",
-      "type": "Pulse",
-      "label": "Open Setup",
-      "help": "Run checks, start the local-only Setup Assistant and open it in your browser"
+      "name": "Codingagent",
+      "type": "Menu",
+      "label": "Coding Agent",
+      "help": "Which coding agent you connect. Auto looks up known clients on this computer (never runs them) and tailors the instructions; it never changes the agent's configuration",
+      "default": "auto",
+      "menu": [
+        "auto",
+        "claude-code",
+        "codex",
+        "cursor",
+        "vscode-copilot",
+        "other"
+      ],
+      "menu_labels": [
+        "Auto (Recommended)",
+        "Claude Code",
+        "OpenAI Codex",
+        "Cursor",
+        "VS Code Copilot",
+        "Other MCP Client"
+      ],
+      "section": true
     },
     {
       "page": "TDflowMCP",
-      "name": "Setupurl",
+      "name": "Agentaccess",
+      "type": "Menu",
+      "label": "Agent Access",
+      "help": "What a new agent may do: Read Only (look), Builder (also change operators in its scope), Operator (also ask you to approve code-running changes)",
+      "default": "builder",
+      "menu": [
+        "observer",
+        "builder",
+        "operator"
+      ],
+      "menu_labels": [
+        "Read Only",
+        "Builder",
+        "Operator"
+      ]
+    },
+    {
+      "page": "TDflowMCP",
+      "name": "Allowedscope",
       "type": "Str",
-      "label": "Setup URL",
-      "readonly": true,
-      "default": "",
-      "help": "Address of the Setup Assistant while it is running"
+      "label": "Allowed Scope",
+      "help": "Operators a new agent may work on, e.g. /project1/** (inside Project Root)",
+      "default": "/project1/**"
+    },
+    {
+      "page": "TDflowMCP",
+      "name": "Connectagent",
+      "type": "Pulse",
+      "label": "Connect Agent",
+      "help": "Guided setup: checks the environment, creates the agent's credentials (Coding Agent, Agent Access, Allowed Scope) and prepares the instructions. Does not enable MCP"
+    },
+    {
+      "page": "TDflowMCP",
+      "name": "Copytoken",
+      "type": "Pulse",
+      "label": "Copy Token",
+      "help": "Copy the new agent token to the clipboard once (within 2 minutes of creating it). It is never stored in the project; the clipboard is cleared after a minute"
     },
     {
       "page": "TDflowMCP",
@@ -223,7 +311,7 @@
       "type": "Toggle",
       "label": "Enable MCP",
       "default": false,
-      "help": "Turn on the MCP endpoint for agents with tokens (only after the local-only check and the preconditions pass)"
+      "help": "Turn the MCP endpoint on or off (agents can connect only while it is on; a live local-only security check runs every time)"
     },
     {
       "page": "TDflowMCP",
@@ -231,85 +319,263 @@
       "type": "Toggle",
       "label": "Suspend Agents",
       "default": false,
-      "help": "Kill switch: reject every agent request, including queued ones"
+      "help": "Emergency stop: refuse every agent request at once, including queued ones"
     },
     {
       "page": "TDflowMCP",
+      "name": "Tellagent",
+      "type": "Str",
+      "label": "Tell Your Coding Agent",
+      "readonly": true,
+      "default": "Not checked yet",
+      "help": "State of the instructions for your coding agent",
+      "section": true
+    },
+    {
+      "page": "TDflowMCP",
+      "name": "Copytellagent",
+      "type": "Pulse",
+      "label": "Copy Instructions",
+      "help": "Copy the instructions for your coding agent"
+    },
+    {
+      "page": "TDflowMCP",
+      "name": "Viewinstructions",
+      "type": "Pulse",
+      "label": "View Full Instructions",
+      "help": "Open the full instructions in a viewer"
+    },
+    {
+      "page": "TDflowMCP",
+      "name": "Connectedagents",
+      "type": "Str",
+      "label": "Connected Agents",
+      "help": "Agents whose authenticated requests TDflowMCP has seen in the last 2 minutes (registered agents that are not talking do not count)",
+      "readonly": true,
+      "default": "none",
+      "section": true
+    },
+    {
+      "page": "TDflowMCP",
+      "name": "Manageagents",
+      "type": "Pulse",
+      "label": "Manage Agents",
+      "help": "Open the Agents page: agents, scopes, tokens and approvals"
+    },
+    {
+      "page": "TDflowMCP",
+      "name": "Opendashboard",
+      "type": "Pulse",
+      "label": "Open Dashboard",
+      "help": "Open the dashboard in your browser, already signed in (starts the local listener if needed)"
+    },
+    {
+      "page": "Agents",
+      "name": "Agentsummary",
+      "type": "Str",
+      "label": "Agents",
+      "readonly": true,
+      "default": "0 agent(s)",
+      "help": "Number of agents and signed-in browser sessions"
+    },
+    {
+      "page": "Agents",
+      "name": "Agentselect",
+      "type": "Menu",
+      "label": "Agent",
+      "help": "The agent the actions below apply to",
+      "default": "none",
+      "menu": [
+        "none"
+      ],
+      "menu_labels": [
+        "(no agents yet)"
+      ],
+      "section": true
+    },
+    {
+      "page": "Agents",
+      "name": "Agentinfo",
+      "type": "Str",
+      "label": "Selected Agent",
+      "help": "Role, state, scopes, tokens and last request of the selected agent",
+      "readonly": true,
+      "default": "No agent selected"
+    },
+    {
+      "page": "Agents",
+      "name": "Agentscope",
+      "type": "Str",
+      "label": "Scope",
+      "help": "Scope for Add Scope / Remove Scope",
+      "default": "/project1/**"
+    },
+    {
+      "page": "Agents",
+      "name": "Addscope",
+      "type": "Pulse",
+      "label": "Add Scope",
+      "help": "Allow the selected agent its role's actions on Scope"
+    },
+    {
+      "page": "Agents",
+      "name": "Removescope",
+      "type": "Pulse",
+      "label": "Remove Scope",
+      "help": "Remove the selected agent's grant on Scope"
+    },
+    {
+      "page": "Agents",
+      "name": "Enableagent",
+      "type": "Pulse",
+      "label": "Enable Agent",
+      "help": "Allow the selected agent to work again"
+    },
+    {
+      "page": "Agents",
+      "name": "Disableagent",
+      "type": "Pulse",
+      "label": "Disable Agent",
+      "help": "Stop the selected agent (its tokens stop working)"
+    },
+    {
+      "page": "Agents",
+      "name": "Rotatetoken",
+      "type": "Pulse",
+      "label": "New Token",
+      "help": "Revoke the selected agent's tokens and create a new one (then pulse Copy Token on the TDflowMCP page)"
+    },
+    {
+      "page": "Agents",
+      "name": "Revoketokens",
+      "type": "Pulse",
+      "label": "Revoke Tokens",
+      "help": "Revoke all tokens of the selected agent"
+    },
+    {
+      "page": "Agents",
+      "name": "Viewagents",
+      "type": "Pulse",
+      "label": "View Agents",
+      "help": "Open a list of all agents (never shows tokens)"
+    },
+    {
+      "page": "Agents",
+      "name": "Approvalsummary",
+      "type": "Str",
+      "label": "Pending Approvals",
+      "help": "Requests from agents waiting for your decision",
+      "readonly": true,
+      "default": "none waiting",
+      "section": true
+    },
+    {
+      "page": "Agents",
+      "name": "Viewapproval",
+      "type": "Pulse",
+      "label": "View Approval",
+      "help": "Show the oldest waiting request with its complete arguments"
+    },
+    {
+      "page": "Agents",
+      "name": "Approverequest",
+      "type": "Pulse",
+      "label": "Approve Request",
+      "help": "Approve the request shown by View Approval"
+    },
+    {
+      "page": "Agents",
+      "name": "Denyrequest",
+      "type": "Pulse",
+      "label": "Deny Request",
+      "help": "Deny the request shown by View Approval"
+    },
+    {
+      "page": "Web",
+      "name": "Opensetup",
+      "type": "Pulse",
+      "label": "Open Setup",
+      "help": "Open the Setup page in your browser, already signed in (starts the local listener)"
+    },
+    {
+      "page": "Web",
+      "name": "Webdashboard",
+      "type": "Pulse",
+      "label": "Open Dashboard",
+      "help": "Open the dashboard in your browser, already signed in"
+    },
+    {
+      "page": "Web",
+      "name": "Websession",
+      "type": "Str",
+      "label": "Browser Session",
+      "help": "Signed-in browser sessions",
+      "readonly": true,
+      "default": "none"
+    },
+    {
+      "page": "Web",
+      "name": "Setupurl",
+      "type": "Str",
+      "label": "Setup URL",
+      "readonly": true,
+      "default": "",
+      "help": "Address of the Setup Assistant while it is running",
+      "section": true
+    },
+    {
+      "page": "Web",
       "name": "Pairingrequest",
       "type": "Str",
       "label": "Pairing Request",
       "readonly": true,
       "default": "",
-      "help": "Match code of the pending browser pairing request (not a secret)"
+      "help": "Match code of a browser that asks to pair (only for a URL you typed yourself)"
     },
     {
-      "page": "TDflowMCP",
+      "page": "Web",
       "name": "Approvepairing",
       "type": "Pulse",
       "label": "Approve Pairing",
       "help": "Approve the pending browser pairing request if its code matches the Setup page"
     },
     {
-      "page": "TDflowMCP",
+      "page": "Web",
       "name": "Rejectpairing",
       "type": "Pulse",
       "label": "Reject Pairing",
       "help": "Reject the pending browser pairing request"
     },
     {
-      "page": "TDflowMCP",
-      "name": "Agentsummary",
-      "type": "Str",
-      "label": "Agents",
-      "readonly": true,
-      "default": "0 agent(s)",
-      "help": "Number of agents and paired admin sessions"
-    },
-    {
-      "page": "TDflowMCP",
-      "name": "Tellagent",
-      "type": "Str",
-      "label": "Tell Your Agent",
-      "readonly": true,
-      "default": "Not checked yet",
-      "help": "State of the coding-agent instructions"
-    },
-    {
-      "page": "TDflowMCP",
-      "name": "Copytellagent",
+      "page": "Web",
+      "name": "Endbrowsersession",
       "type": "Pulse",
-      "label": "Copy Tell Agent",
-      "help": "Copy the Tell Your Coding Agent text to the clipboard"
+      "label": "End Browser Session",
+      "help": "Sign every browser out"
     },
     {
-      "page": "TDflowMCP",
-      "name": "Viewinstructions",
+      "page": "Advanced",
+      "name": "Buildinfo",
+      "type": "Str",
+      "label": "Build",
+      "help": "TouchDesigner build, Python and interface versions",
+      "readonly": true,
+      "default": ""
+    },
+    {
+      "page": "Advanced",
+      "name": "Viewdiagnostics",
       "type": "Pulse",
-      "label": "View Agent Instructions",
-      "help": "Open the full Tell Your Coding Agent text in a viewer"
+      "label": "View Diagnostics",
+      "help": "Open the full diagnostics report with fixes"
     },
     {
       "page": "Advanced",
       "name": "Stopserver",
       "type": "Pulse",
       "label": "Stop Server",
-      "help": "Stop the listener"
-    },
-    {
-      "page": "Advanced",
-      "name": "Rundiagnostics",
-      "type": "Pulse",
-      "label": "Run Diagnostics",
-      "help": "Re-run the compatibility checks"
-    },
-    {
-      "page": "Advanced",
-      "name": "Compatsummary",
-      "type": "Str",
-      "label": "Compatibility",
-      "readonly": true,
-      "default": "not run",
-      "help": "pass / warn / fail / unknown counts"
+      "help": "Stop the listener",
+      "section": true
     },
     {
       "page": "Advanced",
@@ -336,7 +602,8 @@
       "type": "Str",
       "label": "Project Root",
       "default": "/project1",
-      "help": "Agents can only see and change operators inside this component"
+      "help": "Agents can only see and change operators inside this component",
+      "section": true
     },
     {
       "page": "Advanced",
@@ -391,7 +658,8 @@
       "name": "Createprojectmemory",
       "type": "Pulse",
       "label": "Create Project Memory",
-      "help": "Create the optional tdflowProject component (project memory for task checkpoints and handoffs) under Project Root. Agents change it only through TDflowMCP's memory tools"
+      "help": "Create the optional tdflowProject component (project memory for task checkpoints and handoffs) under Project Root. Agents change it only through TDflowMCP's memory tools",
+      "section": true
     },
     {
       "page": "Advanced",

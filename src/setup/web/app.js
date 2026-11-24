@@ -1,6 +1,6 @@
 // TDflowMCP Setup Assistant (Phase 1A read-only + Phase 1B pairing and agent tokens).
 // External script: the CSP forbids inline script. Server data is rendered with textContent only.
-// The admin CSRF token is kept in memory only (a reload means pairing again).
+// The admin CSRF token is kept in memory only; a reload of the same tab keeps it (sessionStorage).
 "use strict";
 (function () {
   const $ = (id) => document.getElementById(id);
@@ -107,16 +107,44 @@
     pairTimer = setInterval(pollPairing, 1500);
   }
 
+  async function becomePaired(token) {
+    clearInterval(pairTimer);
+    csrf = token;
+    try { sessionStorage.setItem("tdflow_csrf", token); } catch (e) { /* private mode: a reload means signing in again */ }
+    $("pair-box").hidden = true;
+    $("admin").hidden = false;
+    document.body.dataset.paired = "true";
+    await refreshAdmin();
+  }
+
+  // One-click sign-in: when TouchDesigner opened this page (Open Setup / Open Dashboard), the address carries a
+  // single-use, short-lived ticket in its fragment. It is removed from the address bar and history at once and
+  // redeemed with a POST; fragments are never sent to the server. Otherwise a still-valid session is resumed.
+  async function signIn() {
+    const m = /^#t=([A-Za-z0-9_-]{20,100})$/.exec(location.hash || "");
+    if (m) {
+      history.replaceState(null, "", location.pathname);
+      const r = await api("POST", "/setup/api/pair/ticket", { ticket: m[1] });
+      if (r.ok && r.data && r.data.csrf) { await becomePaired(r.data.csrf); return; }
+      $("pair-status").textContent = "This sign-in link was already used or has expired. Pulse Open Setup in TouchDesigner again, or pair this browser below.";
+      return;
+    }
+    // A reload of this tab keeps its session: the CSRF token is kept in this tab's sessionStorage (never in a
+    // cookie or the URL), and the session cookie must still be valid (a 401 below ends it).
+    let saved = null;
+    try { saved = sessionStorage.getItem("tdflow_csrf"); } catch (e) { saved = null; }
+    if (saved) {
+      csrf = saved;
+      const probe = await api("GET", "/setup/api/agents");
+      if (probe.ok) { csrf = null; await becomePaired(saved); } else { csrf = null; try { sessionStorage.removeItem("tdflow_csrf"); } catch (e) {} }
+    }
+  }
+
   async function pollPairing() {
     const r = await api("GET", "/setup/api/pair/status");
     const st = r.data && r.data.state;
     if (st === "approved" && r.data.csrf) {
-      clearInterval(pairTimer);
-      csrf = r.data.csrf;
-      $("pair-box").hidden = true;
-      $("admin").hidden = false;
-      document.body.dataset.paired = "true";
-      await refreshAdmin();
+      await becomePaired(r.data.csrf);
     } else if (st === "rejected" || st === "expired" || st === "unknown") {
       clearInterval(pairTimer);
       $("pair-code").hidden = true;
@@ -289,6 +317,7 @@
 
   function unpaired(msg) {
     csrf = null;
+    try { sessionStorage.removeItem("tdflow_csrf"); } catch (e) { /* nothing stored */ }
     $("admin").hidden = true;
     $("pair-box").hidden = false;
     $("pair-code").hidden = true;
@@ -341,6 +370,7 @@
     $("mem-plan-relink").addEventListener("click", () => planMemory("relink"));
     $("mem-confirm").addEventListener("click", confirmMemory);
     $("mem-cancel").addEventListener("click", () => { memPending = null; $("mem-preview").hidden = true; });
+    signIn();
     refresh();
     setInterval(refresh, 2000);
   });

@@ -39,10 +39,11 @@ def _comp_digest(comp):
     h = hashlib.sha256()
     for o in sorted([comp] + list(comp.findChildren()), key=lambda x: x.path):
         h.update(f"{o.path}|{o.OPType}\n".encode())
-        if o.family == "DAT" and o.name not in ("tellagent",):
+        if o.family == "DAT" and o.name not in ("tellagent", "diagnostics", "agents_view", "approval_view"):
             h.update(o.text.encode("utf-8", "replace"))
     for p in comp.customPars:
-        if p.readOnly or p.name in ("Enablemcp", "Suspendagents"):   # status values and user toggles
+        # status values, user toggles, and the Agents page's selection (managed by the component as agents change)
+        if p.readOnly or p.name in ("Enablemcp", "Suspendagents", "Agentselect", "Agentscope"):
             continue
         h.update(f"{p.name}={p.eval()}\n".encode())
     return h.hexdigest()
@@ -68,6 +69,12 @@ def run(mode, comp, ext, T, frames, until, checkpoint, R):
         yield from restart(comp, ext, T, frames, until, checkpoint, R)
     elif mode == "onboard":
         yield from onboard(comp, ext, T, frames, until, checkpoint, R)
+    elif mode == "native":
+        yield from native_onboard(comp, ext, T, frames, until, checkpoint, R)
+    elif mode == "native_restart":
+        yield from native_restart(comp, ext, T, frames, until, checkpoint, R)
+    elif mode == "native_screens":
+        yield from native_screens(comp, ext, T, frames, until, checkpoint, R)
     elif mode == "memory":
         yield from memory(comp, ext, T, frames, until, checkpoint, R)
     elif mode == "memory_persist":
@@ -453,6 +460,115 @@ def bench(comp, ext, T, frames, until, checkpoint, R):
     yield until(lambda: out.get("done"), 120, "bench_done")
     R["bench"] = out
     T("bench.completed", bool(out.get("done")), **{k: v for k, v in out.items() if k != "done"})
+
+
+# ---- native: the first-run acceptance workflow without a browser (UX assignment, 2026-11-23) --------
+def native_onboard(comp, ext, T, frames, until, checkpoint, R):
+    """Blank project -> drop-in -> automatic checks -> manual Run Diagnostics -> Coding Agent Auto -> Connect Agent ->
+    Copy Token -> Enable MCP -> a real Claude Code session -> Connected Agents -> Suspend / resume. No browser and no
+    pairing at any step."""
+    M.fixtures()
+    p = comp.par
+    yield frames(10)
+    T("first_run.AUTOMATIC_DIAGNOSTICS", p.Compatsummary.eval().startswith(("Ready", "Partly", "Not ready")) and bool(ext.checks),
+      summary=p.Compatsummary.eval())
+    T("first_run.NOTHING_LISTENS_OR_IS_CREATED", p.Status.eval() == "Off" and ext.ctl.transport is None
+      and ext.worker is None)
+    T("first_run.environment_ready_next_step", "Connect Agent" in p.Statusdetail.eval(), detail=p.Statusdetail.eval())
+    before = ext.checks_at
+    p.Rundiagnostics.pulse()
+    yield frames(3)
+    T("first_run.MANUAL_DIAGNOSTICS_ANY_TIME", ext.checks_at > before and p.Compatsummary.eval().startswith(("Ready", "Partly", "Not ready")))
+    T("first_run.AUTO_FINDS_CLAUDE_CODE_WITHOUT_RUNNING_IT", "claude-code" in ext.native.detected
+      and p.Codingagent.eval() == "auto", detected=ext.native.detected)
+    p.Agentaccess = "builder"
+    p.Allowedscope = "/project1/fx/**"
+    p.Connectagent.pulse()
+    yield until(lambda: ext.native.handoff is not None, 30, "native_connect")
+    T("first_run.AGENT_CREATED", ext.native.handoff is not None, detail=p.Statusdetail.eval())
+    T("first_run.mcp_not_enabled_silently", not p.Enablemcp.eval() and p.Status.eval() == "Off")
+    p.Copytoken.pulse()
+    yield frames(3)
+    p.Enablemcp = True
+    yield until(lambda: p.Status.eval() == "Enabled", 30, "native_enable")
+    yield frames(3)
+    T("first_run.ENABLED_AND_WAITING", p.Status.eval() == "Enabled" and "Waiting for" in p.Statusdetail.eval(),
+      detail=p.Statusdetail.eval())
+    T("first_run.registered_is_not_connected", "none" in p.Connectedagents.eval(), connected=p.Connectedagents.eval())
+    T("first_run.NO_BROWSER_SESSION_USED", ext.admin.active_sessions() == 0)
+    g = yield checkpoint("native_onboard", {"project_folder": str(td.project.folder), "tell": ext.tell_text},
+                         seconds=900)
+    yield frames(5)
+    T("first_run.CLAUDE_CODE_CONNECTED", "Claude Code" in p.Connectedagents.eval(), connected=p.Connectedagents.eval())
+    T("first_run.status_says_connected", "Claude Code connected" in p.Statusdetail.eval(), detail=p.Statusdetail.eval())
+    T("first_run.edit_applied", abs(opacity() - 0.25) < 1e-6, opacity=opacity())
+    p.Suspendagents = True
+    yield frames(5)
+    T("first_run.SUSPEND", p.Status.eval() == "Suspended" and "suspended" in p.Statusdetail.eval().lower(),
+      detail=p.Statusdetail.eval())
+    yield checkpoint("native_suspended", {})
+    p.Suspendagents = False
+    yield frames(5)
+    T("first_run.RESUME", p.Status.eval() == "Enabled")
+    yield checkpoint("native_resumed", {})
+    R["native"] = g
+    p.Enablemcp = False
+    yield frames(5)
+    toe = os.path.join(str(td.project.folder), str(td.project.name))
+    drv = td.op("/project1/test_driver/drive")
+    drv.par.active = False                    # the reopened project must not double-drive the runner
+    td.project.save()                         # the user saves (same file)
+    drv.par.active = True
+    R["native_toe"] = toe
+
+
+def native_screens(comp, ext, T, frames, until, checkpoint, R):
+    """Visual review: each custom parameter page in TouchDesigner's own parameter window, in three states (fresh,
+    agent created, MCP enabled). The harness captures only this process's windows."""
+    M.fixtures()
+    p = comp.par
+    yield frames(10)
+    comp.openParameters()
+
+    def shots(stage):
+        for page in ("TDflowMCP", "Agents", "Web", "Advanced"):
+            comp.currentPage = page
+            yield frames(15)
+            yield checkpoint(f"screen_{stage}_{page}".replace("-", "_"), {"stage": stage, "page": page})
+    yield from shots("1-fresh")
+    p.Connectagent.pulse()
+    yield until(lambda: ext.native.handoff is not None, 30, "screens_connect")
+    yield frames(5)
+    yield from shots("2-agent-created")
+    p.Copytoken.pulse()
+    p.Enablemcp = True
+    yield until(lambda: p.Status.eval() == "Enabled", 30, "screens_enable")
+    yield frames(10)
+    yield from shots("3-enabled")
+    p.Enablemcp = False
+    yield frames(5)
+
+
+def native_restart(comp, ext, T, frames, until, checkpoint, R):
+    """Launch 2 of the native workflow: TouchDesigner restarted from the saved project."""
+    p = comp.par
+    yield frames(10)
+    T("restart.MCP_OFF_AFTER_REOPEN", not p.Enablemcp.eval() and p.Status.eval() == "Off", status=p.Status.eval())
+    T("restart.AUTOMATIC_DIAGNOSTICS_AGAIN", p.Compatsummary.eval().startswith(("Ready", "Partly", "Not ready")),
+      summary=p.Compatsummary.eval())
+    T("restart.CHOICES_PERSIST", p.Codingagent.eval() == "auto" and p.Agentaccess.eval() == "builder"
+      and p.Allowedscope.eval() == "/project1/fx/**")
+    p.Enablemcp = True
+    yield until(lambda: p.Status.eval() == "Enabled", 30, "restart_enable")
+    yield frames(3)
+    labels = list(p.Agentselect.menuLabels)
+    T("restart.AGENT_PERSISTS", any("Claude Code (Builder)" in x for x in labels), labels=labels)
+    T("restart.NOT_CONNECTED_UNTIL_IT_TALKS", "none" in p.Connectedagents.eval(), connected=p.Connectedagents.eval())
+    yield checkpoint("native_restart", {})
+    yield frames(5)
+    T("restart.CONNECTED_AGAIN", "none" not in p.Connectedagents.eval(), connected=p.Connectedagents.eval())
+    p.Enablemcp = False
+    yield frames(5)
 
 
 # ---- onboard: generated text -> live Claude Code session; Skills round-trip ----------------------

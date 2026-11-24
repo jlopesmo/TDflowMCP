@@ -88,7 +88,7 @@ class Controller:
         self.gate = bv.BindGate()
         self.state = CompState.OFF
         self.error_code = ""
-        self.message = "Off. Pulse Open Setup to start the local Setup Assistant."
+        self.message = "Listener off."
         self.portstatus = "not checked"
         self.transport = None
         self._ev = None
@@ -197,7 +197,7 @@ class Controller:
         if self.state not in (CompState.STARTING, CompState.SETUP):
             if self.state is CompState.ERROR and reason == "user" and self.transport is None:
                 self.state, self.error_code = CompState.OFF, ""
-                self.message = "Off. Pulse Open Setup to start the local Setup Assistant."
+                self.message = "Listener off."
             return "noop"
         self.gate.user_close()
         self.transport.begin_close()
@@ -224,7 +224,7 @@ class Controller:
         self.portstatus = "not checked"
         if self.state is CompState.ERROR and self.error_code == "PORT_IN_USE":
             self.state, self.error_code = CompState.OFF, ""
-        self.message = f"Port set to {port}. Pulse Open Setup to start."
+        self.message = f"Port set to {port}. It is used the next time the listener starts."
         return "set"
 
     # ---- per frame (main thread) --------------------------------------------------------------
@@ -338,16 +338,16 @@ class Controller:
             msg = {"BIND_UNVERIFIED": "The listener could not be verified as local-only and was closed. "
                                       "Pulse Open Setup to try once more.",
                    "PORT_IN_USE": f"Another process started listening on port {self.port}; the listener was closed.",
-                   "TRANSPORT_FAILED": "The listener stopped unexpectedly. Pulse Open Setup to start it again."}
+                   "TRANSPORT_FAILED": "The listener stopped unexpectedly. Turn on Enable MCP (or pulse Open Setup) to start it again."}
             self._error(code, msg.get(code, "The listener was closed."))
         else:
             self.state, self.error_code = CompState.OFF, ""
             if self._close_reason == "port_changed":
-                self.message = f"Port changed to {self.port}. Pulse Open Setup to start on the new port."
+                self.message = f"Port changed to {self.port}. Turn on Enable MCP (or pulse Open Setup) to start on the new port."
             elif self._close_reason == "idle":
-                self.message = "Stopped after a long idle period. Pulse Open Setup to start again."
+                self.message = "Stopped after a long idle period. Turn on Enable MCP (or pulse Open Setup) to start again."
             else:
-                self.message = "Off. Pulse Open Setup to start the local Setup Assistant."
+                self.message = "Listener off."
         self.portstatus = "not checked" if self.state is CompState.OFF else self.portstatus
 
     def _start_launch(self):

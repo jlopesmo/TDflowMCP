@@ -189,6 +189,8 @@ def security_selftest(port: int = 9480) -> bool:
         decide("GET", "/setup/api/agents", dict(host, **{"X-TDflow-Request": "1"}), S, cfg).next == "admin_session+csrf",
         decide("GET", "/setup/", dict(host, Host="evil.example"), S, cfg).code == "BAD_HOST",
         decide("POST", "/mcp", host, ListenerState.VERIFYING, cfg).status == 503,
+        # one-click sign-in: the ticket route needs the exact Origin and the request header (UX assignment)
+        decide("POST", "/setup/api/pair/ticket", dict(host, **{"X-TDflow-Request": "1"}), S, cfg).code == "BAD_ORIGIN",
         embedded_capability("0.0.0.0").verdict is Verdict.FAIL,
     ]
     return all(checks)

@@ -45,15 +45,46 @@ def _fill(obj, url: str):
     return obj
 
 
-def connect_section(port: int, clients: Mapping) -> list:
+def detect(clients: Mapping, which) -> list:
+    """Client ids whose command name is on PATH. ``which`` is ``shutil.which``: it looks names up, it never runs
+    them. A hit is a hint, not proof that the client works; nothing about paths is kept."""
+    found = []
+    for c in (clients.get("clients", []) if isinstance(clients, Mapping) else []):
+        if any(which(n) for n in c.get("detect") or []):
+            found.append(c["id"])
+    return found
+
+
+def choose(selection: str, detected: Sequence[str], clients: Mapping) -> list:
+    """Which clients the instructions cover: the user's explicit choice, else (Auto) the detected ones, else the
+    generic instructions for any MCP client."""
+    ids = [c["id"] for c in (clients.get("clients", []) if isinstance(clients, Mapping) else [])]
+    if selection and selection != "auto" and selection in ids:
+        return [selection]
+    found = [i for i in detected if i in ids]
+    return found or (["other"] if "other" in ids else ids[:1])
+
+
+def display(clients: Mapping, cid: str) -> str:
+    for c in (clients.get("clients", []) if isinstance(clients, Mapping) else []):
+        if c["id"] == cid:
+            return c.get("display", cid)
+    return cid
+
+
+def connect_section(port: int, clients: Mapping, selected: Sequence[str] = ()) -> list:
     """'Connect' section from the client registry (src/integrations/clients.json). Allowlisted inputs only:
-    the port and the registry; the token is always the literal placeholder ${TDFLOW_TOKEN}."""
+    the port, the registry and the selected client ids; the token is always the literal placeholder
+    ${TDFLOW_TOKEN}."""
     url = f"http://127.0.0.1:{int(port)}/mcp"
     reg = clients.get("clients", []) if isinstance(clients, Mapping) else []
+    if selected:
+        reg = [c for c in reg if c.get("id") in selected] or reg
     env = clients.get("token_env", {}) if isinstance(clients, Mapping) else {}
     out = ["", "## Connect your coding agent",
            "The user does these steps; show them the commands, do not run configuration commands yourself.",
-           "1. On the Setup page (Agents and access), create an agent token. It is shown once.",
+           "1. In TouchDesigner, the user pulses Connect Agent on the component's TDflowMCP page (or creates a token "
+           "on the Setup page), then Copy Token. The token is shown or copied only once.",
            "2. Put it in the TDFLOW_TOKEN environment variable of the terminal that starts the agent "
            "(never in a file, a commit or the chat):"]
     for key, label in SHELLS:
@@ -62,7 +93,8 @@ def connect_section(port: int, clients: Mapping) -> list:
     out.append("3. Register the server named `tdflow` (Streamable HTTP, " + url + "):")
     for c in reg:
         mcp = _fill(c.get("mcp") or {}, url)
-        tag = {"primary": "primary, tested", "verified": "tested"}.get(c.get("support"), "from vendor docs, not tested")
+        tag = {"primary": "primary, tested", "verified": "tested", "generic": "any MCP client with Streamable HTTP"}.get(
+            c.get("support"), "from vendor docs, not tested")
         out.append(f"   - {c.get('display')} ({tag}):")
         if mcp.get("json"):
             out.append("     JSON config entry: `" + json.dumps(mcp["json"], separators=(", ", ": ")) + "`")
@@ -74,8 +106,9 @@ def connect_section(port: int, clients: Mapping) -> list:
                 out.append(f"     {label}: `{cmds[key]}`")
         if mcp.get("config_file_note"):
             out.append("     Where: " + mcp["config_file_note"])
-    out += ["4. Start (or restart) the agent from that terminal and call `tdflow_whoami` to confirm the "
-            "connection and see your scopes.",
+    out += ["4. The user turns on Enable MCP in TouchDesigner. Start (or restart) the agent from that terminal and call "
+            "`tdflow_whoami` to confirm the connection and see your scopes; the component then shows the agent under "
+            "Connected Agents.",
             "5. Optional: install the TDflowMCP Skills from the Setup page (preview first, nothing is "
             "overwritten). `tdflow_whoami` reports `expected_skill_version`; tell the user if your Skills differ."]
     return out
@@ -83,7 +116,7 @@ def connect_section(port: int, clients: Mapping) -> list:
 
 def build(state: str, error_code: str, port: int, td_build: str, checks: Sequence[CheckResult],
           troubleshooting: Mapping, version: str = __version__, clients: Mapping = None,
-          memory_lines: Sequence[str] = ()) -> str:
+          memory_lines: Sequence[str] = (), selected: Sequence[str] = (), access: str = "") -> str:
     entries = troubleshooting.get("entries", {}) if isinstance(troubleshooting, Mapping) else {}
     problems = [c for c in checks if c.result in ("fail", "warn")]
     lines = [
@@ -95,18 +128,23 @@ def build(state: str, error_code: str, port: int, td_build: str, checks: Sequenc
         f"- TDflowMCP component v{version} is installed in a TouchDesigner {td_build or '(unknown build)'} project.",
         f"- State: {_state_sentence(state, error_code, port)}",
         (f"- MCP endpoint: http://127.0.0.1:{port}/mcp (Streamable HTTP). Authenticate with a bearer token that the "
-         "user creates on the Setup page and stores as the TDFLOW_TOKEN environment variable. Never write the token "
+         "user creates in TouchDesigner (Connect Agent) or on the Setup page and stores as the TDFLOW_TOKEN environment "
+         "variable. Never write the token "
          "into project files. Call tdflow_whoami first to see your scopes; every change is audited."
          if state in ("Enabled", "Suspended") else
          "- MCP access is not enabled. The user turns it on with the component's Enable MCP toggle after creating "
-         "an agent token on the Setup page. Do not write MCP or agent configuration for TDflowMCP yourself."),
+         "an agent token (Connect Agent in TouchDesigner, or the Setup page). Do not write MCP or agent configuration "
+         "for TDflowMCP yourself."),
         f"- Compatibility checks: {summary(checks) if checks else 'not run yet (pulse Run Diagnostics)'}.",
         # Spike S9: TouchDesigner runs no frames while its window is minimized.
         "- The TouchDesigner window must stay open (it may be behind other windows, but not minimized): "
         "TouchDesigner pauses while minimized, and calls then fail with TDFLOW_NOT_COOKING until the user restores it.",
     ]
-    if clients and state in ("Setup", "Enabled", "Suspended"):
-        lines += connect_section(port, clients)
+    if access:
+        lines.append(f"- Access the user chose for new agents: {access}. Your own permissions are what tdflow_whoami "
+                     "reports; the server enforces them.")
+    if clients:
+        lines += connect_section(port, clients, selected)
     if memory_lines:                               # Phase 2A: built from validated memory fields only
         lines += [""] + list(memory_lines)
     lines += [

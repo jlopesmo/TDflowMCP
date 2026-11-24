@@ -59,6 +59,8 @@ def _par(page, spec):
         p.readOnly = True
     if spec.get("help"):
         p.help = spec["help"]
+    if spec.get("section"):
+        p.startSection = True
     return p
 
 
@@ -113,7 +115,7 @@ def verify(plan, comp):
     c = {}
     man = json.loads(comp.op("manifest").text)
     bad = [n for n, m in man["modules"].items() if _sha(comp.op("src").op(m["dat"]).text) != m["sha256"]]
-    bad += [n for n, d in man["dats"].items() if n != "tellagent" and _sha(comp.op(n).text) != d["sha256"]]
+    bad += [n for n, d in man["dats"].items() if not d.get("runtime") and _sha(comp.op(n).text) != d["sha256"]]
     bad += [n for n, d in man["callbacks"].items() if _sha(comp.op(n).text) != d["sha256"]]
     c["embedded_hash_mismatches"] = bad
     c["params"] = [p.name for p in comp.customPars]

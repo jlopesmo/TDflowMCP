@@ -14,6 +14,18 @@ Adopt [setup-assistant.md](../architecture/setup-assistant.md):
 5. Troubleshooting is diagnosis plus instructions. The only automatic actions are TDflowMCP-internal and reversible. Everything else needs explicit, previewed user confirmation, and installs and client-permission edits are never performed.
 6. Default port **9480** with conflict detection. The port is never changed automatically.
 
+## Revision: first-run UX (owner direction D21, 2026-11-23)
+The first hands-on acceptance of 1.0.0rc1 showed the initial configuration was confusing. The owner directed a redesign ([record](../research/2026-11-23-first-run-ux.md)), now implemented:
+- **Four parameter pages** (TDflowMCP, Agents, Web, Advanced) replace the two. The everyday page follows the sequence System, Connection, Agent Handoff, Management.
+- **Native administration** inside TouchDesigner (agents, scopes, tokens, approvals) is now part of the decision. This reverses the alternative "a TD-native panel UI for setup" rejected below. It is built from custom parameters and viewer DATs, and uses the same backend as the web pages (no second implementation of the rules).
+- **The browser is optional.** The web pages stay, with equivalent operations and richer views.
+- **Automatic diagnostics** run on drop-in, project load and reinit. They never start a listener, create the store, install anything or start an agent; Run Diagnostics stays on the first page.
+- **One-click sign-in** for pages opened from TouchDesigner (single-use, 30 s fragment ticket, a 5-s read-only warm-up and a fail-closed response to interception, [security model §2.5](../architecture/security-model.md#25-dashboard-and-setup-admin-sessions)). Manual pairing remains for typed URLs.
+- **Unchanged:**
+  - the component never listens until the user acts;
+  - Enable MCP stays a TouchDesigner toggle and always runs the live loopback verification;
+  - no installs or coding-agent configuration writes.
+
 ## Alternatives
 - A TD-native panel UI for setup: more TD-specific work, and harder to share with the dashboard.
 - Setup inside the full dashboard: rejected by the owner's sequencing.
