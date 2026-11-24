@@ -568,10 +568,15 @@ def native_onboard(comp, ext, T, frames, until, checkpoint, R):
         # the others (manual setup) in the plan.
         T("connect.AUTO_RECOMMENDS_THE_AUTOMATIC_AGENT", len(dialogs) == n + 1 and d["title"] == "Connect Claude Code"
           and "Also found:" in text, titles=[x["title"] for x in dialogs[n:]])
-    T("connect.CONSENT_SHOWS_THE_PLAN", all(x in text for x in (
-        "~/.claude.json", "other-server", "TURNED ON", "Undo", "Builder", "/project1/fx/**",
+    full = comp.op("connect_view").text                        # the full plan, in the viewer
+    flat = " ".join(text.split())
+    T("connect.CONSENT_SHOWS_THE_PLAN", all(x in flat for x in (
+        "~/.claude.json", "other servers kept", "Turns ON Enable MCP", "Undo", "Builder", "/project1/fx/**",
         "protected storage", "backup", "Then start a new Claude Code chat")) and
-      d["buttons"] == ["Approve", "Cancel"], text=text, buttons=d["buttons"])
+      d["buttons"] == ["Approve", "Cancel"] and all(len(x) <= 25 for x in text.splitlines()),
+      text=text, buttons=d["buttons"])
+    T("connect.FULL_PLAN_IN_THE_VIEWER", all(x in full for x in ("other-server", "TURNED ON", "Disconnect Agent")),
+      full=full[:300])
     T("connect.consent_has_no_secret_or_user_path", not TOKEN_SHAPE.search(text) and home not in text)
     T("connect.REVIEW_SHOWN_IN_NEXT_STEP", p.Statusdetail.eval() == "Approve in the dialog.",
       detail=p.Statusdetail.eval())
@@ -782,7 +787,7 @@ def native_screens(comp, ext, T, frames, until, checkpoint, R):
     yield until(lambda: _stage(ext) == "awaiting", 30, "screens_plan")
     yield frames(20)
     T("screens.REAL_DIALOG_OPENED", ext.connector.dialog is not None, dialog=ext.connector.dialog)
-    T("screens.DIALOG_WIDENED_FOR_READING", td.op("/sys/TDResources/popDialog").par.w.eval() >= 480,
+    T("screens.DIALOG_NOT_MODIFIED", abs(td.op("/sys/TDResources/popDialog").par.w.eval() - 260) < 1,
       width=td.op("/sys/TDResources/popDialog").par.w.eval())
     T("screens.ONE_DIALOG_AT_A_TIME", ext.connector.dialog_opener("x", "y", ["OK", "Cancel"], lambda i: None) is False)
     yield checkpoint("screen_2-dialog", {"stage": "2-dialog", "page": "dialog"})
@@ -800,9 +805,8 @@ def native_screens(comp, ext, T, frames, until, checkpoint, R):
     yield until(lambda: _stage(ext) in ("waiting", "failed"), 40, "screens_connect")
     T("screens.REAL_DIALOG_APPROVE_CONNECTS", _stage(ext) == "waiting", stage=_stage(ext),
       line=(ext.connector.state or {}).get("line"))
-    yield frames(10)
-    T("screens.DIALOG_WIDTH_RESTORED", abs(pop.par.w.eval() - 260) < 1 and str(pop.par.w.mode).endswith("CONSTANT"),
-      width=pop.par.w.eval())
+    T("screens.DIALOG_TEXT_FITS", all(len(x) <= 25 for x in pop.par.Text.eval().splitlines()),
+      longest=max((len(x) for x in pop.par.Text.eval().splitlines()), default=0))
     yield frames(10)
     yield from shots("3-enabled")
     p.Enablemcp = False
@@ -921,7 +925,7 @@ def native_recover(comp, ext, T, frames, until, checkpoint, R):
     ext.connector.state = None
     p.Repairconnection.pulse()
     yield until(lambda: _stage(ext) in ("awaiting", "failed"), 30, "repair_plan")
-    T("repair.PLAN_REUSES_THE_AGENT", "gets a new key" in dialogs[-1]["text"] and dialogs[-1]["buttons"][0] == "Approve",
+    T("repair.PLAN_REUSES_THE_AGENT", "Same agent, new key" in dialogs[-1]["text"] and dialogs[-1]["buttons"][0] == "Approve",
       text=dialogs[-1]["text"][:300])
     dialogs[-1]["cb"](0)
     yield until(lambda: _stage(ext) in ("waiting", "connected", "failed"), 30, "repair_apply")

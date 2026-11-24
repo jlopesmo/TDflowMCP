@@ -30,7 +30,7 @@ import types
 import td
 
 CONSENT_SECONDS = 120.0
-DIALOG_WIDTH = 480             # UX-08: readable plan text (TouchDesigner's default dialog is 260 px)
+DIALOG_CHARS = 25              # UX-08: characters per line TouchDesigner's dialog shows (visual review)
 VIEW_SECONDS = 120.0           # connect_view is cleared after this (it is saved with the .toe: review 19, finding 14)
 RECHECK_SECONDS = 6.0
 SLOTS = {"claude-code": "claude-code"}
@@ -62,6 +62,21 @@ FAIL_LINES = {                          # Next Step after a failed step (the cod
     "*": "Not connected: see Details",
 }
 NO_REQUEST_AFTER_S = 90.0
+
+
+def wrap_dialog(text, width=None):
+    """UX-08: wrap each paragraph to ``DIALOG_CHARS``; list items keep a hanging indent."""
+    import textwrap
+    width = width or DIALOG_CHARS
+    out = []
+    for line in str(text).split("\n"):
+        if len(line) <= width:
+            out.append(line)
+            continue
+        lead = len(line) - len(line.lstrip(" -"))
+        out += textwrap.wrap(line, width=width, subsequent_indent=" " * min(lead, 4), break_long_words=True,
+                             break_on_hyphens=False)
+    return "\n".join(out)
 
 
 def run_security(argv, stdin_text):
@@ -350,9 +365,8 @@ class Connector:
             if not enable:
                 self._set("waiting", **{})
                 return
-            text = (f"{st['display']} is already set up for this project (agent '{st['agent_name']}').\n\n"
-                    "Enable MCP is TURNED ON so it can connect (this computer only; a live security check runs "
-                    "first). Nothing else changes.\n\nTurn it off or Suspend Agents at any time.")
+            text = (f"{st['display']} is already set up for this project.\n\nTurns ON Enable MCP (this "
+                    "computer only). Nothing else changes.")
             buttons = ["Enable MCP", "Cancel"]
         else:
             text = self.C.consent_text(st["display"], self.interfaces(st["client"]), pl, st["access"], st["scope"],
@@ -360,9 +374,13 @@ class Connector:
                                        also_found=self.also_found)
             buttons = ["Approve", "Cancel"]          # narrow buttons (visual review); the text says MCP is turned on
         st["consent"] = text
-        self._show_details(text)
+        self._show_details(text)                   # the full plan, readable in the viewer
+        short = text if st.get("intact") else self.C.consent_short(
+            st["display"], pl, st["access"], st["scope"], enable, reuse_agent=st.get("agent_name") or "",
+            platform=sys.platform, also_found=self.also_found)
+        st["consent_short"] = short
         self._set("awaiting")
-        ok = self.dialog_opener(f"Connect {st['display']}", text, buttons,
+        ok = self.dialog_opener(f"Connect {st['display']}", short, buttons,
                                 lambda i: self.approve() if i == 0 else self.cancel())
         if ok:
             self.state["dialog"] = True              # no expiry while the user is looking at it
@@ -652,12 +670,8 @@ class Connector:
 
     # ---- TouchDesigner dialog ---------------------------------------------------------------------------
     def close_dialog(self):
-        """Put the shared dialog's width back (component shutdown or reinit with a dialog still open)."""
-        r = getattr(self, "_restore_dialog", None)
-        if r is not None:
-            r()
-            self._restore_dialog = None
-            self._restore_after = None
+        """Shutdown hook (kept for compatibility): TouchDesigner's shared dialog is not modified by TDflowMCP."""
+        return None
 
     def _open_dialog(self, title, text, buttons, on_choice):
         """TouchDesigner's own pop-up dialog (TDResources PopDialog). Returns False if it is unavailable."""
@@ -677,72 +691,19 @@ class Connector:
         # its no-dialog path.
         if self.dialog is not None:
             return False
-        ra = getattr(self, "_restore_after", None)
-        if ra:                                       # a restore still pending from the last dialog: do it first
-            self._restore_after = None
-            ra[0]()
-        # UX-08 (rc4): TouchDesigner's dialog is 260 px wide, which wraps the plan awkwardly. It is widened while a
-        # TDflowMCP dialog is open and put back exactly (value, mode, expression) afterwards. It is TouchDesigner's
-        # own /sys component, not the project.
-        saved = None
+        # UX-08 (rc4, visual review): TouchDesigner's dialog is a fixed 260 px and lays out its text and buttons for
+        # that size (widening it clipped the buttons). The text is pre-wrapped to lines that fit, so it breaks where
+        # intended instead of mid-phrase.
         try:
-            par = pop.par.w
-            if float(par.eval()) < DIALOG_WIDTH:
-                mode = par.mode
-                modes = type(mode)                   # TouchDesigner's ParMode enum, taken from the value itself
-                saved = (mode, par.expr if mode == modes.EXPRESSION else None, par.val, modes)
-        except Exception:
-            saved = None
-        if saved is not None:
-            try:
-                par.val = DIALOG_WIDTH
-                if saved[0] != saved[3].CONSTANT:
-                    par.mode = saved[3].CONSTANT
-            except Exception:
-                pass
-
-        def restore():
-            """Put the width back; True once it holds (the dialog's window writes its size back as it closes)."""
-            if saved is None:
-                return True
-            try:
-                par = pop.par.w
-                par.val = saved[2]
-                if saved[0] == saved[3].EXPRESSION:
-                    par.expr = saved[1]
-                par.mode = saved[0]
-                return par.mode == saved[0] and (saved[0] != saved[3].CONSTANT or par.eval() == saved[2])
-            except Exception:
-                return True
-        self._restore_dialog = restore
-
-        def cb_restore(info):
-            # The dialog finishes closing after its callback and re-applies the width it opened with, so the restore
-            # runs a few frames later (tick); it also runs at once if the component shuts down meanwhile.
-            self._restore_after = (restore, 3, 10)      # (restore, frames to wait, attempts left)
-            cb(info)
-        try:
-            pop.OpenDefault(text=text, title=title, buttons=list(buttons), callback=cb_restore,
+            pop.OpenDefault(text=wrap_dialog(text), title=title, buttons=list(buttons), callback=cb,
                             escButton=len(buttons), escOnClickAway=False, enterButton=len(buttons))
         except Exception:
-            restore()
-            self._restore_dialog = None
             return False
         self.dialog = title
         return True
 
     # ---- every frame (main thread) ---------------------------------------------------------------------------
     def tick(self):
-        ra = getattr(self, "_restore_after", None)
-        if ra:
-            fn, n, tries = ra
-            if n > 0:
-                self._restore_after = (fn, n - 1, tries)
-            elif fn() or tries <= 1:
-                self._restore_after = None
-                self._restore_dialog = None
-            else:
-                self._restore_after = (fn, 5, tries - 1)    # re-check: the closing window may write its size back
         vu = getattr(self, "_view_until", None)
         if vu and time.monotonic() > vu:
             self._clear_view()

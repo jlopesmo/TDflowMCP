@@ -643,6 +643,33 @@ def consent_text(client: str, interfaces: Sequence[str], plan: Optional[Plan], a
     return "\n".join(lines)
 
 
+def consent_short(client: str, plan: Optional[Plan], access: str, scope: str, enable_mcp: bool,
+                  reuse_agent: str = "", platform: str = sys.platform, also_found: Sequence[str] = ()) -> str:
+    """UX-08 (rc4, visual review): the plan as TouchDesigner's narrow dialog shows it (about 25 characters a line,
+    short enough that its buttons stay visible). The full plan is in the viewer and View Connection Details."""
+    lines = [f"{client} gets access", "to this project.", ""]
+    if reuse_agent:
+        lines += ["Same agent, new key", "(old keys stop working)."]
+    else:
+        lines += [f"Access: {access}", f"Scope: {scope}"]
+    if plan is not None:
+        if plan.action == "replace":
+            lines += ["REPLACES your \"tdflow\"", "entry (backed up, put", "back on Disconnect)."]
+        elif plan.action == "unchanged":
+            lines += ["Settings: no change."]
+        else:
+            lines += ["Adds \"tdflow\" to", plan.shown_path]
+        lines += ["(other servers kept," if plan.preserved else "(nothing else changes,", "backup made)."]
+    lines += ["Key: " + ("Windows protected" if platform == "win32" else "macOS Keychain"),
+              "storage" + ("." if platform == "win32" else " (untested).")]
+    if enable_mcp:
+        lines += ["Turns ON Enable MCP", "(this computer only)."]
+    lines += ["", "Then start a new", f"{client} chat.", "Undo: Disconnect Agent.", "Full plan: the viewer."]
+    if also_found:
+        lines += ["Also found: " + ", ".join(also_found), "(manual setup: pick it", "in Coding Agent)."]
+    return "\n".join(lines)
+
+
 # ---- manual fallback (clients without secure automatic provisioning) --------------------------------------------
 MANUAL = {
     "codex": ("OpenAI Codex has no way to fetch a credential by itself: it reads the token from an environment "

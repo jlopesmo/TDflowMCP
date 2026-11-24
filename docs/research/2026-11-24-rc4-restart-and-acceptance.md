@@ -61,10 +61,15 @@ In the same run, Enable MCP alone loads the same agent, and Claude Code reconnec
 - Enable MCP still runs the full storage decision, the audit verification and the live loopback check. MCP stays off after every restart.
 
 ## Other corrections
-- **UX-08.** TouchDesigner's pop-up dialog is 260 px wide, so the plan wrapped awkwardly.
-  - It is widened to 480 px while a TDflowMCP dialog is open, then restored exactly (value, mode, expression) by the callback, on failure, and when the component shuts down.
-  - Only one TDflowMCP dialog is open at a time.
-  - Buttons stay short.
+- **UX-08.** TouchDesigner's pop-up dialog has a fixed layout and shows about 25 characters a line, so the plan wrapped awkwardly.
+  - **First attempt, rejected.** Widening the dialog (480 px) made its window wider, but the dialog lays out its text and buttons for its own size. In the screenshots the text was clipped and **the buttons were not visible**. Restoring the width also needed retries, because the closing window writes its size back.
+  - **Fix:**
+    - the dialog shows a **compact plan** (lines of at most 25 characters, about 18 lines): access, scope, the file and the one server added, other servers kept, backup, where the key is kept, that Enable MCP is turned on, what to do next, and how to undo;
+    - every dialog text is pre-wrapped to that width;
+    - the **full plan** is in the `connect_view` viewer and View Connection Details;
+    - TouchDesigner's dialog component is not modified;
+    - only one TDflowMCP dialog is open at a time.
+  - Verified in TD with the real dialog (`screens.*`: not modified, text fits, Approve connects, buttons visible in the capture).
 - **Review 20, storage (3).** An **unsaved** project that carries a saved project's identity (a pasted component, or a `.tox` made from it) is now `COPIED` and does not open that project's data. Previously this was possible when the data lived in private storage. Also, an unsaved session no longer erases the registered `.toe` (copy detection depends on it).
 - **Strict ids:** `\Z` instead of `$`, so no trailing newline.
 - **Kill-safe connection:**
@@ -79,7 +84,7 @@ A read-only agent reviewed the first version of the fix. It ran the unit tests a
 | 1 | Medium | `credentials.sqlite` exists after any storage open (a cancelled connect, after Disconnect), so "Turn on Enable MCP." could be shown for a project with no agent: the defect in reverse | The hint now needs ≥ 1 enabled agent in the non-secret summary (or, for pre-rc4 projects, a connection key file). With no agents: the normal `Ready: pulse Connect Agent` and `0 agents · not loaded` |
 | 2 | Medium (fails closed) | A failed storage decision (moved or copied project) kept showing "Turn on Enable MCP." and "already set up" | `Data: confirm (Advanced)`; the hint and the Tell text are suppressed while the decision waits |
 | 3 | Medium (pre-existing) | An unsaved project with a pasted identity whose data is in private storage opened that project's data and erased the registry's `.toe` | `COPIED` (unit test); the registered `.toe` is kept |
-| 4 | Low | The dialog width could stay widened (a second dialog; an expression mode); restore untested | One dialog at a time; exact restore; restore on shutdown; `screens.*` checks widening, one-at-a-time and restore with the real dialog |
+| 4 | Low | The dialog width could stay widened (a second dialog; an expression mode); restore untested | The widening is removed altogether (it also clipped the buttons, visual review); compact text instead. One dialog at a time; `screens.*` checks with the real dialog that it is not modified, the text fits and Approve works |
 | 5 | Low (tests) | The kill test did not prove that nothing was lost; the duplicate check was partly tautological; directories were not in the snapshot | `recover.NO_AUDIT_EVENT_LOST_IN_THE_KILL` (event count ≥ the count before the kill); the same credential byte for byte (helper) and the same agent id as launch 1; the summary checked; directories in the snapshot |
 | 6 | Low | An id assigned but not saved showed the old state | Read-only registry recovery in the inspection |
 | 7 | Note | `$` accepts a trailing newline | `\Z` (unit test) |
@@ -123,5 +128,5 @@ Evidence is in the [validation index](../icm/validation-index.md) (rc4 package r
 ## UX status (UX-01 to UX-09)
 - **UX-01, 02, 03, 05, 06, 07:** fixed in rc3 and re-verified (native, 1A, unit).
 - **UX-04:** Windows verified. macOS implemented but not validated; this is stated in the instructions and the dialog.
-- **UX-08:** fixed (wider dialog, exact restore).
+- **UX-08:** fixed (a compact plan that fits TouchDesigner's dialog; the full plan in the viewer).
 - **UX-09:** fixed (above).
