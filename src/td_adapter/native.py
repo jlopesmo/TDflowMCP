@@ -193,6 +193,12 @@ class Native:
         st = ext.connector.state or {}
         if st.get("client") in ids:
             return [st["client"]]
+        # ADR-0017 (usability review): with several automatic agents, speak about the one(s) connected to this
+        # project, never about another one that merely comes first in the list.
+        known = ext.connector.connected_clients() or (ext.prior.get("clients") if ext._set_up_off() else [])
+        done = [i for i in ids if i in known]
+        if done:
+            return done
         auto = [i for i in ids if ext.connector.automatic(i)]
         return auto[:1] or ids
 
@@ -210,8 +216,12 @@ class Native:
         ext = self.ext
         st = ext.connector.state
         if st and st.get("stage") == "awaiting":           # a second pulse may be the approval (no dialog)
-            ext.connector.start([st["client"]])
-            return
+            if st.get("dialog") or st.get("client") in self.selected():
+                ext.connector.start([st["client"]])
+                return
+            # Review 23 (8): Coding Agent now names another agent than the plan that was shown. This pulse must not
+            # approve that plan: it is dropped, and a plan for the current selection follows.
+            ext.connector.cancel()
         ext.RunDiagnostics()
         env = ext._m.readiness.environment(ext.checks)
         if env["state"] == "not_ready":
@@ -223,9 +233,10 @@ class Native:
             ext._set_note("No agent found: pick one", 30)
             return
         auto = [i for i in ids if ext.connector.automatic(i)]
-        if is_auto and len(auto) == 1:
-            # Usability review: one agent can be set up automatically: recommend it without asking; the plan names
-            # the others (they need manual setup and are chosen in Coding Agent).
+        if is_auto and auto:
+            # Usability review: agents that can be set up automatically come first. One: recommend it without asking.
+            # Several (ADR-0017: Claude Code and Codex): ask which, with one button each, so that the buttons fit
+            # TouchDesigner's dialog. The plan names the others (manual setup, chosen in Coding Agent).
             ext.connector.start(auto, also_found=[i for i in ids if i not in auto])
             return
         if len(ids) > 1:

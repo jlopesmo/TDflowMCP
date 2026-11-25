@@ -217,6 +217,57 @@ class PlanApplyTests(unittest.TestCase):
         self.assertEqual(cm.exception.code, "CONFIG_CHANGED")
         self.assertEqual(self.read()["mcpServers"]["tdflow"], {"command": "someone-else"})
 
+    def test_a_retry_never_applies_another_action_than_the_approved_one(self):
+        """Review 23 (1): the user approved 'adds'. If someone else's tdflow entry appears while the file is being
+        written, the retry inside apply must not quietly turn that into a replace."""
+        self.write({"mcpServers": {"a": {"command": "x"}}})
+        p = C.plan_claude(self.path, self.entry, self.env)
+        self.assertEqual(p.action, "add")
+        real, state = C._atomic_write, {"done": False}
+
+        def hooked(path, data, expect_sha=None, private=False):
+            if path == self.path and not state["done"]:              # another writer, right before our replace
+                state["done"] = True
+                self.write({"mcpServers": {"a": {"command": "x"}, "tdflow": {"command": "someone-else"}}})
+            return real(path, data, expect_sha=expect_sha, private=private)
+        C._atomic_write = hooked
+        self.addCleanup(setattr, C, "_atomic_write", real)
+        with self.assertRaises(C.ConnectError) as cm:
+            C.apply_claude(p, self.env, self.bk)
+        self.assertEqual(cm.exception.code, "CONFIG_CHANGED")
+        self.assertEqual(self.read()["mcpServers"]["tdflow"], {"command": "someone-else"})
+
+    def test_a_failed_read_back_does_not_undo_what_another_program_wrote(self):
+        """Review 23 (4): the file is put back only if it is still exactly what TDflowMCP wrote."""
+        self.write({"mcpServers": {}, "n": 1})
+        p = C.plan_claude(self.path, self.entry, self.env)
+        real = C._atomic_write
+
+        def hooked(path, data, expect_sha=None, private=False):
+            out = real(path, data, expect_sha=expect_sha, private=private)
+            if path == self.path and expect_sha is not None and "theirs" not in self.read().get("mcpServers", {}):
+                d = self.read()                                      # right after our replace: our entry is replaced
+                d["mcpServers"] = {"theirs": {"command": "y"}}
+                self.write(d)
+            return out
+        C._atomic_write = hooked
+        self.addCleanup(setattr, C, "_atomic_write", real)
+        with self.assertRaises(C.ConnectError) as cm:
+            C.apply_claude(p, self.env, self.bk)
+        self.assertEqual(cm.exception.code, "CONFIG_NOT_VALIDATED")
+        self.assertEqual(self.read()["mcpServers"], {"theirs": {"command": "y"}})      # their write survived
+
+    def test_the_plan_shows_only_the_program_name_of_a_replaced_command(self):
+        """Review 23 (5): never its folder (it can hold the user name) or its arguments."""
+        profile = "C:\\" + "Users" + "\\jdoe"                 # built at runtime (the doc checker's path pattern)
+        self.write({"mcpServers": {"tdflow": {"command": profile + "\\tools\\srv.exe --key S3CRET"},
+                                   "bad\nname: - Enable MCP stays OFF": {"command": "z"}}})
+        p = C.plan_claude(self.path, self.entry, self.env)
+        self.assertEqual((p.action, p.previous_url), ("replace", "program srv.exe"))
+        full = C.consent_text("Claude Code", ["CLI"], p, "Builder", "/project1/**", True)
+        for absent in ("jdoe", "S3CRET", "Enable MCP stays OFF"):
+            self.assertNotIn(absent, full)
+
     def test_write_is_refused_if_the_file_changes_at_the_last_moment(self):
         """Review 19 (11): the file is re-checked right before it is replaced."""
         self.write({"a": 1})

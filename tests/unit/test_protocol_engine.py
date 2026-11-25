@@ -27,6 +27,11 @@ class FakeHost(protocol.ToolHost):
         self.calls.append((name, arguments, client_info))
         return None if name == "nope" else protocol.tool_result({"ok": True})
 
+    def hello(self, client_info):
+        self.hellos = getattr(self, "hellos", []) + [client_info]
+        if client_info.get("name") == "boom":
+            raise RuntimeError("a display-only step must never fail the handshake")
+
 
 def modern(method, params=None, mid=1, headers=None, version=MODERN, caps=True):
     p = dict(params or {})
@@ -103,6 +108,20 @@ class ProtocolTests(unittest.TestCase):
         st, r = self.run_(json.dumps(init).encode(), {})
         self.assertEqual(r["result"]["protocolVersion"], "2025-06-18")
         self.assertEqual(r["result"]["capabilities"], {"tools": {"listChanged": False}})
+        self.assertEqual(self.host.hellos, [{"name": "c", "version": ""}])
+        # ADR-0017: a legacy client (Codex: codex-mcp-client) is identified at the handshake; text is bounded, other
+        # fields are dropped, and a failure in that display-only step never fails the handshake.
+        for ci, want in (({"name": "codex-mcp-client", "title": "Codex", "version": "0.171.0-alpha.13.2", "x": 1},
+                          {"name": "codex-mcp-client", "version": "0.171.0-alpha.13.2"}),
+                         ({"name": "n" * 300, "version": 7}, {"name": "n" * 40, "version": "7"}),
+                         ({"name": "boom"}, {"name": "boom", "version": ""})):
+            init["params"]["clientInfo"] = ci
+            st, r = self.run_(json.dumps(init).encode(), {})
+            self.assertEqual((st, r["result"]["protocolVersion"], self.host.hellos[-1]), (200, "2025-06-18", want))
+        n = len(self.host.hellos)
+        init["params"]["clientInfo"] = "not an object"
+        self.assertEqual(self.run_(json.dumps(init).encode(), {})[0], 200)
+        self.assertEqual(len(self.host.hellos), n)
         init["params"]["protocolVersion"] = "1999-01-01"
         self.assertEqual(self.run_(json.dumps(init).encode(), {})[1]["result"]["protocolVersion"], "2025-11-25")
         note = json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}).encode()
@@ -284,6 +303,29 @@ class EngineTests(unittest.TestCase):
                       lambda: False)
         self.assertIsNone(eng2.call(self.tid, "tdflow_set_parameters", {"path": "/project1/fx/a", "values": {}}))
         self.assertEqual([t["name"] for t in eng2.list_tools(self.tid)], ["tdflow_whoami"])
+
+    def test_legacy_handshake_identifies_the_client_only_for_a_valid_token(self):
+        """ADR-0017: Codex speaks the legacy era, where tool calls carry no clientInfo. Its handshake does."""
+        self.eng.hello(self.tid, {"name": "codex-mcp-client", "version": "0.171.0-alpha.13.2"})
+        seen = self.eng.seen[self.agent.id]
+        self.assertEqual((seen["client"], seen["version"]), ("codex-mcp-client", "0.171.0-alpha.13.2"))
+        self.eng.call(self.tid, "tdflow_whoami", {})                      # a legacy call keeps what the handshake said
+        self.assertEqual(self.eng.seen[self.agent.id]["client"], "codex-mcp-client")
+        before = dict(self.eng.seen)
+        self.eng.hello("not-a-token", {"name": "x", "version": "1"})
+        self.eng.hello(self.tid, "not a dict")
+        self.assertEqual(set(self.eng.seen), set(before))
+        self.assertEqual(self.eng.seen[self.agent.id]["client"], "codex-mcp-client")
+        # review 23: neither a disabled agent nor a revoked token can set what is shown or count as seen
+        other, tok2 = self.idn.create_agent("B", "observer", ["/project1/fx/**"])
+        tid2 = self.idn.authenticate(tok2)
+        self.idn.set_enabled(other.id, False)
+        self.eng.hello(tid2, {"name": "claude-code", "version": "9"})
+        self.assertNotIn(other.id, self.eng.seen)
+        self.idn.set_enabled(other.id, True)
+        self.idn.revoke(tid2)
+        self.eng.hello(tid2, {"name": "claude-code", "version": "9"})
+        self.assertNotIn(other.id, self.eng.seen)
 
     def test_execution_failure_never_leaks(self):
         self.ad.fail = RuntimeError("secret internals")

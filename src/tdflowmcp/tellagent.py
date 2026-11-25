@@ -94,18 +94,33 @@ def connect_section(port: int, clients: Mapping, selected: Sequence[str] = (), p
         cid, name = c.get("id"), c.get("display")
         if cid in automatic:
             state = "already set up for this project" if cid in set_up else "not set up yet"
+            if cid == "codex":
+                where = ("the MCP server `tdflow` to Codex's configuration (`~/.codex/config.toml`, shared by the Codex "
+                         "CLI, the IDE extension and the desktop app)")
+                start = ("2. Start a new Codex chat (VS Code: a new chat in the Codex panel; CLI: a new `codex` "
+                         "session): Codex loads `tdflow` when a chat starts, so a chat that was already open does not "
+                         "have it. A running Codex picks up a repaired key by itself on its next call.")
+                extra = (" If Codex reports HTTP 401 for `tdflow` after a repair, this Codex version is too old to "
+                         "fetch the key (it does not run `http_headers_helper`): tell the user to update Codex "
+                         "(tested: CLI 0.160.0, VS Code extension 26.1120) and pulse Repair Connection. Do not add a "
+                         "token or another `tdflow` entry yourself. Codex in a remote or cloud environment cannot "
+                         "reach this connection.")
+            else:
+                where = ("the user-scope MCP server `tdflow` to Claude Code's configuration (shared by the CLI and the "
+                         "VS Code extension)")
+                start = ("2. Start a new Claude Code conversation (VS Code: a new chat; CLI: a new session), or run "
+                         "/mcp and reconnect `tdflow`.")
+                extra = ""
             out += ["", f"## Connect {name} (automatic; {state})",
                     "The user does this in TouchDesigner; there is nothing to type or paste:",
-                    "1. TDflowMCP page: Connect Agent, then Approve in the dialog. TDflowMCP adds the user-scope MCP "
-                    "server `tdflow` to Claude Code's configuration (shared by the CLI and the VS Code extension). Its "
+                    f"1. TDflowMCP page: Connect Agent, then Approve in the dialog. TDflowMCP adds {where}. Its "
                     "fixed helper command reads this project's credential from the user's protected store; no token "
                     "is shown, pasted or stored in plain text.",
-                    "2. Start a new Claude Code conversation (VS Code: a new chat; CLI: a new session), or run /mcp "
-                    "and reconnect `tdflow`.",
+                    start,
                     "3. Call `tdflow_whoami`. TouchDesigner then shows Agent Connected — Ready.",
                     "If `tdflow` is missing or Failed: first ask the user to check that TouchDesigner is open (not "
                     "minimized) and Enable MCP is on (it is off after every restart). Otherwise ask for Repair "
-                    "Connection (Agents page). Do not edit the `tdflow` entry yourself."]
+                    "Connection (Agents page). Do not edit the `tdflow` entry yourself." + extra]
             continue
         mcp = _fill(c.get("mcp") or {}, url)
         why = c.get("manual_reason") or "this client cannot fetch a credential by itself"
@@ -128,8 +143,9 @@ def connect_section(port: int, clients: Mapping, selected: Sequence[str] = (), p
             out.append("   Where: " + mcp["config_file_note"])
         start = {"cursor": "`cursor .`", "vscode-copilot": "`code .`"}.get(cid, "the agent")
         out.append(f"4. Turn on Enable MCP, start {start} from that terminal, call `tdflow_whoami`.")
-    out += ["", "Optional: TDflowMCP Skills install from the Setup page (preview first). `tdflow_whoami` reports "
-            "`expected_skill_version`; tell the user if your Skills differ."]
+    if any(c.get("skills") is not None for c in reg):    # not for clients TDflowMCP has no Skills for (Codex, …)
+        out += ["", "Optional: TDflowMCP Skills install from the Setup page (preview first). `tdflow_whoami` reports "
+                "`expected_skill_version`; tell the user if your Skills differ."]
     return out
 
 
@@ -319,6 +335,9 @@ def agent_prompt(key: str, client: str = "", automatic: bool = False, version: s
     by_connect = (key == "set_up") if set_up is None else bool(set_up)
     reconnect = (" (I can run /mcp and reconnect `tdflow`, or pulse Repair Connection on the Agents page)"
                  if by_connect and name == "Claude Code" else
+                 " (I can check that TouchDesigner is open with Enable MCP on and then start a new Codex chat, or pulse "
+                 "Repair Connection on the Agents page)"
+                 if by_connect and name == "Codex" else
                  " (I can pulse Repair Connection on the Agents page)" if by_connect else "")
     configured = ("already configured for this project by Connect Agent" if by_connect else
                   "registered by me (manual setup)")

@@ -688,7 +688,13 @@ class TDflowMCPExt:
     def _safe_version(v):
         """A client's self-declared version, shown only if it looks like one (allowlisted characters)."""
         v = str(v or "")[:24]
-        return v if v and all(c.isalnum() or c in ".-+" for c in v) else ""
+        return v if v and all(c.isascii() and (c.isalnum() or c in ".-+") for c in v) else ""
+
+    @staticmethod
+    def _short_version(v):
+        """For the 26-character Connected Agents line: a pre-release suffix is dropped ('0.171.0-alpha.13.2' is
+        shown as '0.171.0'; the full version is in the audit record)."""
+        return v.split("-")[0].split("+")[0] if len(v) > 10 else v
 
     def _client_display(self, name):
         """The registry's display name for an MCP clientInfo name such as 'claude-code' (allowlisted text only)."""
@@ -771,24 +777,30 @@ class TDflowMCPExt:
         rd = rd or self._readiness()
         ids = self.native.tell_clients()
         cid = ids[0] if len(ids) == 1 else None
-        automatic = bool(cid and C.automatic(cid))
         stage = (C.state or {}).get("stage")
         connect = "flow" if stage in CN.FLOW else "failed" if stage == "failed" else ""
-        set_up = bool(cid) and cid in C.connected_clients()
-        rec = (C.records.get(cid) or {}) if set_up else {}
-        aid = rec.get("agent_id")
+        ready = C.connected_clients()
+        # ADR-0017: under Auto several agents can be connected (Claude Code and Codex). The prompt then names no
+        # client, and it is ready when every one of them could work.
+        several = cid is None and len(ids) > 1 and all(i in ready for i in ids)
+        automatic = bool(cid and C.automatic(cid)) or several
+        set_up = (bool(cid) and cid in ready) or several
+        recs = [C.records.get(i) or {} for i in (ids if several else [cid])] if set_up else []
+        aids = {r.get("agent_id") for r in recs}
         if set_up and not connect:
-            url = (rec.get("entry") or {}).get("url", "")
-            # Never "ready" with a configuration that can no longer work: another port, no valid key (requests are
-            # refused), or a revoked credential. Repair Connection fixes each (review 21).
-            if (url and url != f"http://127.0.0.1:{self.ctl.port}/mcp"
-                    or C.stage_line() == CN.STAGE_LINES["no_credential"]
-                    or (self.identity is not None and not any(t.agent_id == aid and t.revoked_at is None
-                                                              for t in self.identity.tokens.values()))):
-                connect = "repair"
+            no_key = (C.stage_line() in (CN.STAGE_LINES["no_credential"],
+                                         *(v.get("no_credential") for v in CN.STAGE_LINES_FOR.values())))
+            for rec in recs:
+                url, aid = (rec.get("entry") or {}).get("url", ""), rec.get("agent_id")
+                # Never "ready" with a configuration that can no longer work: another port, no valid key (requests
+                # are refused), or a revoked credential. Repair Connection fixes each (review 21).
+                if (url and url != f"http://127.0.0.1:{self.ctl.port}/mcp" or no_key
+                        or (self.identity is not None and not any(t.agent_id == aid and t.revoked_at is None
+                                                                  for t in self.identity.tokens.values()))):
+                    connect = "repair"
         talked_ids = {r.get("agent_id") for r in rd.get("connected") or ()}
         if set_up:
-            talked = aid in talked_ids                    # this client's own agent, not any agent (review 21)
+            talked = bool(aids & talked_ids)              # this client's own agent, not any agent (review 21)
         elif not automatic:
             ours = {r.get("agent_id") for r in C.records.values()}
             talked = bool(talked_ids - ours)              # a manually registered agent talked
@@ -1443,6 +1455,9 @@ class TDflowMCPExt:
 
             def call_tool(self_inner, name, arguments, client_info, meta=None):
                 return eng.call(tid, name, arguments, client_info, request_id=str(ctx.rid), main=main, meta=meta)
+
+            def hello(self_inner, client_info):
+                eng.hello(tid, client_info)
         with self._inflight_lock:
             self._inflight += 1
         try:
@@ -2408,7 +2423,8 @@ class TDflowMCPExt:
             conn = rd["connected"]
             seen = self._seen()
             self._ux_vals = {
-                "Connectedagents": ((f"{conn[0]['client']}{' ' + conn[0]['version'] if conn[0].get('version') else ''}"
+                "Connectedagents": ((f"{conn[0]['client']}"
+                                     f"{' ' + self._short_version(conn[0]['version']) if conn[0].get('version') else ''}"
                                      f" · {conn[0]['age_s']} s" + (f" +{len(conn) - 1}" if len(conn) > 1 else ""))
                                     if conn else ("none recently" if self.mcp_on else "none (MCP off)"))[:80],
                 "Agentinfo": self.native.info_line(seen),

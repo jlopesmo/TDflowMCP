@@ -95,8 +95,47 @@ class ReadinessTests(unittest.TestCase):
         end = src.index("NO_REQUEST_AFTER_S")
         exec(src[start:end], ns)                                   # the literal tables only
         for k, v in list(ns["STAGE_LINES"].items()) + list(ns["FAIL_LINES"].items()):
-            line = v.format(client="Claude Code", minutes=59)
-            self.assertLessEqual(len(line), R.MAX_LINE, (k, line))
+            for client, who in (("Claude Code", "Claude"), ("Codex", "Codex")):       # every automatic client
+                line = v.format(client=client, minutes=59, who=who)
+                self.assertLessEqual(len(line), R.MAX_LINE, (k, line))
+        for cid, table in ns["STAGE_LINES_FOR"].items():           # ADR-0017: lines that differ per client
+            for k, v in table.items():
+                self.assertIn(k, ns["STAGE_LINES"])
+                self.assertLessEqual(len(v), R.MAX_LINE, (cid, k, v))
+        self.assertNotIn("/mcp", " ".join(ns["STAGE_LINES_FOR"]["codex"].values()))     # a Claude Code command
+
+    def test_installed_agents_line_fits_with_any_mix_of_agents(self):
+        """ADR-0017 (usability review): with Codex automatic, 'Claude Code, Codex (auto) +2 more' no longer fitted."""
+        import ast
+        from tests.unit import SRC
+        src = (SRC / "td_adapter" / "connection.py").read_text(encoding="utf-8")
+        fn = next(n for n in ast.parse(src).body if isinstance(n, ast.FunctionDef) and n.name == "installed_text")
+        ns = {}
+        exec(compile(ast.Module([fn], []), "installed_text", "exec"), ns)       # a pure function; no `td` needed
+        text = ns["installed_text"]
+
+        def rows(auto=(), manual=(), old=()):
+            return ([{"client": c, "automatic": True} for c in auto] + [{"client": c, "automatic": False} for c in manual]
+                    + [{"client": c, "automatic": False, "manual_why": "x"} for c in old])
+        cases = {
+            "Auto: Claude Code, Codex": rows(("claude-code", "codex")),
+            "Auto: Claude, Codex +2": rows(("claude-code", "codex"), ("cursor", "vscode-copilot")),
+            "Auto: Claude Code +1": rows(("claude-code",), ("cursor",)),
+            "Auto: Codex": rows(("codex",)),
+            "Manual: Cursor, Copilot": rows(manual=("cursor", "vscode-copilot")),
+            "Manual: Codex (too old)": rows(old=("codex",)),
+            "Auto: Claude Code +1": rows(("claude-code",), old=("codex",)),
+        }
+        for want, r in cases.items():
+            self.assertEqual(text(r), want)
+        import itertools
+        ids = ("claude-code", "codex", "cursor", "vscode-copilot")
+        for n in range(1, 5):
+            for combo in itertools.combinations(ids, n):
+                for k in range(len(combo) + 1):
+                    for old in ((), ("codex",)):
+                        r = rows(combo[:k], [c for c in combo[k:] if c not in old], [c for c in old if c in combo[k:]])
+                        self.assertLessEqual(len(text(r)), R.MAX_LINE, text(r))
 
     def test_errors_and_suspension_win(self):
         f = {"checks": checks(), "mcp_on": True, "connected": [{"agent": "A", "last": 5}], "now": 6}

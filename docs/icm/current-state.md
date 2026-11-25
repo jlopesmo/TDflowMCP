@@ -26,7 +26,7 @@
   - Unsaved, read-only, network and cloud-synced folders fall back to private storage (fallbacks unit-tested; project-local in TD).
   - Moved, copied and relocated projects are detected, and nothing is relocated without Confirm Move (verified copy or adoption) or Claim As New Project. TD incremental saves count as the same project. All of this is verified in TD.
 - **Phase 1C:**
-  - **Client registry:** `src/integrations/clients.json`. Claude Code is primary; Codex, Cursor and VS Code Copilot are documented only.
+  - **Client registry:** `src/integrations/clients.json`. Claude Code is primary; Codex, Cursor and VS Code Copilot are documented only. (That is the 1.0.0 state. On `dev`, Codex is verified on Windows: see [1.0.1 release candidate](#101-release-candidate-one-click-codex-owner-d27).)
   - **Connection instructions:** "Connect your coding agent", with the token always `${TDFLOW_TOKEN}`.
   - **Live Claude Code 2.1.289 session:** connected using the generated text; scoped edit audited; no token in any file or output.
   - **Skills:** `tdflow-core` v1.0, with a consent-based install/update/uninstall round-trip and hash manifest.
@@ -181,7 +181,8 @@
 
 ## Not observed / unverified
 - **CI before 2026-11-25:** no GitHub Actions run was observed for the commits recorded below as "CI: not observed". Runs have been observed since then ([validation index](validation-index.md), [Release 1.0.0](#release-100--2026-11-25)).
-- **Other clients:** Codex CLI, Cursor and VS Code Copilot connections are documented manual fallbacks only, with no live test. Client facts were re-checked against vendor documentation on 2026-11-24 ([client audit](../research/2026-11-24-one-click-connection.md#client-audit)).
+- **Other clients:** Cursor and VS Code Copilot connections are documented manual fallbacks only, with no live test. Client facts were re-checked against vendor documentation on 2026-11-24 ([client audit](../research/2026-11-24-one-click-connection.md#client-audit)). In the released 1.0.0 the same holds for Codex; on `dev` (1.0.1rc1) Codex is verified on Windows.
+- **Codex, not observed** (1.0.1rc1): the chat window of the Codex VS Code extension on the owner's profile, and a model session in which Codex itself decides to call the tools (the engines were driven directly; [checklist](../operations/release-candidate-1.0.1.md)); the Codex desktop app (not installed); Codex on macOS or Linux; what a Codex version too old for `http_headers_helper` does with the entry (reasoned, not run); whether a new chat in an already open VS Code window is enough without reloading it.
 - **The Capabilities page on the owner's real profile** (rc6): automated with a stub API in headless Edge and against the real component API in the 1B suite; not opened by the owner yet.
 - **The owner's real profile with the Claude Code VS Code chat UI** (including pasting the rc5 Copy Agent Prompt there; the same text was validated with the Claude Code CLI): not executed by an agent. It requires the owner's own approval in TouchDesigner ([checklist](../operations/release-candidate-1.0.md)). The extension's engine is validated against the written configuration.
 - **macOS automatic setup** (Keychain, sh helper): implemented from documentation, **not validated**. Pre-existing: on macOS the private root is `~/TDflowMCP` with default permissions.
@@ -256,3 +257,22 @@ The two sections above are earlier checkpoints of the same day; this one superse
 - **Default branch:** `main` (observed). `main` is protected against force pushes and deletion.
 - **Not observed yet:** a byte download of the published `.tox` with its checksum compared. It could not be done from this network (the gateway intercepts the asset host with an untrusted certificate, and certificate checking was not bypassed). The owner will do it from another network; **Issue #2 stays open until then**.
 - **Not claimed:** compatibility beyond Windows with TouchDesigner 2025.32440; an open-source license.
+
+## 1.0.1 release candidate: one-click Codex (owner D27)
+
+**On `dev` only, version `1.0.1rc1`; observed 2026-11-25.** `main`, the tag `v1.0.0` and the published release are unchanged. Decision: [ADR-0017](../decisions/0017-codex-one-click-connection.md) (Conditionally Accepted). Record: [research](../research/2026-11-25-codex-one-click-connection.md). Evidence: [validation index](validation-index.md). Checklist: [1.0.1 candidate](../operations/release-candidate-1.0.1.md).
+
+- **What Codex supports, verified before building:** the Codex CLI 0.160.0 and the engine of the Codex VS Code extension 26.1120.50957 (codex-cli 0.171.0-alpha.13.2) both run `mcp_servers.<id>.http_headers_helper`. Observed: started through `cmd.exe /Q /D /C` with a reduced environment; headers cached per connection; run again once after a 401; a non-zero exit sends no request, an empty object sends requests without credentials.
+- **Implemented:**
+  - **Coding Agent: Codex → Connect Agent → Approve → new Codex chat**, on Windows. One table `[mcp_servers.tdflow]` (`url`, `http_headers_helper`) in `~/.codex/config.toml`, edited as text and verified by re-parsing; every other byte kept; backup; exact undo by Disconnect Agent; Repair Connection.
+  - The ADR-0015 vault and listener proof, in a separate credential slot; the Codex helper exits 1 and prints nothing on any failure. The Claude Code helper is byte-for-byte the released one (pinned by digest in a test).
+  - Codex and Claude Code connected to one project at the same time, each with its own agent, key and audit records.
+  - The connected client's name and version for legacy-era MCP clients (`Codex 0.160.0`).
+  - The manual fallback remains for Codex outside Windows and for an extension older than 26.1117.
+- **Verified in TouchDesigner 2025.32440 with real clients** (disposable client home and project): the Codex suite 55/55 + 64/64 with the extension's engine and the CLI's engine, next to a real Claude Code CLI; every other suite, the visual review and the browser checks pass on the same build (candidate `b37e1d94…`, source digest `486e33be…`).
+- **Reviews:** independent security review 23 (0 High; 1 Medium and 8 Low fixed, also in the Claude Code path; 1 Low accepted and documented) and a usability review (all High and Medium addressed).
+- **Also changed for Claude Code users** (wording and hardening, no new capability): `Start a new Claude chat.`; `Error in Claude settings` / `Can't edit Claude settings` with the reason in View Connection Details; the approval dialog ends with "Then: Copy Agent Prompt, paste it in a new Claude Code chat."; the chooser button says `Claude`; a racing writer can no longer change the approved action.
+- **Not changed:** the 30 tools, tool surface `1`, Skill 1.6, permissions, approvals, the audit format, the capability list.
+- **Known limits:** Windows only; not for Codex cloud tasks or remote sessions; the minimum Codex version is not documented by the vendor; a different `CODEX_HOME` for Codex than for TouchDesigner is not detected; hand-written inline or dotted `mcp_servers` layouts are refused, not converted.
+- **Not observed:** see [Not observed / unverified](#not-observed--unverified) (the Codex chat window on the owner's profile and a model session; the desktop app; macOS and Linux).
+- **Next:** the owner's five-minute acceptance check, then the owner's decision on releasing 1.0.1 ([roadmap B8](roadmap.md#open-blockers-and-owner-actions)).

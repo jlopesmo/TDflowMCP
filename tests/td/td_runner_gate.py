@@ -85,6 +85,10 @@ def run(mode, comp, ext, T, frames, until, checkpoint, R):
         yield from native_recover(comp, ext, T, frames, until, checkpoint, R)
     elif mode == "native_screens":
         yield from native_screens(comp, ext, T, frames, until, checkpoint, R)
+    elif mode == "codex":
+        yield from codex_onboard(comp, ext, T, frames, until, checkpoint, R)
+    elif mode == "codex_restart":
+        yield from codex_restart(comp, ext, T, frames, until, checkpoint, R)
     elif mode == "memory":
         yield from memory(comp, ext, T, frames, until, checkpoint, R)
     elif mode == "memory_persist":
@@ -512,12 +516,13 @@ def _events(ext, until, tool):
 
 
 def _connect_and_pick(comp, ext, dialogs, frames, until, name):
-    """Pulse Connect Agent; when several agents were found, pick Claude Code in the chooser dialog."""
+    """Pulse Connect Agent; when several agents were found, pick Claude Code in the chooser dialog (its button
+    says "Claude": the buttons show about seven characters)."""
     n = len(dialogs)
     comp.par.Connectagent.pulse()
     yield frames(2)
     if len(dialogs) > n and dialogs[-1]["title"] == "Connect a coding agent":
-        dialogs[-1]["cb"](dialogs[-1]["buttons"].index("Claude Code"))
+        dialogs[-1]["cb"](dialogs[-1]["buttons"].index("Claude"))
     yield until(lambda: _stage(ext) in ("awaiting", "failed", "waiting"), 30, name)
 
 
@@ -553,8 +558,8 @@ def native_onboard(comp, ext, T, frames, until, checkpoint, R):
     T("first_run.PENDING_NEVER_COUNTED_AS_PASSED", [c.result for c in ext.checks if c.id == "net.bind"] == ["unknown"],
       checks={c.id: c.result for c in ext.checks})
     T("first_run.AUTO_FINDS_CLAUDE_CODE_WITHOUT_RUNNING_IT", "claude-code" in ext.native.detected
-      and p.Codingagent.eval() == "auto" and "Claude Code (auto)" in p.Detectedclients.eval()
-      and len(p.Detectedclients.eval()) <= 80, detected=ext.native.detected, installed=p.Detectedclients.eval())
+      and p.Codingagent.eval() == "auto" and p.Detectedclients.eval().startswith("Auto: Claude")
+      and len(p.Detectedclients.eval()) <= 26, detected=ext.native.detected, installed=p.Detectedclients.eval())
     several = len(ext.native.selected()) > 1
     R["several_detected"] = ext.native.detected
     p.Agentaccess = "builder"
@@ -578,7 +583,17 @@ def native_onboard(comp, ext, T, frames, until, checkpoint, R):
     yield from _connect_and_pick(comp, ext, dialogs, frames, until, "connect_plan")
     d = dialogs[-1]
     text = d["text"]
-    if several:
+    n_auto = sum(1 for i in ext.native.selected() if ext.connector.automatic(i))
+    if several and n_auto > 1:
+        # ADR-0017: when several agents can be set up automatically (Claude Code and Codex), Auto asks which one;
+        # each gets its own identity.
+        ch = dialogs[n]
+        T("connect.AUTO_ASKS_WHEN_SEVERAL_ARE_AUTOMATIC", len(dialogs) == n + 2 and ch["title"] == "Connect a coding agent"
+          and "Two agents can be set up automatically" in ch["text"] and "Nothing changes yet" in ch["text"]
+          and ch["buttons"] == ["Claude", "Codex", "Cancel"] and d["title"] == "Connect Claude Code"
+          and all(len(x) <= 25 for x in sys.modules["tdflowmcp_td.connection"].wrap_dialog(ch["text"]).splitlines()),
+          titles=[x["title"] for x in dialogs[n:]], text=ch["text"], buttons=ch["buttons"])
+    elif several:
         # Usability review: one agent can be set up automatically, so Auto recommends it without asking and names
         # the others (manual setup) in the plan.
         T("connect.AUTO_RECOMMENDS_THE_AUTOMATIC_AGENT", len(dialogs) == n + 1 and d["title"] == "Connect Claude Code"
@@ -587,7 +602,7 @@ def native_onboard(comp, ext, T, frames, until, checkpoint, R):
     flat = " ".join(text.split())
     T("connect.CONSENT_SHOWS_THE_PLAN", all(x in flat for x in (
         "~/.claude.json", "other servers kept", "Turns ON Enable MCP", "Undo", "Builder", "/project1/fx/**",
-        "protected storage", "backup", "Then start a new Claude Code chat")) and
+        "Windows-protected", "backup", "Then: Copy Agent Prompt, paste it in a new Claude Code chat")) and
       d["buttons"] == ["Approve", "Cancel"] and all(len(x) <= 25 for x in sys.modules["tdflowmcp_td.connection"]
                                                        .wrap_dialog(text).splitlines()),   # as the dialog shows it
       text=text, buttons=d["buttons"])
@@ -621,7 +636,7 @@ def native_onboard(comp, ext, T, frames, until, checkpoint, R):
     T("connect.MCP_ENABLED_ONLY_BY_THE_APPROVAL", p.Enablemcp.eval() and p.Status.eval() == "Enabled",
       status=p.Status.eval())
     T("connect.CONFIGURED_IS_NOT_CONNECTED", p.Statusdetail.eval() in (
-        "Start a Claude Code chat.", "Save, then start a chat.")
+        "Start a new Claude chat.", "Save, then start a chat.")
       and "none" in p.Connectedagents.eval(), detail=p.Statusdetail.eval(), connected=p.Connectedagents.eval())
     T("prompt.READY_ONCE_SET_UP", p.Tellagent.eval() == "Prompt ready: copy it", tell=p.Tellagent.eval())
     p.Copytellagent.pulse()
@@ -837,6 +852,42 @@ def native_screens(comp, ext, T, frames, until, checkpoint, R):
             yield frames(15)
             yield checkpoint(f"screen_{stage}_{page}".replace("-", "_"), {"stage": stage, "page": page})
     yield from shots("1-fresh")
+    if "codex" in ext.native.detected and ext.connector.automatic("codex") and ext.connector.automatic("claude-code"):
+        # ADR-0017: the two dialogs the Codex flow adds, as TouchDesigner really shows them: the chooser (Auto with
+        # two agents that can be set up automatically) and the Codex plan. Both are cancelled; nothing is written.
+        pop0 = td.op("/sys/TDResources/popDialog")
+
+        def labels0():
+            return [str(getattr(pop0.par, f"Buttonlabel{i}").eval()) for i in range(1, 1 + int(pop0.par.Buttons.eval()))]
+        p.Codingagent = "auto"
+        yield frames(3)
+        p.Connectagent.pulse()
+        yield until(lambda: _stage(ext) == "choosing" and ext.connector.dialog is not None, 30, "screens_chooser")
+        yield frames(20)
+        text0 = pop0.par.Text.eval()
+        T("chooser.REAL_DIALOG_ONE_BUTTON_PER_AUTOMATIC_AGENT", ext.connector.dialog == "Connect a coding agent"
+          and labels0() == ["Claude", "Codex", "Cancel"] and all(len(x) <= 7 for x in labels0())
+          and all(len(x) <= 25 for x in text0.splitlines())
+          and len(text0.splitlines()) <= 12 and abs(pop0.par.w.eval() - 260) < 1, labels=labels0(), text=text0)
+        yield checkpoint("screen_0-chooser", {"stage": "0-chooser", "page": "dialog"})
+        pop0.ext.PopDialogExt.OnButtonClicked(3)                # Cancel
+        yield frames(10)
+        T("chooser.CANCEL_CHANGES_NOTHING", ext.connector.state is None and ext.connector.dialog is None
+          and not p.Enablemcp.eval())
+        p.Codingagent = "codex"
+        yield frames(3)
+        p.Connectagent.pulse()
+        yield until(lambda: _stage(ext) == "awaiting" and ext.connector.dialog is not None, 30, "screens_codex_plan")
+        yield frames(20)
+        text0 = pop0.par.Text.eval()
+        T("codexdialog.REAL_DIALOG_FITS", ext.connector.dialog == "Connect Codex" and labels0() == ["Approve", "Cancel"]
+          and all(len(x) <= 25 for x in text0.splitlines()) and len(text0.splitlines()) <= 18
+          and "~/.codex/config.toml" in text0 and "Codex chat." in text0, text=text0, lines=len(text0.splitlines()))
+        yield checkpoint("screen_0-codex", {"stage": "0-codex", "page": "dialog"})
+        pop0.ext.PopDialogExt.OnButtonClicked(2)                # Cancel
+        yield frames(10)
+        T("codexdialog.CANCEL_CHANGES_NOTHING", ext.connector.state is None and ext.connector.dialog is None
+          and not p.Enablemcp.eval() and (ext.identity is None or len(ext.identity.agents) == 0))
     p.Codingagent = "claude-code"
     p.Connectagent.pulse()                                   # the real TouchDesigner dialog opens
     yield until(lambda: _stage(ext) == "awaiting", 30, "screens_plan")
@@ -930,7 +981,7 @@ def _enable_and_reconnect(comp, ext, T, frames, until, checkpoint, tag, g, live)
     aid = rec.get("agent_id")
     n = len(ext.identity.agents)
     T(f"{tag}.EXISTING_AGENT_LOADED", aid == g.get("aid") and n == g.get("agents"), aid=aid, agents=n)
-    T(f"{tag}.waiting_for_the_agent", p.Statusdetail.eval() in ("Start a Claude Code chat.", "Waiting for the agent…",
+    T(f"{tag}.waiting_for_the_agent", p.Statusdetail.eval() in ("Start a new Claude chat.", "Waiting for the agent…",
                                                                 "MCP on. Waiting for agent"), detail=p.Statusdetail.eval())
     T(f"{tag}.PROMPT_READY_AFTER_ENABLE_MCP", p.Tellagent.eval() in ("Prompt ready: copy it", "Prompt ready · connected")
       and "already configured" in ext._refresh_prompt(), tell=p.Tellagent.eval())
@@ -1031,7 +1082,7 @@ def native_recover(comp, ext, T, frames, until, checkpoint, R):
     ext.connector.state = None
     p.Repairconnection.pulse()
     yield until(lambda: _stage(ext) == "failed", 30, "failed_plan")
-    T("failure.INVALID_CONFIG_FAILS_CLEANLY", p.Statusdetail.eval() == "Claude settings damaged"
+    T("failure.INVALID_CONFIG_FAILS_CLEANLY", p.Statusdetail.eval() == "Error in Claude settings"
       and _cfg(cfg) == b"{ not valid json" and len(ext.identity.agents) == n_agents, detail=p.Statusdetail.eval())
     with open(cfg, "wb") as f:
         f.write(good)
@@ -1055,6 +1106,294 @@ def native_recover(comp, ext, T, frames, until, checkpoint, R):
     ev = yield from _events(ext, until, "client_disconnect")
     T("disconnect.AUDITED", [e["outcome"] for e in reversed(ev)] == ["intent", "ok"])
     yield checkpoint("restart_disconnected", {})
+    p.Enablemcp = False
+    yield frames(5)
+
+
+# ---- codex: Coding Agent: Codex -> Connect Agent -> Approve -> a real Codex engine connects (ADR-0017, Issue #3) ----
+def _select_agent(ext, p, aid, frames):
+    ext.native.refresh_menu()
+    p.Agentselect = aid
+    yield frames(3)
+
+
+def _live_tokens(ext, aid):
+    return [t for t in ext.identity.tokens.values() if t.agent_id == aid and not t.revoked_at]
+
+
+def codex_onboard(comp, ext, T, frames, until, checkpoint, R):
+    """Launch 1, with a disposable client home (TDFLOW_CLIENT_HOME) holding a realistic ``.codex/config.toml`` and a
+    ``.claude.json``: review, cancel, approve; the harness then runs the real Codex engines against the configuration
+    TDflowMCP wrote. Claude Code is connected next to it; Codex alone is revoked and repaired; save."""
+    import tomllib
+    M.fixtures()
+    p = comp.par
+    home = os.environ["TDFLOW_CLIENT_HOME"]
+    cfg = os.path.join(home, ".codex", "config.toml")
+    ccfg = os.path.join(home, ".claude.json")
+    original, c_original = _cfg(cfg), _cfg(ccfg)
+    dialogs = _dialogs(ext)
+    wrap = sys.modules["tdflowmcp_td.connection"].wrap_dialog
+    yield frames(10)
+    T("codex.FOUND_WITHOUT_RUNNING_IT", "codex" in ext.native.detected and ext.connector.automatic("codex")
+      and "Codex" in p.Detectedclients.eval() and p.Detectedclients.eval().startswith("Auto: ")
+      and len(p.Detectedclients.eval()) <= 26,
+      detected=ext.native.detected, installed=p.Detectedclients.eval(), interfaces=ext.connector.interfaces("codex"))
+    p.Codingagent = "codex"
+    p.Agentaccess = "builder"
+    p.Allowedscope = "/project1/fx/**"
+    yield frames(3)
+    sect = ext.tell_text.split("## Connect Codex", 1)[-1].split("## ", 1)[0]
+    T("codex.INSTRUCTIONS_ARE_AUTOMATIC_WITHOUT_A_TOKEN", "## Connect Codex (automatic; not set up yet)" in ext.tell_text
+      and "TDFLOW_TOKEN" not in sect and "Copy Token" not in sect and "Claude" not in sect, text=sect[:300])
+    T("codex.PROMPT_NOT_READY_BEFORE_CONNECTING", p.Tellagent.eval() == "Not ready: Connect Agent", tell=p.Tellagent.eval())
+    # 0. Review 23 (8), without a dialog (a second pulse approves): a pulse made after Coding Agent was changed to
+    # another agent must not approve the plan that was shown for Codex.
+    recorder = ext.connector.dialog_opener
+    ext.connector.dialog_opener = lambda title, text, buttons, cb: False
+    p.Connectagent.pulse()
+    yield until(lambda: _stage(ext) in ("awaiting", "failed"), 30, "codex_plan_no_dialog")
+    T("consent.plan_for_codex_waits_for_a_second_pulse", (ext.connector.state or {}).get("client") == "codex"
+      and p.Statusdetail.eval() == "Review, then pulse again.", detail=p.Statusdetail.eval())
+    p.Codingagent = "claude-code"
+    yield frames(2)
+    p.Connectagent.pulse()
+    yield until(lambda: (ext.connector.state or {}).get("client") == "claude-code"
+                and _stage(ext) in ("awaiting", "failed"), 30, "other_plan_no_dialog")
+    T("consent.A_PULSE_FOR_ANOTHER_AGENT_DOES_NOT_APPROVE_THE_CODEX_PLAN", _cfg(cfg) == original
+      and _cfg(ccfg) == c_original and len(ext.identity.agents) == 0 and not p.Enablemcp.eval()
+      and (ext.connector.state or {}).get("client") == "claude-code" and _stage(ext) == "awaiting",
+      stage=_stage(ext), client=(ext.connector.state or {}).get("client"))
+    ext.connector.cancel()
+    ext.connector.dialog_opener = recorder
+    p.Codingagent = "codex"
+    yield frames(3)
+    # 1. Review, then cancel: nothing changes.
+    p.Connectagent.pulse()
+    yield until(lambda: _stage(ext) in ("awaiting", "failed"), 30, "codex_plan")
+    d = dialogs[-1]
+    text, full = d["text"], comp.op("connect_view").text
+    flat = " ".join(text.split())
+    T("codex.CONSENT_SHOWS_THE_PLAN", d["title"] == "Connect Codex" and d["buttons"] == ["Approve", "Cancel"]
+      and all(x in flat for x in ("~/.codex/config.toml", "other servers kept", "Turns ON Enable MCP", "Undo", "Builder",
+                                  "/project1/fx/**", "Windows-protected", "backup",
+                                  "Then: Copy Agent Prompt, paste it in a new Codex chat"))
+      and all(len(x) <= 25 for x in wrap(text).splitlines()), text=text, buttons=d["buttons"],
+      failed=(ext.connector.state or {}).get("code"))
+    T("codex.FULL_PLAN_IN_THE_VIEWER", all(x in full for x in ("blender", "docs", "TURNED ON", "Disconnect Agent",
+                                                              "Needs a recent Codex", "VS Code extension",
+                                                              "a new chat in the Codex panel")), full=full[:600])
+    T("codex.consent_has_no_secret_or_user_path", not TOKEN_SHAPE.search(text + full) and home not in text + full)
+    T("codex.NOTHING_CHANGED_BEFORE_APPROVAL", _cfg(cfg) == original and _cfg(ccfg) == c_original
+      and len(ext.identity.agents) == 0 and not p.Enablemcp.eval())
+    d["cb"](1)                                                   # Cancel
+    yield frames(2)
+    T("codex.CANCEL_CHANGES_NOTHING", ext.connector.state is None and _cfg(cfg) == original
+      and len(ext.identity.agents) == 0, detail=p.Statusdetail.eval())
+    # 2. Approve.
+    p.Connectagent.pulse()
+    yield until(lambda: _stage(ext) in ("awaiting", "failed"), 30, "codex_plan2")
+    seen, lines = [], []
+    dialogs[-1]["cb"](0)
+
+    def progressed():
+        seen.append(_stage(ext))
+        lines.append(p.Statusdetail.eval())
+        return _stage(ext) in ("waiting", "failed")
+    yield until(progressed, 40, "codex_configure")
+    yield frames(3)
+    T("codex.VISIBLE_PROGRESS", "configuring" in seen and _stage(ext) == "waiting"
+      and any(x.startswith("Configuring Codex") for x in lines) and all(len(x) <= 26 for x in lines),
+      stages=sorted(set(map(str, seen))), long=[x for x in set(lines) if len(x) > 26],
+      failed=(ext.connector.state or {}).get("line"), code=(ext.connector.state or {}).get("code"))
+    T("codex.MCP_ENABLED_ONLY_BY_THE_APPROVAL", p.Enablemcp.eval() and p.Status.eval() == "Enabled", status=p.Status.eval())
+    T("codex.CONFIGURED_IS_NOT_CONNECTED", p.Statusdetail.eval() in ("Start a new Codex chat.", "Save, then start a chat.")
+      and "none" in p.Connectedagents.eval(), detail=p.Statusdetail.eval(), connected=p.Connectedagents.eval())
+    T("codex.PROMPT_READY_ONCE_SET_UP", p.Tellagent.eval() == "Prompt ready: copy it"
+      and "start a new Codex chat" in ext._refresh_prompt() and "/mcp" not in ext.prompt_text, tell=p.Tellagent.eval())
+    now = _cfg(cfg)
+    T("codex.TABLE_APPENDED_EVERY_OTHER_BYTE_KEPT", now.startswith(original)
+      and now[len(original):].startswith(b"\n[mcp_servers.tdflow]\n"), tail=now[len(original):][:120])
+    parsed, before = tomllib.loads(now.decode("utf-8")), tomllib.loads(original.decode("utf-8"))
+    entry = parsed["mcp_servers"].pop("tdflow")
+    T("codex.ENTRY_IS_URL_AND_HELPER_ONLY", sorted(entry) == ["http_headers_helper", "url"]
+      and entry["url"] == "http://127.0.0.1:9480/mcp" and "TDflowMCP" in entry["http_headers_helper"]
+      and "catch{exit 1}" in entry["http_headers_helper"] and parsed == before, keys=sorted(entry))
+    T("codex.CLAUDE_CODE_SETTINGS_UNTOUCHED", _cfg(ccfg) == c_original)
+    T("codex.NO_TOKEN_IN_THE_CONFIG_OR_COMPONENT", not TOKEN_SHAPE.search(now.decode("utf-8"))
+      and not _no_token_in_component(comp), hits=_no_token_in_component(comp))
+    rec = ext.connector.records.get("codex") or {}
+    root = ext._private_root()
+    vf = os.path.join(root, "connect", "codex", rec.get("pid", "x") + ".dpapi")
+    T("codex.OWN_CREDENTIAL_IN_THE_PROTECTED_STORE", os.path.isfile(vf)
+      and not TOKEN_SHAPE.search(open(vf, encoding="ascii").read())
+      and not os.path.exists(os.path.join(root, "connect", "claude-code")))
+    T("codex.BACKUP_KEPT_PRIVATELY", bool(rec.get("backup")) and _cfg(os.path.join(root, "connect", "backups",
+                                                                              rec.get("backup", "x"))) == original)
+    ev = yield from _events(ext, until, "client_connect")
+    T("codex.AUDITED_INTENT_BEFORE_OUTCOME", [e["outcome"] for e in reversed(ev)] == [
+        "cancelled", "cancelled", "cancelled", "intent", "ok"], outcomes=[e["outcome"] for e in reversed(ev)])
+    aid = rec.get("agent_id")
+    R["codex_record"] = {k: rec.get(k) for k in ("client", "agent_id", "shown_path", "action", "created_file")}
+    g = yield checkpoint("codex_live", {"project_folder": str(td.project.folder), "pid": ext.storage.project_id,
+                                        "aid": aid}, seconds=900)
+    yield frames(5)
+    yield until(lambda: _stage(ext) == "connected", 10, "codex_verified")
+    ext._note_until = 0.0
+    yield frames(3)
+    T("codex.AGENT_CONNECTED_READY", p.Statusdetail.eval() == "Agent Connected — Ready", detail=p.Statusdetail.eval())
+    R["codex_connected_line"] = p.Connectedagents.eval()
+    # Codex speaks the legacy MCP era: its name and version come from the handshake ("codex-mcp-client 0.171...").
+    T("codex.ACTUAL_CLIENT_IDENTITY_SHOWN", not g.get("live") or __import__("re").match(
+        r"Codex \d+\.\d+\.\d+ · \d+ s\Z", p.Connectedagents.eval()) is not None, connected=p.Connectedagents.eval())
+    T("codex.CONNECTED_LINE_FITS", len(p.Connectedagents.eval()) <= 26, n=len(p.Connectedagents.eval()))
+    ev = yield from _events(ext, until, "client_connect")
+    T("codex.VERIFIED_ONLY_AFTER_A_REAL_REQUEST", any(e["outcome"] == "verified" and e.get("agent_id") == aid for e in ev))
+    T("codex.work.OPERATOR_CREATED_IN_SCOPE", td.op("/project1/fx/codex_probe") is not None or not g.get("live"),
+      ops=[o.name for o in td.op("/project1/fx").children])
+    T("codex.work.OUT_OF_SCOPE_UNCHANGED", td.op("/project1/codex_outside") is None)
+    denied = yield from store_op(ext, until, "events", "kind = ? AND agent_id = ?", ("deny", aid), 50)
+    T("codex.work.DENIAL_AUDITED_FOR_THE_CODEX_AGENT", len(denied) >= 1 or not g.get("live"), denied=len(denied))
+    T("codex.PROMPT_READY_CONNECTED", p.Tellagent.eval() == "Prompt ready · connected", tell=p.Tellagent.eval())
+    # 3. Claude Code next to it: its own configuration file, identity and credential.
+    p.Codingagent = "claude-code"
+    yield frames(3)
+    p.Connectagent.pulse()
+    yield until(lambda: _stage(ext) in ("awaiting", "failed"), 30, "claude_plan")
+    d = dialogs[-1]
+    T("both.CLAUDE_PLAN_IS_ITS_OWN", d["title"] == "Connect Claude Code" and "~/.claude.json" in " ".join(d["text"].split())
+      and "Turns ON Enable MCP" not in " ".join(d["text"].split()), text=d["text"])
+    d["cb"](0)
+    yield until(lambda: _stage(ext) in ("waiting", "failed"), 40, "claude_configure")
+    yield frames(3)
+    recs = ext.connector.records
+    c_aid = (recs.get("claude-code") or {}).get("agent_id")
+    T("both.TWO_CLIENTS_TWO_AGENTS", sorted(recs) == ["claude-code", "codex"] and bool(c_aid) and c_aid != aid
+      and len(ext.identity.agents) == 2 and recs["codex"].get("agent_id") == aid, records=sorted(recs))
+    T("both.CODEX_SETTINGS_UNTOUCHED_BY_THE_CLAUDE_SETUP", _cfg(cfg) == now)
+    cvf = os.path.join(root, "connect", "claude-code", rec.get("pid", "x") + ".dpapi")
+    T("both.EACH_CLIENT_HAS_ITS_OWN_CREDENTIAL_FILE", os.path.isfile(vf) and os.path.isfile(cvf))   # keys: harness
+    yield checkpoint("both_live", {"codex_aid": aid, "claude_aid": c_aid}, seconds=900)
+    yield frames(5)
+    rows = ext._connected_rows()
+    T("both.EACH_AGENT_TALKED_UNDER_ITS_OWN_IDENTITY", {aid, c_aid} <= {r.get("agent_id") for r in rows} or not g.get("live"),
+      rows=[(r.get("agent_id"), r.get("client")) for r in rows])
+    # 4. Revoke Codex only; Claude Code keeps working. Then Repair Connection: the same agent, a new key.
+    yield from _select_agent(ext, p, aid, frames)
+    p.Revoketokens.pulse()
+    yield until(lambda: not ext.native.busy and not _live_tokens(ext, aid), 15, "codex_revoke")
+    T("revoke.ONLY_THE_CODEX_KEY_IS_REVOKED", not _live_tokens(ext, aid) and len(_live_tokens(ext, c_aid)) == 1)
+    yield checkpoint("codex_revoked", {}, seconds=600)
+    p.Codingagent = "codex"
+    yield frames(3)
+    T("revoke.PROMPT_SAYS_REPAIR", p.Tellagent.eval() == "Not ready: Repair (Agents)"
+      and "Repair Connection" in ext._refresh_prompt(), tell=p.Tellagent.eval())
+    ext.connector.state = None
+    yield from _select_agent(ext, p, aid, frames)
+    p.Repairconnection.pulse()
+    yield until(lambda: _stage(ext) in ("awaiting", "failed"), 30, "codex_repair_plan")
+    d = dialogs[-1]
+    T("repair.PLAN_REUSES_THE_CODEX_AGENT", d["title"] == "Connect Codex" and "Same agent, new key" in d["text"]
+      and d["buttons"][0] == "Approve", text=d["text"][:300])
+    d["cb"](0)
+    yield until(lambda: _stage(ext) in ("waiting", "connected", "failed"), 30, "codex_repair_apply")
+    T("repair.SAME_AGENT_NEW_KEY_CONFIG_UNCHANGED", len(ext.identity.agents) == 2 and len(_live_tokens(ext, aid)) == 1
+      and _cfg(cfg) == now and ext.connector.records["codex"].get("agent_id") == aid, stage=_stage(ext))
+    yield checkpoint("codex_repaired", {}, seconds=600)
+    yield frames(5)
+    T("repair.CODEX_CONNECTED_AGAIN", _stage(ext) in ("connected", "waiting"), stage=_stage(ext))
+    p.Enablemcp = False
+    yield frames(5)
+    toe = os.path.join(str(td.project.folder), str(td.project.name))
+    drv = td.op("/project1/test_driver/drive")
+    drv.par.active = False
+    td.project.save()
+    drv.par.active = True
+    R["codex_toe"] = toe
+    R["codex_ids"] = {"codex_aid": aid, "claude_aid": c_aid, "pid": ext.storage.project_id}
+
+
+def codex_restart(comp, ext, T, frames, until, checkpoint, R):
+    """Launch 2: the saved project reopened in a new TouchDesigner process. Enable MCP alone: a newly started Codex
+    engine reconnects with the stored credential. Then damaged and unsupported settings (refused, untouched), and
+    Disconnect Agent for Codex (exact removal) while Claude Code stays connected."""
+    p = comp.par
+    home = os.environ["TDFLOW_CLIENT_HOME"]
+    cfg = os.path.join(home, ".codex", "config.toml")
+    ccfg = os.path.join(home, ".claude.json")
+    dialogs = _dialogs(ext)
+    yield frames(10)
+    T("restart.MCP_OFF_NOTHING_OPENED", not p.Enablemcp.eval() and p.Status.eval() == "Off" and ext.worker is None
+      and ext.ctl.transport is None and ext.identity is None, status=p.Status.eval())
+    T("restart.BOTH_AGENTS_KNOWN_BUT_NOT_LOADED", p.Agentsummary.eval() == "2 agents · not loaded"
+      and p.Statusdetail.eval() == "Turn on Enable MCP.", summary=p.Agentsummary.eval(), detail=p.Statusdetail.eval())
+    g = yield checkpoint("codex_restart_inspected", {"projectid": str(p.Projectid.eval())})
+    aid, c_aid = g.get("codex_aid"), g.get("claude_aid")
+    T("restart.PROJECT_IDENTITY_KEPT", str(p.Projectid.eval()) == g.get("pid") and bool(g.get("pid")))
+    p.Enablemcp = True                                       # the user's explicit decision; no Connect Agent
+    yield until(lambda: p.Status.eval() == "Enabled", 30, "codex_restart_enable")
+    yield frames(5)
+    recs = ext.connector.records
+    T("restart.SAME_AGENTS_LOADED", (recs.get("codex") or {}).get("agent_id") == aid
+      and (recs.get("claude-code") or {}).get("agent_id") == c_aid and len(ext.identity.agents) == 2,
+      records={k: v.get("agent_id") for k, v in recs.items()})
+    v0 = yield from store_op(ext, until, "verify")
+    live = yield checkpoint("codex_restart_live", {}, seconds=900)
+    yield frames(5)
+    T("restart.NO_DUPLICATE_AGENT_OR_KEY", len(ext.identity.agents) == 2 and len(_live_tokens(ext, aid)) == 1
+      and len(_live_tokens(ext, c_aid)) == 1 and len(ext.connector.records) == 2)
+    rows = ext._connected_rows()
+    T("restart.CODEX_RECONNECTED_WITHOUT_SETUP", aid in {r.get("agent_id") for r in rows} or not live.get("live"),
+      rows=[(r.get("agent_id"), r.get("client")) for r in rows])
+    v1 = yield from store_op(ext, until, "verify")
+    T("restart.AUDIT_CHAIN_CONTINUOUS", v0.get("chain_ok") is True and v1.get("chain_ok") is True
+      and v1.get("events", 0) >= v0.get("events", 0), events=(v0.get("events"), v1.get("events")))
+    # Settings TDflowMCP must not edit: refused before anything changes.
+    p.Codingagent = "codex"
+    yield from _select_agent(ext, p, aid, frames)
+    good = _cfg(cfg)
+    for label, bad, line in (("DAMAGED", b"model = \n[broken", "Error in Codex settings"),
+                             ("UNSUPPORTED_LAYOUT", b'mcp_servers = { other = { url = "https://x.invalid" } }\n',
+                              "Can't edit Codex settings")):
+        with open(cfg, "wb") as f:
+            f.write(bad)
+        ext.connector.state = None
+        p.Repairconnection.pulse()
+        yield until(lambda: _stage(ext) == "failed", 30, "codex_failed_" + label)
+        T(f"failure.{label}_SETTINGS_REFUSED_UNTOUCHED", p.Statusdetail.eval() == line and _cfg(cfg) == bad
+          and len(ext.identity.agents) == 2 and len(_live_tokens(ext, aid)) == 1, detail=p.Statusdetail.eval(),
+          code=(ext.connector.state or {}).get("code"))
+        why = ext.connector.details_text()
+        T(f"failure.{label}_DETAILS_SAY_WHY_AND_WHAT_TO_DO", "Codex: not connected. Nothing was changed." in why
+          and "Why: Codex's settings file (~/.codex/config.toml)" in why and "What to do:" in why
+          and home not in why, text=why[-500:])
+    with open(cfg, "wb") as f:
+        f.write(good)
+    # Disconnect Agent for Codex: exactly its table goes; Claude Code is not touched.
+    c_before = _cfg(ccfg)
+    ext.connector.state = None
+    yield from _select_agent(ext, p, aid, frames)
+    p.Disconnectagent.pulse()
+    yield frames(2)
+    T("disconnect.ASKS_FIRST", dialogs[-1]["buttons"] == ["Disconnect", "Cancel"]
+      and "~/.codex/config.toml" in " ".join(dialogs[-1]["text"].split()), text=dialogs[-1]["text"][:200])
+    dialogs[-1]["cb"](0)
+    yield until(lambda: "codex" not in ext.connector.records, 20, "codex_disconnect")
+    yield frames(3)
+    pid = ext.storage.project_id
+    root = ext._private_root()
+    T("disconnect.CODEX_CREDENTIAL_DELETED_KEYS_REVOKED_AGENT_DISABLED",
+      not os.path.exists(os.path.join(root, "connect", "codex", pid + ".dpapi"))
+      and not _live_tokens(ext, aid) and not ext.identity.agents[aid].enabled)
+    T("disconnect.CLAUDE_CODE_NOT_TOUCHED", "claude-code" in ext.connector.records and _cfg(ccfg) == c_before
+      and os.path.isfile(os.path.join(root, "connect", "claude-code", pid + ".dpapi"))
+      and len(_live_tokens(ext, c_aid)) == 1 and ext.identity.agents[c_aid].enabled and bool(ext._connect_key))
+    left = __import__("tomllib").loads(_cfg(cfg).decode("utf-8")).get("mcp_servers", {})
+    T("disconnect.NO_TDFLOW_TABLE_LEFT", sorted(left) == ["blender", "docs"], servers=sorted(left))
+    ev = yield from _events(ext, until, "client_disconnect")
+    T("disconnect.AUDITED", [e["outcome"] for e in reversed(ev)] == ["intent", "ok"],
+      outcomes=[e["outcome"] for e in reversed(ev)])
+    yield checkpoint("codex_disconnected", {}, seconds=600)
     p.Enablemcp = False
     yield frames(5)
 

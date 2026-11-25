@@ -33,7 +33,8 @@ CONSENT_SECONDS = 120.0
 DIALOG_CHARS = 25              # UX-08: characters per line TouchDesigner's dialog shows (visual review)
 VIEW_SECONDS = 120.0           # connect_view is cleared after this (it is saved with the .toe: review 19, finding 14)
 RECHECK_SECONDS = 6.0
-SLOTS = {"claude-code": "claude-code"}
+SLOTS = {"claude-code": "claude-code", "codex": "codex"}     # client id -> vault slot (one credential per client)
+SHORT = {"claude-code": "Claude", "codex": "Codex"}           # in status lines of at most 26 characters
 STAGE_LINES = {                       # Next Step; every line fits the default parameter width (~60 characters)
     "preparing": "Preparing connection…",
     "choosing": "Choose an agent (dialog)",
@@ -41,7 +42,7 @@ STAGE_LINES = {                       # Next Step; every line fits the default p
     "awaiting_pulse": "Review, then pulse again.",
     "configuring": "Configuring {client}…",
     "enabling": "Turning on MCP…",
-    "waiting": "Start a {client} chat.",
+    "waiting": "Start a new {who} chat.",
     "waiting_save": "Save, then start a chat.",
     "waiting_off": "Turn on Enable MCP.",
     "idle": "Connected · idle {minutes} min",
@@ -49,11 +50,16 @@ STAGE_LINES = {                       # Next Step; every line fits the default p
     "no_credential": "No key: Repair Connection",
     "port_changed": "Port changed: pulse Repair",
 }
+# Lines that differ per client (usability review, ADR-0017): /mcp is a Claude Code command; a Codex that sends no key
+# right after the key was stored is one that does not run the header helper, which Repair cannot fix.
+STAGE_LINES_FOR = {"codex": {"no_request": "No request: new Codex chat", "no_credential": "No key sent: update Codex"}}
 FLOW = ("preparing", "choosing", "awaiting", "configuring", "enabling")
-FAIL_LINES = {                          # Next Step after a failed step (the code is in View Connection Details)
-    "CONFIG_INVALID": "Claude settings damaged",
-    "CONFIG_UNREADABLE": "Can't read Claude settings",
-    "CONFIG_TOO_LARGE": "Claude settings too big",
+FAIL_LINES = {                          # Next Step after a failed step (the reason is in View Connection Details)
+    "CONFIG_INVALID": "Error in {who} settings",
+    "CONFIG_UNREADABLE": "Can't read {who} settings",
+    "CONFIG_TOO_LARGE": "{who} settings too big",
+    "CONFIG_UNSUPPORTED": "Can't edit {who} settings",
+    "PLATFORM_UNSUPPORTED": "Not on this OS: manual",
     "CONFIG_IS_LINK": "Settings file is a link",
     "CONFIG_CHANGED": "Settings changed: retry",
     "CONFIG_NOT_VALIDATED": "Write not confirmed: retry",
@@ -62,6 +68,22 @@ FAIL_LINES = {                          # Next Step after a failed step (the cod
     "*": "Not connected: see Details",
 }
 NO_REQUEST_AFTER_S = 90.0
+# What a failed step means and the one thing to do next (View Connection Details; usability review). {name}: the
+# agent, {path}: its settings file without the user name.
+FAIL_DETAILS = {
+    "CONFIG_INVALID": ("Why: {name}'s settings file ({path}) has an error in it, so TDflowMCP did not touch it. {name} "
+                       "normally reports the same error when it starts.\nWhat to do: fix or remove the line {name} "
+                       "complains about, then pulse Connect Agent again."),
+    "CONFIG_UNSUPPORTED": ("Why: {name}'s settings file ({path}) is valid, but its \"tdflow\" entry or its list of "
+                           "servers is written in a form TDflowMCP does not edit (for example on one line).\nWhat to "
+                           "do: if you added a \"tdflow\" server to {name} yourself, remove it (for Codex, in a "
+                           "terminal: codex mcp remove tdflow), then pulse Connect Agent again."),
+    "CONFIG_IS_LINK": ("Why: {name}'s settings file ({path}) is a link to another file, which TDflowMCP never "
+                       "replaces.\nWhat to do: connect this agent with the manual steps in View Full Instructions."),
+    "CONFIG_CHANGED": ("Why: {name}'s settings file changed while you were reviewing the plan.\nWhat to do: pulse "
+                       "Connect Agent again and review the new plan."),
+    "CONFIG_BUSY": ("Why: another program had {name}'s settings file open.\nWhat to do: pulse Connect Agent again."),
+}
 
 
 def wrap_dialog(text, width=None):
@@ -77,6 +99,33 @@ def wrap_dialog(text, width=None):
         out += textwrap.wrap(line, width=width, subsequent_indent=" " * min(lead, 4), break_long_words=True,
                              break_on_hyphens=False)
     return "\n".join(out)
+
+
+def installed_text(rows, width=26):
+    """The Installed Agents value from discovery rows, within the 26 characters the parameter window shows:
+    ``Auto: Claude Code, Codex``; with agents that need manual setup ``Auto: Claude, Codex +1``; none automatic
+    ``Manual: Cursor, Copilot``. A Codex extension that is too old for automatic setup says so."""
+    long = {"claude-code": "Claude Code", "codex": "Codex", "cursor": "Cursor", "vscode-copilot": "Copilot"}
+    brief = dict(long, **{"claude-code": "Claude"})
+    auto = [r for r in rows if r.get("automatic")]
+    manual = [r for r in rows if not r.get("automatic")]
+
+    def names(rs, table):
+        return [table.get(r["client"], r["client"]) + (" (too old)" if r.get("manual_why") else "") for r in rs]
+    if auto:
+        more = f" +{len(manual)}" if manual else ""
+        for table in (long, brief):
+            text = "Auto: " + ", ".join(names(auto, table)) + more
+            if len(text) <= width:
+                return text
+        return text[:width]
+    for n in range(len(manual), 0, -1):
+        rest = f" +{len(manual) - n}" if n < len(manual) else ""
+        for table in (long, brief):
+            text = "Manual: " + ", ".join(names(manual[:n], table)) + rest
+            if len(text) <= width:
+                return text
+    return text[:width]
 
 
 def run_security(argv, stdin_text):
@@ -102,6 +151,7 @@ class Connector:
         self.dialog_opener = self._open_dialog          # replaceable by tests
         self._recheck = None       # (deadline, record) a later check that the entry is still in place
         self.after_note = None     # a note to show when the flow reaches connected / failed
+        self._working = None       # "configure" | "disconnect": one background change of the records at a time
         self.also_found = []       # display names of manual-setup agents Auto also found
 
     # ---- helpers ----------------------------------------------------------------------------------------
@@ -191,12 +241,7 @@ class Connector:
         """Agents page 'Installed Agents': who was found and whether setup is automatic (labels only)."""
         if not self.discovered:
             return "none found"
-        short = {"claude-code": "Claude Code", "codex": "Codex", "cursor": "Cursor", "vscode-copilot": "Copilot"}
-        auto = [short.get(r["client"], r["client"]) for r in self.discovered if r["automatic"]]
-        manual = [short.get(r["client"], r["client"]) for r in self.discovered if not r["automatic"]]
-        if auto:
-            return (", ".join(auto) + " (auto)" + (f" +{len(manual)} more" if manual else ""))[:60]
-        return (", ".join(manual) + " (manual)")[:60]
+        return installed_text(self.discovered)
 
     def interfaces(self, cid):
         return next((r["interfaces"] for r in self.discovered if r["client"] == cid), [])
@@ -205,7 +250,11 @@ class Connector:
         if cid not in SLOTS:
             return False
         row = next((r for r in self.discovered if r["client"] == cid), None)
-        return bool(row["automatic"]) if row else sys.platform in ("win32", "darwin")
+        return bool(row["automatic"]) if row else sys.platform in self.C.PLATFORMS.get(cid, ())
+
+    def fail_line(self, code):
+        who = SHORT.get((self.state or {}).get("client"), "Agent")
+        return FAIL_LINES.get(code, FAIL_LINES["*"]).format(who=who)
 
     def load_records(self, text):
         try:
@@ -236,32 +285,43 @@ class Connector:
         if stage == "awaiting" and not st.get("dialog"):
             return STAGE_LINES["awaiting_pulse"]
         if stage in FLOW:
-            return STAGE_LINES[stage].format(client=st.get("display", "the agent"))
+            return STAGE_LINES[stage].format(client=st.get("display", "the agent"),
+                                             who=SHORT.get(st.get("client"), "agent"))
         if stage == "failed":
             return st.get("line") or "Connection failed. Pulse Connect Agent to try again."
         ready = self.connected_clients()
         if not ready:
             return None
-        cid = ready[0]
+        # Several clients can be set up (each with its own agent): the line speaks about the one being connected,
+        # else the one chosen in Coding Agent, else the first.
+        chosen = [i for i in ext.native.selected() if i in ready] if getattr(ext, "native", None) else []
+        cid = st["client"] if st and st.get("client") in ready else (chosen[0] if len(chosen) == 1 else ready[0])
         rec, name = self.records[cid], self.display(cid)
-        url = (rec.get("entry") or {}).get("url", "")
-        if url and url != f"http://127.0.0.1:{ext.ctl.port}/mcp":
-            return STAGE_LINES["port_changed"]
+        for r in (self.records[i] for i in ready):
+            url = (r.get("entry") or {}).get("url", "")
+            if url and url != f"http://127.0.0.1:{ext.ctl.port}/mcp":
+                return STAGE_LINES["port_changed"]
         seen, now = ext._seen(), time.time()
-        last = max((seen.get(r.get("agent_id"), {}).get("last", 0) for r in self.records.values()), default=0)
+        # While one client is being connected, only its own agent's requests count (another client's agent may be
+        # talking at the same time).
+        watched = [rec] if stage == "waiting" else list(self.records.values())
+        last = max((seen.get(r.get("agent_id"), {}).get("last", 0) for r in watched), default=0)
         if last and now - last <= 120:
             return None
+        def line(key, **kw):
+            text = STAGE_LINES_FOR.get(cid, {}).get(key) or STAGE_LINES[key]
+            return text.format(client=name, who=SHORT.get(cid, "agent"), **kw)
         if not ext.mcp_on:
-            return STAGE_LINES["waiting_off"].format(client=name)
+            return line("waiting_off")
         if last and last >= getattr(ext, "_mcp_on_wall", 0):
-            return STAGE_LINES["idle"].format(client=name, minutes=max(2, int((now - last) // 60)))
+            return line("idle", minutes=max(2, int((now - last) // 60)))
         if stage == "waiting" and self._auth_fails() > st.get("auth_fail0", 0):
-            return STAGE_LINES["no_credential"].format(client=name)     # requests arrive, but without a valid key
+            return line("no_credential")                 # requests arrive, but without a valid key
         if stage == "waiting" and now - st.get("since", now) > NO_REQUEST_AFTER_S:
-            return STAGE_LINES["no_request"].format(client=name)
+            return line("no_request")
         if self.after_note:
-            return STAGE_LINES["waiting_save"].format(client=name)
-        return STAGE_LINES["waiting"].format(client=name)
+            return line("waiting_save")
+        return line("waiting")
 
     # ---- Connect Agent ------------------------------------------------------------------------------------
     def start(self, selection_ids, also_found=()):
@@ -286,9 +346,24 @@ class Connector:
         ids = list(ids)[:4]
         # TouchDesigner's dialog buttons are narrow (visual review): short names; the text says which are automatic.
         short = {"claude-code": "Claude Code", "codex": "Codex", "cursor": "Cursor", "vscode-copilot": "Copilot"}
-        names = [short.get(i, self.display(i))[:12] for i in ids]
-        kinds = "\n".join(f"- {short.get(i, self.display(i))}: {'automatic setup' if self.automatic(i) else 'manual setup'}"
-                           for i in ids)
+        # Visual review (ADR-0017): TouchDesigner's dialog buttons show about seven characters ("Claude Code" was cut
+        # off on both sides), so the buttons carry short names and the text carries the full ones.
+        names = [dict(short, **{"claude-code": "Claude"}).get(i, self.display(i))[:7] for i in ids]
+        done = set(self.connected_clients())
+        if all(self.automatic(i) for i in ids):
+            # ADR-0017 (usability review): several agents with automatic setup. Lines of at most 24 characters; an
+            # agent that is already connected is named as such.
+            count = {2: "Two"}.get(len(ids), "Several")
+            listed = "".join(f"- {short.get(i, self.display(i))}: connected\n" for i in ids if i in done)
+            text = (f"{count} agents can be set up automatically. Which one should work in this project?\n\n"
+                    + (listed + "\n" if listed else "")
+                    + "Nothing changes yet: the plan comes next. You can connect the other later.")
+        else:
+            kinds = "\n".join(f"- {short.get(i, self.display(i))}: "
+                              f"{'connected' if i in done else 'automatic' if self.automatic(i) else 'manual steps'}"
+                              for i in ids)
+            text = ("Several coding agents were found on this computer. Which one do you want to connect to this "
+                    "project?\n\n" + kinds + "\n\nNothing changes yet. You can connect the others later.")
         self._set("choosing", client="", display="")
 
         def picked(i):
@@ -297,10 +372,7 @@ class Connector:
                 self._note("Nothing was connected.")
                 return
             self.begin(ids[i])
-        ok = self.dialog_opener("Connect a coding agent",
-                                "Several coding agents were found on this computer. Which one do you want to connect "
-                                "to this project?\n\n" + kinds + "\n\nYou can connect the others later (each gets its "
-                                "own identity and permissions).", names + ["Cancel"], picked)
+        ok = self.dialog_opener("Connect a coding agent", text, names + ["Cancel"], picked)
         if not ok:
             self.state = None
             self._note("Pick one in Coding Agent", 30)
@@ -342,9 +414,9 @@ class Connector:
         C = self.C
 
         def plan():
-            entry = C.claude_entry(sys.platform, port, slot, vdir)
-            path = C.claude_config_path(env)
-            pl = C.plan_claude(path, entry, env)
+            entry = C.client_entry(cid, sys.platform, port, slot, vdir)
+            path = C.client_config_path(cid, env)
+            pl = C.plan_client(cid, path, entry, env)
             has = vault.has(slot, pid)
             return pl, has
         st.update(role=role, access=access, scope=scope, pid=pid, port=port, agent=agent and agent.id,
@@ -354,7 +426,7 @@ class Connector:
     def _planned(self, ok, res):
         if not ok:
             code, msg = res
-            return self._fail(code, FAIL_LINES.get(code, FAIL_LINES["*"]))
+            return self._fail(code, self.fail_line(code))
         pl, has_cred = res
         st = self.state
         ext = self.ext
@@ -366,7 +438,7 @@ class Connector:
                 self._set("waiting", **{})
                 return
             text = (f"{st['display']} is already set up for this project.\n\nTurns ON Enable MCP (this "
-                    "computer only). Nothing else changes.")
+                    f"computer only). Nothing else changes.\n\nThen start a new {st['display']} chat.")
             buttons = ["Enable MCP", "Cancel"]
         else:
             text = self.C.consent_text(st["display"], self.interfaces(st["client"]), pl, st["access"], st["scope"],
@@ -415,6 +487,12 @@ class Connector:
                 self._enable()
             self._bg("record", record, recorded)
             return "enabling"
+        if self._working:
+            # Review 23 (10): a Disconnect of another agent is still writing the connection records. The plan stays
+            # approved-pending; the next Connect Agent pulse applies it.
+            self._note("Busy: pulse again", 20)
+            return None
+        self._working = "configure"
         self._set("configuring")
         C, pl = self.C, st["plan"]
         env, vault, bdir = self.env(), self.vault(), self.backup_dir()
@@ -448,15 +526,25 @@ class Connector:
                 pending = dict(old, client=cid, agent_id=aid, slot=slot, pid=pid, path=pl.path,
                                shown_path=pl.shown_path, entry=pl.entry, pending=True,
                                at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+                if pl.action == "replace" and pl.previous_entry is not None:
+                    pending.update(replaced=True, previous_entry=pl.previous_entry)   # review 23 (9): survives a kill
                 store.set_private_setting("connections", json.dumps(dict(self.records, **{cid: pending})))
                 vault.put(slot, pid, token, key)
                 token = None
-                res = C.apply_claude(pl, env, bdir)
-                previous = old.get("previous_entry") if old.get("replaced") else res.get("previous_entry")
+                res = C.apply_client(pl, env, bdir)
+                # Review 23 (9): what Disconnect has to undo comes from the run that put the entry there. A run that
+                # replaced puts back what it replaced; a run that added has nothing to put back; a run that only
+                # updated or found it unchanged (Repair) keeps the earlier facts.
+                fresh = res["action"] in ("add", "create_file", "replace")
+                facts = res if fresh else old
+                previous = res.get("previous_entry") if res["action"] == "replace" else None if fresh else (
+                    old.get("previous_entry") if old.get("replaced") else None)
                 rec = {"client": cid, "agent_id": aid, "slot": slot, "pid": pid, "path": pl.path,
                        "shown_path": pl.shown_path, "entry": pl.entry, "action": res["action"],
-                       "backup": res.get("backup", ""),
-                       "created_key": bool(res.get("created_key") or old.get("created_key")),
+                       "backup": res.get("backup", "") or old.get("backup", ""),
+                       "created_key": bool(facts.get("created_key")),
+                       "created_file": bool(facts.get("created_file")),
+                       "added_newline": bool(facts.get("added_newline")),
                        "replaced": previous is not None, "previous_entry": previous,
                        "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
                 recs = dict(self.records)
@@ -474,10 +562,11 @@ class Connector:
                     store.set_private_setting("connections", json.dumps(self.records))
                 except Exception:
                     pass
-                if res is not None and res.get("action") in ("add", "create_file", "replace", "update"):
+                # An entry that was already there and only updated stays (ADR-0015: "the entry that this run
+                # wrote"); its key is revoked above, and Repair Connection gives it a new one.
+                if res is not None and res.get("action") in ("add", "create_file", "replace"):
                     try:
-                        C.remove_claude(pl.path, env, bdir, pl.entry, restore_entry=res.get("previous_entry"),
-                                        drop_empty_key=bool(res.get("created_key")))
+                        C.remove_client(cid, pl.path, env, bdir, pl.entry, res)
                     except Exception:
                         pass
                 try:
@@ -508,10 +597,11 @@ class Connector:
         return failed
 
     def _configured(self, ok, res):
+        self._working = None
         st = self.state
         if not ok:
             code, msg = res
-            return self._fail(code, FAIL_LINES.get(code, FAIL_LINES["*"]))
+            return self._fail(code, self.fail_line(code))
         self.records, rec = res
         st["record"] = rec
         self._recheck = (time.monotonic() + RECHECK_SECONDS, rec)
@@ -565,6 +655,10 @@ class Connector:
                 self._show_details(text, open_viewer=True)
                 self._note("Pulse again to confirm", 60)
                 return "confirm"
+        if self._working:
+            self._note("Busy: pulse again", 20)          # review 23 (10): never while another agent is being set up
+            return None
+        self._working = "disconnect"
         self._disc_pending = None
         self._clear_view()
         C, env, vault, bdir, store, ext = self.C, self.env(), self.vault(), self.backup_dir(), self.ext.store, self.ext
@@ -586,9 +680,7 @@ class Connector:
             res = {"action": "kept_for_others", "others": others}
             if not others:
                 try:
-                    res = C.remove_claude(rec["path"], env, bdir, rec.get("entry") or {},
-                                          restore_entry=rec.get("previous_entry") if rec.get("replaced") else None,
-                                          drop_empty_key=bool(rec.get("created_key")))
+                    res = C.remove_client(cid, rec["path"], env, bdir, rec.get("entry") or {}, rec)
                 except Exception as e:
                     problems.append("config")
                     res = {"action": "config_failed", "code": getattr(e, "code", type(e).__name__)}
@@ -603,6 +695,7 @@ class Connector:
             return recs, res, problems
 
         def done(ok, r):
+            self._working = None
             if not ok:
                 self._note(f"Disconnect failed ({r[0]})"[:40], 30)
                 return
@@ -625,21 +718,37 @@ class Connector:
             lines.append("No agent was connected with Connect Agent in this project.")
         for cid, r in self.records.items():
             lines += [f"{self.display(cid)}: agent {r.get('agent_id')}, connected {r.get('at')}",
-                      f"  Configuration: {r.get('shown_path')} (user scope), MCP server 'tdflow'",
+                      f"  Configuration: {r.get('shown_path')}{' (user scope)' if cid == 'claude-code' else ''}, "
+                      "MCP server 'tdflow'",
                       f"  URL: {(r.get('entry') or {}).get('url')}",
                       "  Credential: OS-protected store ("
                       + ("Windows DPAPI, current user" if sys.platform == "win32" else "macOS Keychain") + ")",
-                      "  headersHelper (fixed command, contains no secret; the listener must prove this project's key "
+                      "  Headers helper (fixed command, contains no secret; the listener must prove this project's key "
                       "before it releases the token):",
-                      "    " + self._redact_path(str((r.get("entry") or {}).get("headersHelper", ""))),
+                      "    " + self._redact_path(self.C.helper_text(r.get("entry"))),
                       f"  Backup of the file before the change: {r.get('backup') or 'none (the file did not exist)'}"
-                      " (TDflowMCP private folder)", ""]
+                      " (TDflowMCP private folder)"]
+            if cid == "codex":
+                lines += ["  If Codex shows tdflow as failed with HTTP 401 after Repair Connection, this Codex is too old "
+                          "to fetch the key (it does not run http_headers_helper). Update Codex (tested: CLI 0.160.0, "
+                          "VS Code extension 26.1120), then pulse Repair Connection.",
+                          "  Codex cloud tasks and remote sessions cannot use this connection."]
+            lines.append("")
         st = self.state
-        if st:
-            lines += [f"Current step: {st.get('stage')} {st.get('code') or ''}".rstrip()]
-            if st.get("consent"):
-                lines += ["", "Last plan shown:", st["consent"]]
-        lines += ["", "Undo: Agents page > select the agent > Disconnect.",
+        if st and st.get("stage") == "failed":
+            # Usability review: say what happened, that nothing was changed, and the one thing to do next.
+            name = st.get("display") or "The agent"
+            path = getattr(st.get("plan"), "shown_path", "") or {"codex": "~/.codex/config.toml",
+                                                                "claude-code": "~/.claude.json"}.get(st.get("client"), "")
+            why = FAIL_DETAILS.get(st.get("code"))
+            lines += [f"{name}: not connected. Nothing was changed.",
+                      why.format(name=name, path=path) if why else "What to do: pulse Connect Agent to try again.",
+                      f"[{st.get('code') or 'failed'}]"]
+        elif st:
+            lines += [f"Current step: {st.get('stage')}"]
+        if st and st.get("consent"):
+            lines += ["", "Last plan shown:", st["consent"]]
+        lines += ["", "Undo: Agents page > select the agent > Disconnect Agent.",
                   "Manual fallback (any client): Agents page > New Token, then Copy Token; see View Full Instructions."]
         return "\n".join(lines)
 
@@ -754,7 +863,7 @@ class Connector:
             rec, C = rc[1], self.C
 
             def check():
-                return C.still_configured(rec["path"], rec["entry"])
+                return C.client_still_configured(rec.get("client", ""), rec["path"], rec["entry"])
 
             def done(ok, res):
                 if ok and res is False:
