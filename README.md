@@ -2,7 +2,7 @@
 
 A source-first, AI-powered TouchDesigner development environment: an MCP server packaged as a reusable `.tox`, with server-side permissions, agent identity, audit logging, approvals, a local browser dashboard, safe experimentation and optional Code Mode orchestration.
 
-> **Status: TDflowMCP 1.0.0 — release source; the v1.0.0 download is being published.**
+> **Status: TDflowMCP 1.0.0 — released 2026-11-25 for evaluation. [Download v1.0.0](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.0.0).**
 > - Version 1.0.0 is the frozen 1.0.0rc6 feature set with the final version label. Tests passed on Windows with TouchDesigner **2025.32440**, the only verified combination; newer builds and macOS are **not verified**.
 > - Claude Code on Windows supports consent-based Connect Agent without copying credentials; other documented clients use a manual setup fallback.
 > - MCP binds to `127.0.0.1` only, enforces agent scopes and approvals, and requires an intact durable security audit.
@@ -11,7 +11,15 @@ A source-first, AI-powered TouchDesigner development environment: an MCP server 
 
 ## Download and first run
 
-**Once v1.0.0 is published:** open [GitHub Releases](https://github.com/jlopesmo/TDflowMCP/releases), download the attached `TDflowMCP.tox` and `SHA256SUMS`, verify the hash, then drag the `.tox` into a saved TouchDesigner project. There is no binary in the `main` branch; the tested asset is attached to the release, not committed as a build output.
+1. Open the [v1.0.0 release](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.0.0) and download [`TDflowMCP.tox`](https://github.com/jlopesmo/TDflowMCP/releases/download/v1.0.0/TDflowMCP.tox) (and `SHA256SUMS` if you want the checksum file).
+2. Check the download. In PowerShell: `Get-FileHash .\TDflowMCP.tox -Algorithm SHA256` must print
+
+   `466a1b5e577c695e5c924e031116173b68af4f8172799317e9c9d103931d5358`
+3. Save your TouchDesigner project, then drag `TDflowMCP.tox` into it. Use Windows with TouchDesigner 2025.32440, and try it first in a copy of a project.
+
+There is no binary in the `main` branch: the tested `.tox` is built from the `v1.0.0` tag and attached to the release, not committed as a build output. The download is for evaluation ([License](#license)).
+
+Then, in TouchDesigner:
 
 1. Open the `TDflowMCP` parameter page; automatic diagnostics run, and **Run Diagnostics** remains available manually.
 2. Leave **Coding Agent** on Auto, pulse **Connect Agent**, and approve the displayed plan. The approved Claude Code setup configures the local client securely.

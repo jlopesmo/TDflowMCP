@@ -177,7 +177,6 @@
   - per-grant `allowed_op_types` and `param_denylist` editing (grants themselves are editable);
   - task, decision and ICM record types (`tdflow_memory_get/put`), archiving (adding an agent-writable record type reopens owner condition D18);
 - **Not yet:**
-  - a published 1.0 download (the version is 1.0.0; tag and publication are tracked under [Release 1.0.0](#release-100--2026-11-25));
   - dev-mode file-synced DATs.
 
 ## Not observed / unverified
@@ -250,4 +249,10 @@ The two sections above are earlier checkpoints of the same day; this one superse
 - **Version 1.0.0** (GitHub Issue #2): `1.0.0rc6` with the final version label. Also changed: the status API's `phase` (`1.0`), the component's node comment, the package manifest's release flag (`package_release.py --release-tag`), and the install guide's evaluation terms. No feature, tool, permission or security behaviour changed; the 1.0 feature freeze (D25) holds.
 - **Verified on the release-commit tree** (TouchDesigner 2025.32440, Windows): 496 unit tests on both Pythons; 1B, 1A, gate, memory, onboarding and native suites, the visual review and the browser checks all pass with the same counts as rc6; the Version parameter shows `1.0.0 (tools 1)`.
 - **Compatibility claimed:** Windows with TouchDesigner 2025.32440 only (owner D26). Newer builds and macOS: not verified.
-- **Not yet done at this commit:** CI on this commit, the annotated tag `v1.0.0`, the clean build from the tag, publication of the GitHub Release, verification of the public download, and the default-branch change. Each is recorded here and in the validation index only once observed.
+- **Release commit:** `33af082` on `dev` and `main`; CI runs #56 and #57 passed on Windows and Ubuntu.
+- **Tagged:** annotated `v1.0.0` on `33af082`.
+- **Built from the tag** in a clean worktree on TouchDesigner 2025.32440: `TDflowMCP.tox` SHA-256 `466a1b5e577c695e5c924e031116173b68af4f8172799317e9c9d103931d5358`, source digest `348683a0…` (the tested candidate's). Every suite, the visual review and the browser checks pass on this packaged file.
+- **Published:** GitHub Release [v1.0.0](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.0.0) with `TDflowMCP.tox`, `TDflowMCP.json`, `SHA256SUMS` and `INSTALL.md`. The page is public, and GitHub's own digests of the four assets equal the local hashes.
+- **Default branch:** `main` (observed). `main` is protected against force pushes and deletion.
+- **Not observed yet:** a byte download of the published `.tox` with its checksum compared. It could not be done from this network (the gateway intercepts the asset host with an untrusted certificate, and certificate checking was not bypassed). The owner will do it from another network; **Issue #2 stays open until then**.
+- **Not claimed:** compatibility beyond Windows with TouchDesigner 2025.32440; an open-source license.

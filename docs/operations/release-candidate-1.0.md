@@ -155,7 +155,10 @@ No other compatibility is claimed.
 - [x] Owner approved release preparation, public evaluation distribution and Windows-only compatibility exception (2026-11-25).
 - [x] CI on the final docs head (`326a1c1`: runs #53 and #54) and PR #1 merged `dev → main` as `5f86345`; post-merge [run #55](https://github.com/jlopesmo/TDflowMCP/actions/runs/45666920078) passed on Windows and Ubuntu.
 - [x] 1.0.0 (tree): version label `1.0.0`; unit tests, every in-TD suite, the visual review and the browser checks pass on the candidate build `0336f243…` with the same counts as rc6 (validation index).
-- [ ] **Publication remains:** CI on the release commit, the annotated tag `v1.0.0` on `main`, the clean build from the tag and its validation, the GitHub Release assets, verification of the downloaded SHA-256, the README download link and the receipt in the ICM.
+- [x] CI on the release commit `33af082` (runs #56 and #57, Windows and Ubuntu); annotated tag `v1.0.0` on it.
+- [x] Package built from the tag in a clean worktree (`TDflowMCP.tox` SHA-256 `466a1b5e577c695e5c924e031116173b68af4f8172799317e9c9d103931d5358`); every suite, the visual review and the browser checks pass on the packaged `.tox`.
+- [x] GitHub Release [v1.0.0](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.0.0) published with `TDflowMCP.tox`, `TDflowMCP.json`, `SHA256SUMS` and `INSTALL.md`; GitHub's digests of the assets equal the local hashes; README download link; receipt in the ICM; default branch `main`, protected against force pushes and deletion.
+- [ ] **Owner:** download `TDflowMCP.tox` from the release on another network or device and compare its SHA-256 with the value above (the byte download could not be done from the build network; validation index). Then close Issue #2.
 
 ## Known limits carried into 1.0
 These are listed in their records ([Code Mode](../research/2026-11-23-phase-3-code-mode.md#limits), [experiments](../research/2026-11-23-phase-3-experiments.md#limits), [Phase 4](../research/2026-11-23-phase-4-extensions.md#limits), [minimized window](../research/2026-11-23-phase-2b-increment-2.md#limits)):
