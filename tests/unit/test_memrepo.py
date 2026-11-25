@@ -58,8 +58,9 @@ class PathTests(Base):
         self.assertEqual(c.exception.code, "MEMORY_UNLINKED")
 
     def test_resolve_refuses_absolute_and_escaping_links(self):
-        self.assertEqual(os.path.normcase(R.resolve(self.proj, "..")), os.path.normcase(self.repo))
-        self.assertEqual(os.path.normcase(R.resolve(self.proj, ".")), os.path.normcase(self.proj))
+        # Windows CI may spell the same folder as RUNNER~1 or RunnerAdmin; compare filesystem identity.
+        self.assertTrue(os.path.samefile(R.resolve(self.proj, ".."), self.repo))
+        self.assertTrue(os.path.samefile(R.resolve(self.proj, "."), self.proj))
         for bad in (self.repo, "C:/x", "/etc", "..\\other", "../../../../x", "a/../../b"):
             with self.assertRaises(R.RepoError, msg=bad) as c:
                 R.resolve(self.proj, bad)
