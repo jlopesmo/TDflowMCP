@@ -212,6 +212,11 @@ Package zip `dbfbebe2…`. Not published. CI: not observed |
 - Before the review-22 fixes the 1B run had 4 harness failures, all in the new tests (a stale parameter-order list and reading the wrong refusal field); fixed in the tests.
 
 `check_docs` 0 problems; `scan_secrets` 0 findings. Not published. CI: not observed |
+| 2026-11-25 | TouchDesigner 2025.32440 + Claude Code CLI 2.1.289 + VS Code extension engine 2.1.332 + Microsoft Edge 158 headless (**packaged** `dist/TDflowMCP-1.0.0rc6-36ce1e5628`, tox `67b393cebe04ef14…`, source digest `47638ab8…` = the tested candidate, clean worktree of `36ce1e5`; `SHA256SUMS` verified) | **1.0.0rc6 packaged-component acceptance** | **1B 89/89 + 246/246** (capabilities, permission changes and denials, approval invalidation, native/web parity, parameter order, sign-in codes); 1A 59/59 + 71/71; gate (`--only gate,gate_crash,gate_restart,perf_worker,gate_bench`) 48/48 + 80/80; memory 52/52 + 182/182; onboarding 7/7 + 47/47.
+- **Native 90/90 + 79/79**: first run, restart, second restart, abrupt kill, recovery and every Copy Agent Prompt state. The copied-prompt session: `tdflow_whoami` → `tdflow_project_info` → `tdflow_describe_network` (23.5 s, 5 turns). **"What can you do?": `tdflow_whoami` → `tdflow_capabilities`, its own capabilities and the page, no change** (23.7 s, 4 turns).
+- Visual review 12/12. Browser checks 179/179.
+
+Package zip `25733376…`. Not published. CI: not observed |
 
 ## Local environment facts (file inspection only, 2026-11-22)
 
