@@ -192,6 +192,12 @@ Package zip `807de04e…`. Not published. CI: not observed |
 - Visual review 6/6 `screens.*`; the capture shows **Copy Agent Prompt** and `Not ready: Connect Agent` / `Prompt ready: copy it`, both within the default width.
 
 Not published. CI: not observed |
+| 2026-11-24 | TouchDesigner 2025.32440 + Claude Code CLI 2.1.289 + VS Code extension engine 2.1.331 (**packaged** `dist/TDflowMCP-1.0.0rc5-6c36460f74`, tox `84a83b7d71530dec…`, clean worktree of `6c36460`; `SHA256SUMS` verified) | **1.0.0rc5 packaged-component acceptance** | 1B 82/82 + 217/217; 1A 59/59 + 71/71; gate (`--only gate,gate_crash,gate_restart,perf_worker,gate_bench`) 48/48 + 80/80; memory 52/52 + 182/182; onboarding 7/7 + 47/47.
+- **Native 90/90 + 73/73**: first run, restart, second restart, abrupt kill, recovery, and every Copy Agent Prompt state.
+- **The live Claude Code session from the copied prompt alone:** `tdflow_whoami` → `tdflow_project_info` → `tdflow_describe_network`, an overview, no change (18 s, 5 turns).
+- Visual review 6/6 `screens.*`.
+
+Package zip `dbfbebe2…`. Not published. CI: not observed |
 
 ## Local environment facts (file inspection only, 2026-11-22)
 
