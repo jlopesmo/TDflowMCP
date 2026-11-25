@@ -2,15 +2,25 @@
 
 A source-first, AI-powered TouchDesigner development environment: an MCP server packaged as a reusable `.tox`, with server-side permissions, agent identity, audit logging, approvals, a local browser dashboard, safe experimentation and optional Code Mode orchestration.
 
-> **Status: Phase 2A complete; Phase 2B in progress (2026-11-23), development builds only.**
-> - The source-built `TDflowMCP.tox` (TouchDesigner 2025.32440+) provides the local-only Setup Assistant (1A), a secure MCP core (1B: scoped, audited tools with verified undo, pairing, agent tokens, a kill switch), agent onboarding with Skills (1C), and project memory (2A: task checkpoints, verified handoffs, restart persistence, and records either inside the project file or as files in a folder of the project).
-> - Phase 2B increment 1: a governance dashboard at `/ui/` (activity, approvals, sessions, agents, reports, kill switch). Code-running parameter changes run only after you approve that exact call there. There is no raw Python execution.
-> - Keep the TouchDesigner window open while agents work: TouchDesigner pauses while minimized.
-> - Nothing is released.
->
-> See [current state](docs/icm/current-state.md) and [build and test](docs/operations/build-and-test.md).
+> **Status: TDflowMCP 1.0.0rc6 — verified release candidate; v1.0.0 publication pending.**
+> - The 1.0 feature set is frozen. Tests passed on Windows with TouchDesigner **2025.32440**; newer builds and macOS are **not yet verified**.
+> - Claude Code on Windows supports consent-based Connect Agent without copying credentials; other documented clients use a manual setup fallback.
+> - MCP binds to `127.0.0.1` only, enforces agent scopes and approvals, and requires an intact durable security audit.
+> - No official GitHub Release asset has been published yet. The generated `.tox` is deliberately excluded from source Git history.
+> - Release preparation: [PR #1](https://github.com/jlopesmo/TDflowMCP/pull/1), [RC6 acceptance](docs/operations/release-candidate-1.0.md).
 
-**User experience** (built for Claude Code; development builds): drag `TDflowMCP.tox` into a project → the compatibility checks run → pulse **Connect Agent** and approve the plan in TouchDesigner (Claude Code is configured with no token to copy; other agents get a short manual setup) → pulse **Copy Agent Prompt** and paste it as the first message of a new Claude Code chat → work under enforced, audited scopes (see and change what each agent may do on the dashboard's **Capabilities** page; ask the agent "What can you do?") → resume later from verified handoffs.
+## Download and first run
+
+**Once v1.0.0 is published:** open [GitHub Releases](https://github.com/jlopesmo/TDflowMCP/releases), download the attached `TDflowMCP.tox` (and its SHA-256 manifest), verify the hash, then drag it into a saved TouchDesigner project. There is no binary to download from the `main` branch yet; the tested asset will be attached to the release, not committed as a build output.
+
+1. Open the `TDflowMCP` parameter page; automatic diagnostics run, and **Run Diagnostics** remains available manually.
+2. Leave **Coding Agent** on Auto, pulse **Connect Agent**, and approve the displayed plan. The approved Claude Code setup configures the local client securely.
+3. Pulse **Copy Agent Prompt** and paste it into a new Claude Code chat. The agent verifies access with `tdflow_whoami` and awaits your task.
+4. Use **Open Dashboard → Capabilities** to review or change supported agent permissions.
+
+The browser dashboard is optional for initial setup. Keep TouchDesigner open and unminimized while an agent modifies the project. [Installation and security details](docs/operations/install.md).
+
+**User experience** (Windows / Claude Code, verified on RC6): drag `TDflowMCP.tox` into a project → the compatibility checks run → pulse **Connect Agent** and approve the plan in TouchDesigner (Claude Code is configured with no token to copy; other agents get a short manual setup) → pulse **Copy Agent Prompt** and paste it as the first message of a new Claude Code chat → work under enforced, audited scopes (see and change what each agent may do on the dashboard's **Capabilities** page; ask the agent "What can you do?") → resume later from verified handoffs.
 
 ## Start here
 
@@ -18,7 +28,7 @@ A source-first, AI-powered TouchDesigner development environment: an MCP server 
 - **Agents:** [AGENTS.md](AGENTS.md) → [ICM index](docs/icm/README.md).
 - **Research:** [Landscape and comparison (2026-11-22)](docs/research/2026-11-22-landscape-and-comparison.md).
 
-## Proposed architecture in one picture
+## Architecture at a glance
 
 ```
 MCP client ──Streamable HTTP + bearer token──▶ ┌ TDflowMCP.tox (inside TouchDesigner) ─────────────┐
@@ -29,7 +39,7 @@ Browser dashboard ──same origin, admin session─▶│ loopback transport (
                                                 └───────────────────────────────────────────────────┘
 ```
 
-No separate Node.js server and no third-party Python packages are needed under the proposed design ([ADR-0002](docs/decisions/0002-in-process-mcp-host.md), [ADR-0003](docs/decisions/0003-protocol-implementation.md)).
+No separate Node.js server or third-party Python packages are required for the embedded server ([ADR-0002](docs/decisions/0002-in-process-mcp-host.md), [ADR-0003](docs/decisions/0003-protocol-implementation.md)).
 
 ## Checks
 
@@ -40,4 +50,4 @@ python -m unittest discover -s tests -t .
 
 ## License
 
-Private repository. Choosing a public license is deferred (owner decision, 2026-11-22). No reuse rights are granted.
+This repository is publicly readable, but a public software license has not yet been selected. Public access alone does not grant rights to redistribute, modify, or commercially reuse the source. The owner intends to make an official binary available for evaluation; broader licensing requires an explicit decision.
