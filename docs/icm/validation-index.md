@@ -232,3 +232,9 @@ Package zip `25733376…`. Not published. CI: not observed |
 - CI-only fixes committed on `dev`: `4275b8a` skips Windows shell-helper tests on non-Windows hosts (keeps Windows CI coverage); `fdbd857` compares existing directory identity with `os.path.samefile` (handles Windows short aliases). No runtime/source logic or `.tox` changed in those fixes.
 - A clean RC6 binary was packaged and validated at source commit `36ce1e5` (tox SHA-256 prefix `67b393cebe04ef14`). Subsequent commits are tests and docs; new CI results must be observed before merging.
 - Public download is **not** ready: `dist/` is git-ignored and there is no release asset yet. Release validation also asks for the latest TouchDesigner build; do not claim it was tested. Current verified version remains 2025.32440 on Windows.
+
+## 2026-11-25 GitHub CI green and owner-approved release scope
+
+- **Observed passing CI** on exact dev head `341094011c0a74074635fadc6d43cd9bb2d1795f`: [push run #51](https://github.com/jlopesmo/TDflowMCP/actions/runs/45665928515) and [PR run #52](https://github.com/jlopesmo/TDflowMCP/actions/runs/45665945561), both **success**, with Windows and Ubuntu jobs. Docs and secret checks pass; unit tests pass following fixes `4275b8a` and `fdbd857`. Earlier run #42 failed and remains historical evidence.
+- **Owner compatibility decision D26:** v1.0.0 is scoped to **Windows TouchDesigner 2025.32440** only. The owner explicitly waives the newer-build test for **this initial release only**. Newer builds and macOS are **unverified**. All other release checks still apply; never claim unobserved tests.
+- Public repo and [release PR #1](https://github.com/jlopesmo/TDflowMCP/pull/1) confirmed. GitHub default branch still dev. No official release asset or tag yet. Published package must come from clean tagged main and be verified independently.

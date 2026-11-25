@@ -139,9 +139,10 @@ No other compatibility is claimed.
 
   The same flows are automated (1B `caps.*`, browser checks, live Claude Code; validation index).
 - [ ] **macOS:** automatic setup not validated (no Mac).
-- [ ] **CI evidence:** no GitHub Actions run has been observed (B3). Release procedure step 1 requires observed CI.
-- [ ] **Latest TD build:** not tested (release procedure step 1 asks for the minimum and the latest build).
-- [ ] Owner acceptance; then the owner's PR `dev → main`, tag, clean build from the tag and publication (not done by agents).
+- [x] **Observed GitHub CI:** final pre-authorization head `34109401` passed on Windows and Ubuntu: [push run #51](https://github.com/jlopesmo/TDflowMCP/actions/runs/45665928515) and [PR run #52](https://github.com/jlopesmo/TDflowMCP/actions/runs/45665945561). Earlier failing platform-specific unit tests were corrected without changing MCP runtime.
+- [x] **v1.0.0 exception — latest TD build not tested:** owner approved a Windows-only initial release whose **only verified TouchDesigner version is 2025.32440**. Release policy exception is recorded in [verification and release](verification-and-release.md#4-release-proposed). Newer builds and macOS remain unverified, not claimed compatible.
+- [x] Owner approved release preparation, public evaluation distribution and Windows-only compatibility exception (2026-11-25).
+- [ ] **Publication remains:** confirm CI on final docs head, merge PR `dev → main`, tag v1.0.0 on main, clean-build and validate the final-version `.tox`, upload GitHub Release assets, verify the downloaded SHA-256, update public README/download guidance and record receipt.
 
 ## Known limits carried into 1.0
 These are listed in their records ([Code Mode](../research/2026-11-23-phase-3-code-mode.md#limits), [experiments](../research/2026-11-23-phase-3-experiments.md#limits), [Phase 4](../research/2026-11-23-phase-4-extensions.md#limits), [minimized window](../research/2026-11-23-phase-2b-increment-2.md#limits)):

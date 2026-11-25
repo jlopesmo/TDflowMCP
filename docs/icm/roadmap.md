@@ -66,9 +66,13 @@ The 1.0 feature set is **frozen** as of `1.0.0rc6`. Until the 1.0 release, only 
 
 New features, new tools and UI additions wait for after 1.0. Outside the verified Windows 1.0 scope, and kept open:
 - macOS;
-- an observed CI run (B3);
-- newer TouchDesigner builds;
+- CI observed and passing on Windows/Ubuntu (B3 resolved);
+- newer TouchDesigner builds (v1.0.0 Windows-only exception D26);
 - the features listed as not implemented in [current state](current-state.md).
+
+## D26 — Initial public release scope and exception (owner, 2026-11-25)
+
+The owner approved proceeding with **TDflowMCP v1.0.0** for public download and evaluation from the **public repository**, using verified **Windows + TouchDesigner 2025.32440 only**, without testing a newer TouchDesigner build before this initial release. This is a one-release exception to the newer-build compatibility gate, not an assertion of newer-version or macOS support. Preserve the 1.0 feature freeze and all other gates: passing CI, final tagged-source package validation, binary integrity and public release receipt. Source licensing remains deferred; binary evaluation is authorized. Merge to `main`, set it as the GitHub default branch, and upload verified .tox release assets.
 
 ## Open blockers and owner actions
 
@@ -76,7 +80,7 @@ New features, new tools and UI additions wait for after 1.0. Outside the verifie
 |---|---|---|---|
 | B1 | ~~TD 2025.33230+ is not installed locally~~ | **Resolved by D10 + S6 (2026-11-22):** Phase 1A proceeds on 2025.32440. Only the optional S1 (Web Server DAT comparison) needs a build with `localaddress` | None |
 | B2 | Original `mcp_bridge.tox` embeds unreviewed historical `textport_log` rows | The audit and source are preserved in Git; the binary is kept git-ignored (`.tmp/references/`) | Decide whether to commit the binary after reviewing its log rows (non-blocking) |
-| B3 | **CI observable; release gate failed** (2026-11-25, [run 42](https://github.com/jlopesmo/TDflowMCP/actions/runs/45663833839)) | Ubuntu Windows-only helper-path tests and Windows 8.3 path spelling assertion failed. Fixes `4275b8a` and `fdbd857` committed; reruns pending. Documentation and secret scan passed in run 42 | Observe passing Windows and Ubuntu jobs before release |
+| B3 | **Resolved:** GitHub CI observed passing on Windows and Ubuntu, 2026-11-25 ([PR run #52](https://github.com/jlopesmo/TDflowMCP/actions/runs/45665945561), [push run #51](https://github.com/jlopesmo/TDflowMCP/actions/runs/45665928515)) | Earlier cross-platform test assumption failures corrected without MCP runtime changes (`4275b8a`, `fdbd857`) | Reconfirm on final merge head |
 | B4 | GitHub default branch remains `dev` although repository visibility is already **public** | For public sharing, the released, stable `main` should be the landing page. README updated on `dev`; binary will be a GitHub Release asset | Set default branch to `main` after release merge in GitHub Settings |
 | B5 | ~~ADRs 0010–0013 acceptance~~ | **Resolved:** 0010 (D9), 0012/0013 (D12) and 0011 (D13) are Conditionally Accepted | None |
 | B6 | ~~ADR-0006 MCP latency with the audit worker~~ | **Resolved (owner, 2026-11-22):** the worker with `synchronous=FULL` is the baseline. The continuation experiment was rejected: no measurable median gain ([spike B6](../../spikes/b6/README.md)). **Investigation closed (D17)** | None |

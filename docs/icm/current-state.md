@@ -232,3 +232,10 @@
 - **Frozen implementation:** v1.0.0rc6, source commit `36ce1e5`, packaged `.tox` hash begins `67b393ce`; RC6 development/evidence through `8b15421`. The artifact is git-ignored; publish it as a release asset with SHA256SUMS, not as an unverifiable source-tree binary.
 - **CI evidence now observable:** PR #1 run 42 failed Windows and Ubuntu unit tests for portable test assumptions, with doc/secret scan passed. `4275b8a` (Windows-only helper tests) and `fdbd857` (8.3 path identity) are release-gate test corrections; subsequent CI results pending. See validation index.
 - **Outstanding:** latest TouchDesigner build separate test or explicit owner policy decision; observed passing CI; release asset; public README/default branch and licensing terms. `main` stays unchanged until those gates are closed.
+
+## Release authorization and CI closure — 2026-11-25
+
+- **Owner D26:** approved initial public **Windows-only v1.0.0** on **TouchDesigner 2025.32440**, with an explicit one-release exception to newer-build testing. No claims for macOS or newer TouchDesigner. The previous D25 feature freeze stands.
+- **CI observed passing:** GitHub Actions [PR #52](https://github.com/jlopesmo/TDflowMCP/actions/runs/45665945561) and [push #51](https://github.com/jlopesmo/TDflowMCP/actions/runs/45665928515), both Windows and Ubuntu; docs checker, secret scan and unit tests pass after portable test fixes. Latest documentation-only head must also pass before merge.
+- **Release artifact:** tagged-source v1.0.0 binary and checksums still require a clean local TouchDesigner build, package tests, GitHub Release asset publication and independent download verification. No binary has yet been published; release receipts belong in the validation index.
+- **GitHub:** public repository; PR #1 proposes dev into main; default branch remains dev pending post-merge settings change. Public-source licensing remains deferred, but owner explicitly authorizes binary sharing for evaluation. `main` remains unchanged until actual merge.
