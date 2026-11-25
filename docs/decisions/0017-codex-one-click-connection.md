@@ -1,6 +1,8 @@
 # ADR-0017 — One-click OpenAI Codex connection through `http_headers_helper`
 
-**Status:** Conditionally Accepted (owner D27, GitHub Issue #3, 2026-11-25), subject to the validation gates below. It extends [ADR-0015](0015-consent-based-client-connection.md) to a second client and corrects its statement that Codex has no helper mechanism. Target: 1.0.1.
+**Status:** Accepted (owner D28, [GitHub Issue #3](https://github.com/jlopesmo/TDflowMCP/issues/3#issuecomment-7175371704), 2026-11-25) as delivered for the tested Windows and Codex interfaces, with the limitations and security controls documented below.
+
+History: the owner first approved it subject to the validation gates below (D27, 2026-11-25); they passed. It extends [ADR-0015](0015-consent-based-client-connection.md) to a second client and corrects its statement that Codex has no helper mechanism. Target: 1.0.1 (release in progress).
 
 ## Context
 ADR-0015 gave Claude Code a consent-based, one-click connection and left Codex, Cursor and VS Code Copilot on a manual fallback, because their documented credential options were an environment variable present at start, or OAuth. The owner asked (D27, Issue #3) for the same experience with Codex: **Coding Agent: Codex → Connect Agent → Approve → new Codex chat → connected**, without copying a token, editing TOML or setting an environment variable.
@@ -63,7 +65,7 @@ What was **observed** on this Windows computer, with an isolated `CODEX_HOME` an
 ## Validation gates
 - **Windows, real Codex engines: passed** 2026-11-25 ([validation index](../icm/validation-index.md)). With a disposable client home and the configuration TDflowMCP wrote, used unmodified, the Codex VS Code extension's engine and the Codex CLI's engine list the tools, call `tdflow_whoami` as the Codex agent, create an operator in scope and are refused outside it; Claude Code works next to it with its own identity; revocation, repair without restarting Codex, a TouchDesigner restart and Disconnect behave as decided.
 - **Independent security review:** see [review 23](../research/2026-11-25-codex-one-click-connection.md#independent-review-23-security).
-- **Owner's real profile and the Codex chat in VS Code: pending.** This is the owner's acceptance step ([checklist](../operations/release-candidate-1.0.1.md)). It needs the owner's own approval in TouchDesigner and a model session; no agent executed it.
+- **Owner's real profile and the Codex chat in VS Code: passed** 2026-11-25, **reported by the owner** (no agent executed or observed it; [Issue #3](https://github.com/jlopesmo/TDflowMCP/issues/3#issuecomment-7175371704)). With `1.0.1rc1` in a saved disposable project: OpenAI Codex selected, Connect Agent approved, a Codex chat in VS Code returned a successful `tdflow_whoami` (Builder role, `/project1/**` scopes), TouchDesigner showed `Agent Connected — Ready` and `Codex 0.171.0`, and the agent inspected the network without changing anything.
 - **macOS, Linux, the desktop app, remote execution: not validated and not offered.**
 
 ## Consequences

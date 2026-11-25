@@ -1,6 +1,15 @@
-# TDflowMCP 1.0.1 release candidate: changelog, compatibility and acceptance checklist
+# TDflowMCP 1.0.1: changelog, compatibility and release checklist
 
-**Candidate: `1.0.1rc1`**, on `dev` only (owner D27, GitHub Issue #3). **This is not a release:** nothing is merged to `main`, tagged or published, and the published [v1.0.0](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.0.0) is unchanged. Releasing it is the owner's decision after the acceptance check below ([verification and release §4](verification-and-release.md#4-release-proposed)).
+## Release 1.0.1 (2026-11-25)
+**Version `1.0.1` is `1.0.1rc1` with the final version label** (owner D28: the hands-on check with the Codex chat in VS Code passed, and the owner approved the release; [Issue #3](https://github.com/jlopesmo/TDflowMCP/issues/3#issuecomment-7175371704)). No feature, tool, permission or security behaviour changed from the candidate. Changes from rc1:
+- the version is `1.0.1` (the Version parameter shows `1.0.1 (tools 1)`), and the status API's `phase` is `1.0.1`;
+- the install guide says `Version 1.0.1`;
+- release tooling outside the component: a workflow that verifies the published assets from GitHub-hosted runners (`verify-release`).
+
+The published [v1.0.0](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.0.0) stays available unchanged. Evidence for each step (tests, CI, merge, tag, package hashes, publication, the download check) is in the [validation index](../icm/validation-index.md) and the [current state](../icm/current-state.md#release-101--2026-11-25).
+
+## Candidate `1.0.1rc1`
+The candidate was on `dev` only (owner D27, GitHub Issue #3) until the owner's acceptance.
 
 ## Changes from 1.0.0
 - **One-click connection for OpenAI Codex on Windows** ([ADR-0017](../decisions/0017-codex-one-click-connection.md), [record](../research/2026-11-25-codex-one-click-connection.md)):
@@ -23,7 +32,7 @@
 | TouchDesigner (Windows 11) | **2025.32440** | All in-TD suites pass | [validation index](../icm/validation-index.md) |
 | TouchDesigner newer builds, macOS, Linux | **not tested** | — | — |
 | Codex CLI (Windows) | **0.160.0** | Its engine connects through the written `config.toml`: tools listed, `tdflow_whoami` as the Codex agent, restart, revoke, repair without restart, disconnect | validation index (Codex suite) |
-| Codex VS Code extension (Windows) | **26.1120.50957** (engine codex-cli 0.171.0-alpha.13.2) | The same, plus an operator created in scope and a refusal outside it. **The chat window itself and a model session: owner acceptance step, not executed by an agent** | validation index (Codex suite) |
+| Codex VS Code extension (Windows) | **26.1120.50957** (engine codex-cli 0.171.0-alpha.13.2) | The same, plus an operator created in scope and a refusal outside it. **The chat window itself with a model session: passed in the owner's hands-on check** (reported by the owner, `Codex 0.171.0`; not executed by an agent) | validation index (Codex suite); [Issue #3](https://github.com/jlopesmo/TDflowMCP/issues/3#issuecomment-7175371704) |
 | Codex desktop app | **not tested** (not installed) | Shares the configuration per OpenAI's documentation | — |
 | Codex on macOS or Linux; Codex in a remote or cloud environment | **not offered** | Manual setup, or not possible | [ADR-0017](../decisions/0017-codex-one-click-connection.md) |
 | Claude Code CLI (Windows) | **2.1.289** | Unchanged; also verified connected next to Codex | validation index |
@@ -39,7 +48,7 @@ No other compatibility is claimed. The minimum Codex version for the header help
 - [x] The same on the **packaged** `.tox`, built from a clean worktree of the candidate commit `2bb48e5` (`dist/TDflowMCP-1.0.1rc1-2bb48e5390`, tox SHA-256 `95e53f84ec961f21a771eac3b261c5bcfd98ebaf0816d775ce0c6e14de92329e`, the same source digest as the tested candidate) (validation index).
 - [x] Independent security review 23 (0 High; 1 Medium and 8 Low fixed, 1 Low accepted) and a usability review (High and Medium addressed) ([record](../research/2026-11-25-codex-one-click-connection.md#independent-review-23-security)).
 - [x] GitHub CI, Windows and Ubuntu: [run #62](https://github.com/jlopesmo/TDflowMCP/actions/runs/45702971854) on `4d28dd9` passed. (Runs #60 and #61 failed on Ubuntu in one new unit test that used a Windows path; the test was fixed, no product code changed. Validation index.)
-- [ ] **Owner: Codex in VS Code on the real profile** (**not executed by an agent**: it needs your approval in TouchDesigner and a Codex chat). About five minutes, in a copy of a project or one you can experiment with:
+- [x] **Owner: Codex in VS Code on the real profile: passed 2026-11-25, reported by the owner** in [Issue #3](https://github.com/jlopesmo/TDflowMCP/issues/3#issuecomment-7175371704) (**not executed or observed by an agent**): `tdflow_whoami` succeeded from the Codex chat in VS Code; TouchDesigner showed `Agent Connected — Ready` and `Codex 0.171.0`; Builder role, `/project1/**` scopes; nothing changed in the project. The steps were:
   1. Drag the 1.0.1rc1 `TDflowMCP.tox` into a saved project (or replace the 1.0.0 component in a copy).
   2. On the TDflowMCP page set **Coding Agent** to **OpenAI Codex**, pulse **Connect Agent**, read the plan and choose **Approve**.
   3. In VS Code open the Codex panel. `tdflow` should now be in its MCP servers list. Start a **new** Codex chat.
@@ -47,7 +56,8 @@ No other compatibility is claimed. The minimum Codex version for the header help
   5. Optional: Agents page, select the Codex agent, **Disconnect Agent**. `tdflow` should be gone from Codex's list, and `~/.codex/config.toml` should be as it was before step 2.
 
   If step 3 shows `tdflow` as failed: check that TouchDesigner is open (not minimized) and Enable MCP is on, then View Connection Details (Advanced page).
-- [ ] **Owner decision:** release 1.0.1 (PR `dev → main`, version `1.0.1`, tag, package from the tag, GitHub Release), or ask for changes.
+- [x] **Owner decision (D28):** release 1.0.1.
+- [ ] **Release steps:** version `1.0.1` tested and committed; CI; PR #4 merged into `main`; annotated tag `v1.0.1`; the package from the tag and its suites; the GitHub Release with its four assets; the download check from GitHub-hosted runners; the README link; Issue #3 closed. Each is recorded in the validation index once observed.
 
 ## Known limits added by this candidate
 - Automatic Codex setup is for Windows only.

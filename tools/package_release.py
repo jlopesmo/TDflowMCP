@@ -103,8 +103,10 @@ def main():
         with zipfile.ZipFile(zp, "w", zipfile.ZIP_DEFLATED) as z:
             for n in sorted(os.listdir(out)):
                 z.write(os.path.join(out, n), f"{name}/{n}")
+        # sums_sha256: the hash of SHA256SUMS covers every asset; it is what the verify-release workflow is given.
         print(json.dumps({"package": os.path.relpath(out, ROOT), "zip": os.path.relpath(zp, ROOT),
-                          "zip_sha256": sha_file(zp), "tox_sha256": meta["sha256"], "commit": commit,
+                          "zip_sha256": sha_file(zp), "tox_sha256": meta["sha256"],
+                          "sums_sha256": sha_file(os.path.join(out, "SHA256SUMS")), "commit": commit,
                           "td_build": meta["td_build_used"], "development_build": ".dev" in version}, indent=1))
     finally:
         subprocess.run(["git", "-c", f"safe.directory={ROOT.replace(os.sep, '/')}", "worktree", "remove", "--force", wt],

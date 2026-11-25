@@ -80,6 +80,14 @@ After the 1.0.0 release the owner asked for the Claude Code experience with Open
 
 Decision record: [ADR-0017](../decisions/0017-codex-one-click-connection.md). Status and evidence: [current state](current-state.md#101-release-candidate-one-click-codex-owner-d27), [checklist](../operations/release-candidate-1.0.1.md). The 1.0 feature freeze (D25) ended with the 1.0.0 release; D27 is the only feature directed for 1.0.1.
 
+## D28 — Codex acceptance and release of 1.0.1 (owner, GitHub Issue #3, 2026-11-25)
+
+The owner ran the hands-on check on `1.0.1rc1` and reported it passed ([Issue #3](https://github.com/jlopesmo/TDflowMCP/issues/3#issuecomment-7175371704)): OpenAI Codex selected, Connect Agent approved, the Codex chat in VS Code returned `tdflow_whoami`, TouchDesigner showed `Agent Connected — Ready` and `Codex 0.171.0`. Decided:
+- **Release v1.0.1.** Version and documents only from `1.0.1rc1`; no new features; every permission, audit, authentication and secret-handling gate stays.
+- **ADR-0017 is accepted as delivered** for the tested Windows and Codex interfaces, with its documented limitations and security controls.
+- **Procedure:** validations and CI on Windows and Ubuntu; merge the verified `dev` into `main` (PR #4); annotated tag `v1.0.1` on the release commit; the final `.tox` built and tested from the clean tag (never a renamed candidate); a GitHub Release with `TDflowMCP.tox`, `TDflowMCP.json`, `SHA256SUMS` and `INSTALL.md`; the public assets verified independently; Issue #3 closed only after that.
+- **Scope:** Windows with TouchDesigner 2025.32440; Codex CLI 0.160.0, the Codex VS Code extension's engine (verified by agents: 0.171.0-alpha.13.2; TouchDesigner shows it as `Codex 0.171.0`) and the owner's VS Code chat. macOS, Linux and the desktop app are not verified. The published v1.0.0 stays available unchanged. `main` stays the default branch, protected against force pushes and deletion.
+
 ## Open blockers and owner actions
 
 | # | Item | Why it matters | Needed from owner |
@@ -89,6 +97,6 @@ Decision record: [ADR-0017](../decisions/0017-codex-one-click-connection.md). St
 | B3 | **Resolved:** GitHub CI observed passing on Windows and Ubuntu, 2026-11-25 ([PR run #52](https://github.com/jlopesmo/TDflowMCP/actions/runs/45665945561), [push run #51](https://github.com/jlopesmo/TDflowMCP/actions/runs/45665928515)) | Earlier cross-platform test assumption failures corrected without MCP runtime changes (`4275b8a`, `fdbd857`) | None. Reconfirmed on the merge head: [push run #55](https://github.com/jlopesmo/TDflowMCP/actions/runs/45666920078) on `main` `5f86345` passed on both systems |
 | B4 | ~~GitHub default branch remains `dev` although the repository is public~~ | **Resolved (observed 2026-11-25):** the default branch is `main`, protected against force pushes and deletion; the binary is an asset of the [v1.0.0 release](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.0.0) | None |
 | B7 | The published `TDflowMCP.tox` has not been downloaded and checksum-compared from outside the build network | The build network's gateway blocks a trusted connection to GitHub's asset host. GitHub's own digests match ([validation index](validation-index.md#2026-11-25-v100-release)) | Download it on another network or device, compare the SHA-256, then close Issue #2 |
-| B8 | 1.0.1rc1 (one-click Codex) awaits the owner's hands-on acceptance | No agent can open the Codex chat in VS Code on the owner's profile or approve in the owner's TouchDesigner. The engines were verified; the chat window and a model session were not | The five-minute check in the [1.0.1 checklist](../operations/release-candidate-1.0.1.md#acceptance-checklist), then decide on the 1.0.1 release |
+| B8 | ~~1.0.1rc1 (one-click Codex) awaits the owner's hands-on acceptance~~ | **Resolved (owner D28, 2026-11-25):** the owner's check with the Codex chat in VS Code passed, and the owner approved the 1.0.1 release | None |
 | B5 | ~~ADRs 0010–0013 acceptance~~ | **Resolved:** 0010 (D9), 0012/0013 (D12) and 0011 (D13) are Conditionally Accepted | None |
 | B6 | ~~ADR-0006 MCP latency with the audit worker~~ | **Resolved (owner, 2026-11-22):** the worker with `synchronous=FULL` is the baseline. The continuation experiment was rejected: no measurable median gain ([spike B6](../../spikes/b6/README.md)). **Investigation closed (D17)** | None |
