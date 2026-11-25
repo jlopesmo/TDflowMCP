@@ -225,3 +225,10 @@
 4. **Owner:** accept or reject the 1.0 release candidate; the release steps after that (PR `dev → main`, tag, clean build from the tag, publication) are the owner's.
 5. **Owner question:** whether to add agent-writable task, decision or ICM records (reopens D18).
 6. **B3:** an observed CI run. **Remaining review-6 follow-ups:** bind/export propagation; pairing DoS mitigation.
+
+## Public release integration checkpoint — 2026-11-25
+
+- **Owner authorization:** prepare and share the finished 1.0 Windows build through `main` and a GitHub Release. Repository visibility is already **public**; default branch currently `dev` (must switch to `main` for the public landing page). PR [#1](https://github.com/jlopesmo/TDflowMCP/pull/1) is open; release not merged, tagged or published.
+- **Frozen implementation:** v1.0.0rc6, source commit `36ce1e5`, packaged `.tox` hash begins `67b393ce`; RC6 development/evidence through `8b15421`. The artifact is git-ignored; publish it as a release asset with SHA256SUMS, not as an unverifiable source-tree binary.
+- **CI evidence now observable:** PR #1 run 42 failed Windows and Ubuntu unit tests for portable test assumptions, with doc/secret scan passed. `4275b8a` (Windows-only helper tests) and `fdbd857` (8.3 path identity) are release-gate test corrections; subsequent CI results pending. See validation index.
+- **Outstanding:** latest TouchDesigner build separate test or explicit owner policy decision; observed passing CI; release asset; public README/default branch and licensing terms. `main` stays unchanged until those gates are closed.

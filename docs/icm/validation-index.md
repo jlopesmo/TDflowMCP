@@ -8,7 +8,7 @@ This file lists every check that exists, how to run it, and its last **executed 
 |---|---|---|---|
 | Doc checker | `python tools/check_docs.py` | Required files, relative links/images + anchors, ADR status vs index, privacy patterns in `.md/.py/.yml/.yaml/.json/.txt` | See runs below |
 | Doc checker unit tests | `python -m unittest discover -s tests -t .` | `tools/check_docs.py` | See runs below |
-| CI workflow `docs.yml` | GitHub Actions on push to `dev`/`main` and on every pull request | Doc checker + all unit tests on Python 3.11, Ubuntu + Windows | **Not observed.** The repo is private, and no GitHub integration is available in this environment: no `gh` CLI, no GitHub connector (checked 2026-11-22), and a credential-based API read was denied. No run status, URL or log has been seen for any commit. Owner action [B3](roadmap.md#open-blockers-and-owner-actions) |
+| CI workflow `docs.yml` | GitHub Actions on push to `dev`/`main` and on every pull request | Doc checker + all unit tests on Python 3.11, Ubuntu + Windows | **Observed 2026-11-25:** [PR #1 CI run 42](https://github.com/jlopesmo/TDflowMCP/actions/runs/45663833839) failed in unit tests on Ubuntu (3 Windows-helper-path test errors) and Windows (1 directory 8.3-alias assertion); documentation and secret scan passed on both. Corrections on `dev` (`4275b8a`, `fdbd857`); fresh CI conclusions pending. Earlier historical inability to observe CI is superseded. |
 | Independent documentation review | separate agent, read-only | All docs + tooling | Review 1 and review 2, see runs below |
 | Core unit tests (`tests/unit/`) | `python -m unittest discover -s tests -t .` (same command) | `net.bindverify`, `net.oslisteners`, `net.pyhttp` (real loopback sockets, ephemeral ports), `gate`, `compat`, troubleshooting data, `td`-free/no-subprocess boundaries | See runs below |
 | TD bundled-Python parity | `"C:\Program Files\Derivative\TouchDesigner.2025.32440\bin\python.exe" -m unittest discover -s tests -t .` | The same suite on TD's interpreter (no TouchDesigner process) | See runs below |
@@ -224,3 +224,11 @@ Package zip `25733376…`. Not published. CI: not observed |
 - Chrome and Edge are installed. Edge headless made no request on this machine; Chrome headless (throwaway profile) worked.
 - Node.js v24.14.0 and Python 3.11.8 are on PATH. There is no `gh` CLI.
 - Original bridge hashes were verified with `sha256sum`: the `.tox` matches the audit's stated SHA-256, and the committed audit/zip copies are byte-identical to the supplied files.
+
+## 2026-11-25 public release readiness and GitHub CI
+
+- Repository visibility independently observed as **public**, while default branch remains `dev`; `main` still contains Phase 0 only. PR [#1](https://github.com/jlopesmo/TDflowMCP/pull/1) proposes the RC6 release into `main`.
+- GitHub Actions run [42](https://github.com/jlopesmo/TDflowMCP/actions/runs/45663833839) **failed**, not passed: on Ubuntu, 3 Windows-only helper unit tests assumed NT path semantics; on Windows, one test compared an 8.3 short path against a long path as strings. Both OS jobs passed documentation and secret scan.
+- CI-only fixes committed on `dev`: `4275b8a` skips Windows shell-helper tests on non-Windows hosts (keeps Windows CI coverage); `fdbd857` compares existing directory identity with `os.path.samefile` (handles Windows short aliases). No runtime/source logic or `.tox` changed in those fixes.
+- A clean RC6 binary was packaged and validated at source commit `36ce1e5` (tox SHA-256 prefix `67b393cebe04ef14`). Subsequent commits are tests and docs; new CI results must be observed before merging.
+- Public download is **not** ready: `dist/` is git-ignored and there is no release asset yet. Release validation also asks for the latest TouchDesigner build; do not claim it was tested. Current verified version remains 2025.32440 on Windows.
