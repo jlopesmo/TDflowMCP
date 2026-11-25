@@ -58,6 +58,7 @@ class DiscoveryTests(unittest.TestCase):
 
 
 class HelperTests(unittest.TestCase):
+    @unittest.skipUnless(sys.platform == "win32", "Windows-only cmd.exe helper path semantics")
     def test_windows_helper_has_no_secret_and_cmd_safe(self):
         cmd = C.helper_command("win32", 9480, "claude-code", r"D:\Profiles\x\TDflowMCP\connect")
         self.assertIn("TDflowMCP", cmd)
@@ -73,6 +74,7 @@ class HelperTests(unittest.TestCase):
         self.assertTrue(C.is_ours(C.claude_entry("win32", 9480, "claude-code", r"C:\v\connect"),
                                   C.claude_entry("win32", 9481, "claude-code", r"C:\v\connect")))
 
+    @unittest.skipUnless(sys.platform == "win32", "Windows-only cmd.exe helper path semantics")
     def test_refuses_unsafe_paths_and_platforms(self):
         for bad in (r"C:\a%PATH%\b", 'C:\\a"b', "relative\\dir", "C:\\O\u2019Brien\\x", "C:\\a!b", "C:\\a^b"):
             with self.assertRaises(C.ConnectError, msg=bad):
@@ -100,6 +102,7 @@ class HelperTests(unittest.TestCase):
             with self.assertRaises(C.ConnectError):
                 C.proof(*bad)
 
+    @unittest.skipUnless(sys.platform == "win32", "Windows-only cmd.exe helper path semantics")
     def test_ownership_is_strict(self):
         """Review 19 (8): a user's own helper that mentions TDflowMCP is not ours."""
         mine = C.claude_entry("win32", 9480, "claude-code", r"C:\v\connect")
