@@ -89,6 +89,8 @@ class TDflowMCPExt:
         self._ux_at, self._ux_vals = -1e9, {}      # throttled readiness/agent lines (see _publish)
         self.clipboard_writer = self._default_clipboard  # main thread only
         self.tell_text = ""
+        self.prompt_text = ""            # Copy Agent Prompt (D24): the first message for a new chat (no secrets)
+        self.prompt_key = "connect"
         self.note, self._note_until, self._note_at = "", 0.0, 0.0
         self._msg, self._msg_at = None, -1e9         # the initial controller message is not "recent" (UX)
         self._static_facts = None
@@ -734,21 +736,81 @@ class TDflowMCPExt:
     def _memory_ops(self):
         return self.tdops or self._m.tdops.TDAdapter(self.ownerComp, lambda: self._root_text, lambda: None)
 
-    def _memory_lines(self):
-        """Phase 2A: resume lines from project memory (main thread, no disk I/O; validated fields only). In
-        repository mode the counts come from the component's derived index, never from the files."""
+    def _memory_counts(self):
+        """Phase 2A: (tasks, not marked done) from project memory (main thread, no disk I/O; validated fields only).
+        In repository mode the counts come from the component's derived index, never from the files."""
         M = self._m.memory
         try:
             ops = self._memory_ops()
             info = ops.memory_info(with_dats=False)
             if info["status"] != "ready":
-                return []
+                return 0, 0
             if info["authority"] == "repo":
-                return M.tell_counts(*M.derived_counts(info["derived"]))
+                return M.derived_counts(info["derived"])
             status, _, _, entries = ops.memory_entries()
         except Exception:
-            return []
-        return M.tell_section(M.tasks(entries)) if status == "ready" else []
+            return 0, 0
+        if status != "ready":
+            return 0, 0
+        rows = M.tasks(entries)
+        return len(rows), sum(1 for t in rows if t.get("status") != "done")
+
+    def _memory_lines(self, counts=None):
+        return self._m.memory.tell_counts(*(counts or self._memory_counts()))
+
+    def _prompt_facts(self, rd=None):
+        """Copy Agent Prompt facts (D24) for the selected client: (key, cid, automatic, set_up). Main thread, no I/O."""
+        CN, C = self._m.connection, self.connector
+        rd = rd or self._readiness()
+        ids = self.native.tell_clients()
+        cid = ids[0] if len(ids) == 1 else None
+        automatic = bool(cid and C.automatic(cid))
+        stage = (C.state or {}).get("stage")
+        connect = "flow" if stage in CN.FLOW else "failed" if stage == "failed" else ""
+        set_up = bool(cid) and cid in C.connected_clients()
+        rec = (C.records.get(cid) or {}) if set_up else {}
+        aid = rec.get("agent_id")
+        if set_up and not connect:
+            url = (rec.get("entry") or {}).get("url", "")
+            # Never "ready" with a configuration that can no longer work: another port, no valid key (requests are
+            # refused), or a revoked credential. Repair Connection fixes each (review 21).
+            if (url and url != f"http://127.0.0.1:{self.ctl.port}/mcp"
+                    or C.stage_line() == CN.STAGE_LINES["no_credential"]
+                    or (self.identity is not None and not any(t.agent_id == aid and t.revoked_at is None
+                                                              for t in self.identity.tokens.values()))):
+                connect = "repair"
+        talked_ids = {r.get("agent_id") for r in rd.get("connected") or ()}
+        if set_up:
+            talked = aid in talked_ids                    # this client's own agent, not any agent (review 21)
+        elif not automatic:
+            ours = {r.get("agent_id") for r in C.records.values()}
+            talked = bool(talked_ids - ours)              # a manually registered agent talked
+        else:
+            talked = False
+        key = self._m.tellagent.prompt_state(rd["stage"], mcp_on=self.mcp_on, automatic=automatic, set_up=set_up,
+                                             connect=connect, talked=talked,
+                                             mcp_ready=rd.get("mcp", {}).get("state") == "ready")
+        return key, cid, automatic, set_up
+
+    def _prompt_key(self, rd=None):
+        return self._prompt_facts(rd)[0]
+
+    def _prompt_line(self, rd):
+        """Tell Your Coding Agent value; never breaks _publish (an unexpected fact shows 'not ready')."""
+        try:
+            return self._m.tellagent.prompt_line(self._prompt_key(rd))
+        except Exception:
+            return self._m.tellagent.prompt_line("failed")
+
+    def _refresh_prompt(self, rd=None, counts=None):
+        key, cid, automatic, set_up = self._prompt_facts(rd)
+        self.prompt_key = key
+        n, o = counts or self._memory_counts()
+        self.prompt_text = self._m.tellagent.agent_prompt(
+            key, client=self._m.tellagent.display(self.clients, cid) if cid else "", automatic=automatic,
+            version=self.version, td_build=self.td_build, n_tasks=n, n_open=o, error_code=self.ctl.error_code or "",
+            set_up=set_up)
+        return self.prompt_text
 
     def _bg(self, fn):
         """Run TD-free file I/O on a short-lived thread; the Future is polled in OnFrame (``_after``). The main
@@ -1203,12 +1265,16 @@ class TDflowMCPExt:
         self.note, self._note_until, self._note_at = text, now + seconds, now
 
     def CopyTellAgent(self):
+        """Copy Agent Prompt (owner D24): a first message for a new coding-agent chat, or (not ready) a short
+        recovery message. The full setup guide stays in View Full Instructions."""
         self._refresh_tell()
         try:
-            ok = bool(self.clipboard_writer(self.tell_text))
+            ok = bool(self.clipboard_writer(self._refresh_prompt()))
         except Exception:
             ok = False
-        self._set_note("Instructions copied." if ok else "Copy failed: View Full")
+        ready = self.prompt_key in self._m.tellagent.PROMPT_READY
+        self._set_note(("Prompt copied: paste it" if ready else "Copied (not ready yet)") if ok
+                       else "Copy failed: View Full")
         return ok
 
     def ViewInstructions(self):
@@ -2232,6 +2298,8 @@ class TDflowMCPExt:
                 if self.admin.active_sessions() else "none",
                 "Agentsummary": (self._not_loaded_line() if self._not_loaded() else
                                  f"{n_agents} agent{'' if n_agents == 1 else 's'} · {len(conn)} connected"),
+                # D24: whether Copy Agent Prompt gives a ready first message (else a recovery message).
+                "Tellagent": self._prompt_line(rd),
             }
         vals = dict(self._ux_vals)
         vals.update({
@@ -2244,7 +2312,6 @@ class TDflowMCPExt:
             "Compatsummary": ("Running diagnostics…" if self._diag_request else
                               self._m.readiness.system_line(self.checks) if self.checks else "not run"),
             "Lastcheck": (f"{self.checks_wall} ({self.checks_how})" if self.checks_wall else "not run yet"),
-            "Tellagent": self._m.tellagent.one_line(ctl.state.value, ctl.error_code, self.checks, self.version),
             "Pairingrequest": (f"Pending: {pend['code']} ({pend['wall']})" if pend and pend["state"] == "pending" else ""),
             "Datadir": self._data_display(),
             "Datastatus": self._data_status(),

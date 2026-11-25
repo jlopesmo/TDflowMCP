@@ -10,7 +10,7 @@ A source-first, AI-powered TouchDesigner development environment: an MCP server 
 >
 > See [current state](docs/icm/current-state.md) and [build and test](docs/operations/build-and-test.md).
 
-**User experience** (built for Claude Code; development builds): drag `TDflowMCP.tox` into a project → pulse **Open Setup** → the browser Setup Assistant runs compatibility checks and guides pairing, agent tokens and enabling MCP → copy **Tell Your Coding Agent** into Claude Code → work under enforced, audited scopes → resume later from verified handoffs.
+**User experience** (built for Claude Code; development builds): drag `TDflowMCP.tox` into a project → the compatibility checks run → pulse **Connect Agent** and approve the plan in TouchDesigner (Claude Code is configured with no token to copy; other agents get a short manual setup) → pulse **Copy Agent Prompt** and paste it as the first message of a new Claude Code chat → work under enforced, audited scopes → resume later from verified handoffs.
 
 ## Start here
 

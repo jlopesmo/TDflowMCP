@@ -160,7 +160,7 @@ def script():
     T("diag.summary", comp.par.Compatsummary.eval() not in ("", "not run"), summary=comp.par.Compatsummary.eval())
     T("diag.checks", len(ext.checks) >= 9, checks={c.id: c.result for c in ext.checks})
     T("diag.no_listener", ext.ctl.transport is None and comp.par.Status.eval() == "Off")
-    T("diag.tellagent_param", comp.par.Tellagent.eval() != "Not checked yet", tellagent=comp.par.Tellagent.eval())
+    T("diag.tellagent_param", comp.par.Tellagent.eval().startswith("Not ready"), tellagent=comp.par.Tellagent.eval())
     yield checkpoint("diagnosed", {"pid": os.getpid()})
 
     calls = []
@@ -185,8 +185,15 @@ def script():
     try:
         comp.par.Copytellagent.pulse()
         yield frames(3)
-        T("copy.clipboard_has_text", td.ui.clipboard == ext.tell_text and "Tell Your Coding Agent" in td.ui.clipboard)
-        T("copy.reported", "copied" in comp.par.Statusdetail.eval().lower(), detail=comp.par.Statusdetail.eval())
+        # D24: Copy Agent Prompt puts the prompt (here: not ready, no agent yet) on the real clipboard, not the guide.
+        T("copy.clipboard_has_the_agent_prompt", td.ui.clipboard == ext.prompt_text and bool(ext.prompt_text)
+          and "It is not ready for you yet" in td.ui.clipboard and "## " not in td.ui.clipboard,
+          clip=td.ui.clipboard[:200])
+        T("copy.reported", comp.par.Statusdetail.eval() == "Copied (not ready yet)", detail=comp.par.Statusdetail.eval())
+        T("copy.label_renamed", comp.par.Copytellagent.label == "Copy Agent Prompt"
+          and comp.par.Viewinstructions.label == "View Full Instructions")
+        T("copy.tellagent_says_not_ready", comp.par.Tellagent.eval().startswith("Not ready"),
+          tell=comp.par.Tellagent.eval())
 
         def broken(_):
             raise RuntimeError("clipboard locked")
@@ -366,7 +373,8 @@ def script():
     T("frame.no_errors", diag["frame_errors"] == 0, last=diag["last_frame_error"])
     T("reverify.ran", R.get("reverifies_before_reinit", 0) >= 1, reverifies=R.get("reverifies_before_reinit"))
     params = {p.name: str(p.eval()) for p in comp.customPars}
-    yield checkpoint("scan", {"params": params, "tell": ext.tell_text, "tellagent_dat": comp.op("tellagent").text,
+    yield checkpoint("scan", {"params": params, "tell": ext.tell_text + ext._refresh_prompt(),
+                              "tellagent_dat": comp.op("tellagent").text,
                               "diagnostics": diag})
 
     # Delete the component while it is serving: the listener must go away.

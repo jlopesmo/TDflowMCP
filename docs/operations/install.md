@@ -54,8 +54,11 @@ On the **TDflowMCP** page:
    - how to undo.
 
    Choose **Approve**, or **Cancel** (nothing changes).
-6. Next Step shows the progress, then **Start a Claude Code chat.** Start a new conversation in the
-   VS Code extension or a new `claude` session in a terminal (or run `/mcp` and reconnect `tdflow`).
+6. Next Step shows the progress, then **Start a Claude Code chat.** **Tell Your Coding Agent** now says
+   *Prompt ready: copy it*. Pulse **Copy Agent Prompt**, start a new conversation in the VS Code extension or a new
+   `claude` session in a terminal, and paste. The agent connects, checks its identity and permissions with
+   `tdflow_whoami`, gives a short overview of the project and waits for your first task. It contains no token. (If
+   Tell Your Coding Agent says *Not ready: …*, the copied text names the one step to do first.)
 7. When the agent's first request arrives, Next Step says **Agent Connected — Ready**, and **Connected Agents** shows
    the client and its version. A configured agent that has not talked is never shown as connected.
 
@@ -63,8 +66,8 @@ There is no token to copy and nothing to type: Claude Code fetches the credentia
 
 **After restarting TouchDesigner,** MCP is off as always and the agents are not loaded yet. The Agents page says
 *1 agent · not loaded*, not zero. Next Step says *Turn on Enable MCP.*: turn it on (or pulse Connect Agent and
-approve), then start a new Claude Code chat or reconnect `tdflow` with `/mcp`. Nothing is set up again, and the same
-agent and key are used.
+approve), then pulse **Copy Agent Prompt** and paste it into a new Claude Code chat (or reconnect `tdflow` with
+`/mcp`). Nothing is set up again, and the same agent and key are used.
 
 **Other agents (Codex, Cursor, VS Code Copilot, others).** These read their credential from an environment variable
 when they start, so they need one paste:
@@ -73,7 +76,7 @@ when they start, so they need one paste:
    after a minute). On macOS Copy Token is not available; use Open Setup (Web page) to create and copy a token.
 3. Follow **View Full Instructions**: one command in the terminal that starts the agent, and one to register the
    server.
-4. Turn on **Enable MCP**.
+4. Turn on **Enable MCP**, then pulse **Copy Agent Prompt** and paste it as the agent's first message.
 
 **Undo:** Agents page, select the agent, then **Disconnect**. It removes the entry (or restores the one it replaced),
 deletes the stored credential and revokes the agent's tokens. **Repair Connection** gives it a new credential if

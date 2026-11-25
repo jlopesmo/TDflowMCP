@@ -13,6 +13,13 @@ Adopt [agent-integration.md](../architecture/agent-integration.md) and [setup-as
 4. Version management uses `tdflow_whoami`, Skills frontmatter and manifest comparison.
 5. "Tell Your Coding Agent" is generated from allowlisted state fields and never contains secrets or environment-derived free text. Its resume section is reference-only by default, and agent-authored content is available only through `tdflow_handoff_resume`, fenced and labelled as untrusted.
 
+**Amendment (owner D24, 2026-11-24): Copy Agent Prompt.** The main-page pulse that copied the full text is renamed
+**Copy Agent Prompt** and copies a short first message for a new chat instead ([setup assistant §6.1](../architecture/setup-assistant.md#61-copy-agent-prompt-owner-d24)).
+- When the connection is ready, it asks the agent to use the existing `tdflow` server, call `tdflow_whoami`, give an overview, check memory when relevant and authorized, respect approvals, and change nothing until given a task.
+- Otherwise it is a recovery message that never claims a connection.
+- It follows rule 5: allowlisted fields only, memory as counts only, and no permission claims (`tdflow_whoami` reports those).
+- The full text stays under View Full Instructions.
+
 ## Alternatives
 - Automatic config writing (Envoy-like): rejected.
 - Shipping no Skills: weaker agent behaviour and higher token use.

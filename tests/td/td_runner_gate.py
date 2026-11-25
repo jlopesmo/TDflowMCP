@@ -477,6 +477,10 @@ def bench(comp, ext, T, frames, until, checkpoint, R):
 
 # ---- native: drop the .tox -> Check Ready -> Connect Agent -> Approve -> Start Working (owner D22, ADR-0015) --------
 TOKEN_SHAPE = __import__("re").compile(r"tdf_[A-Za-z0-9]{12}\.[A-Za-z0-9_\-]{43,}")
+CHANGE_TOOLS = ("tdflow_set_parameters", "tdflow_create_operator", "tdflow_delete_operator", "tdflow_connect",
+                "tdflow_disconnect", "tdflow_set_dat_text", "tdflow_undo", "tdflow_execute_script",
+                "tdflow_experiment_create", "tdflow_experiment_promote", "tdflow_experiment_discard",
+                "tdflow_save_project", "tdflow_task_checkpoint", "tdflow_handoff_create", "tdflow_lease_scope")
 
 
 def _dialogs(ext):
@@ -558,6 +562,17 @@ def native_onboard(comp, ext, T, frames, until, checkpoint, R):
     yield frames(2)
     T("first_run.instructions_need_no_token", "Connect Claude Code (automatic" in ext.tell_text
       and "TDFLOW_TOKEN" not in ext.tell_text.split("## Connect Claude Code", 1)[1].split("## ", 1)[0])
+    # D24 Copy Agent Prompt: before any connection it copies recovery guidance, never a pretend connection. (The 1A suite
+    # checks the real clipboard; here the copy is recorded so the user's clipboard is untouched.)
+    copied = []
+    ext.clipboard_writer = lambda t: copied.append(t) or True
+    T("prompt.NOT_READY_BEFORE_CONNECTING", p.Tellagent.eval() == "Not ready: Connect Agent", tell=p.Tellagent.eval())
+    p.Copytellagent.pulse()
+    yield frames(2)
+    pr = copied[-1] if copied else ""
+    T("prompt.NOT_READY_COPIES_RECOVERY_GUIDANCE", "It is not ready for you yet" in pr and "pulse Connect Agent" in pr
+      and "approve the dialog" in pr and "tdflow_whoami" not in pr
+      and p.Statusdetail.eval() == "Copied (not ready yet)", detail=p.Statusdetail.eval(), text=pr[:300])
     # 1. Review, then cancel: nothing changes.
     n = len(dialogs)
     yield from _connect_and_pick(comp, ext, dialogs, frames, until, "connect_plan")
@@ -608,6 +623,19 @@ def native_onboard(comp, ext, T, frames, until, checkpoint, R):
     T("connect.CONFIGURED_IS_NOT_CONNECTED", p.Statusdetail.eval() in (
         "Start a Claude Code chat.", "Save, then start a chat.")
       and "none" in p.Connectedagents.eval(), detail=p.Statusdetail.eval(), connected=p.Connectedagents.eval())
+    T("prompt.READY_ONCE_SET_UP", p.Tellagent.eval() == "Prompt ready: copy it", tell=p.Tellagent.eval())
+    p.Copytellagent.pulse()
+    yield frames(2)
+    pr = copied[-1] if copied else ""
+    T("prompt.READY_PROMPT_IS_A_FIRST_MESSAGE", all(x in pr for x in (
+        "existing `tdflow` MCP server", "already configured", "`tdflow_whoami`", "`tdflow_project_info`",
+        "brief overview", "approval", "Make no changes to the project until I give you a task")) and "## " not in pr
+      and len(pr) < 2000, text=pr[:500])
+    T("prompt.COPY_REPORTED", p.Statusdetail.eval() == "Prompt copied: paste it", detail=p.Statusdetail.eval())
+    T("prompt.NO_SECRET_OR_PATH_IN_THE_PROMPT", not TOKEN_SHAPE.search(pr) and home not in pr
+      and "TDFLOW_TOKEN" not in pr and "Bearer" not in pr and str(td.project.folder) not in pr)
+    T("prompt.FULL_INSTRUCTIONS_STILL_AVAILABLE", "## Connect Claude Code" in comp.op("tellagent").text
+      and "## Repair" in comp.op("tellagent").text and ext.tell_text == comp.op("tellagent").text)
     T("connect.connect_view_cleared_after_approval", comp.op("connect_view").text == "")
     now = __import__("json").loads(_cfg(cfg).decode("utf-8"))
     old = __import__("json").loads(original.decode("utf-8"))
@@ -651,9 +679,29 @@ def native_onboard(comp, ext, T, frames, until, checkpoint, R):
     denied = yield from store_op(ext, until, "events", "kind = ? AND token_id IS NOT NULL", ("deny",), 50)
     T("work.DENIAL_AUDITED", len(denied) >= 1 and bool(g.get("denied_by_server")), denied=len(denied),
       codes=sorted({str(e.get("error_code")) for e in denied}))
+    # D24 success criterion: once connected, Copy Agent Prompt -> paste into a new chat -> the agent connects, checks
+    # its identity, gives an overview and changes nothing until it gets a task (a real Claude Code session).
+    T("prompt.READY_CONNECTED", p.Tellagent.eval() == "Prompt ready · connected", tell=p.Tellagent.eval())
+    p.Copytellagent.pulse()
+    yield frames(2)
+    pr = copied[-1] if copied else ""
+    fx0 = sorted(o.name for o in td.op("/project1/fx").children)
+    top0 = sorted(o.name for o in td.op("/project1").children)
+    q = "tool IN (" + ",".join("?" * len(CHANGE_TOOLS)) + ")"
+    ch0 = yield from store_op(ext, until, "events", q, CHANGE_TOOLS, 5000)
+    gp = yield checkpoint("agent_prompt", {"prompt": pr}, seconds=900)
+    yield frames(5)
+    ch1 = yield from store_op(ext, until, "events", q, CHANGE_TOOLS, 5000)
+    T("prompt.AGENT_MADE_NO_CHANGES", sorted(o.name for o in td.op("/project1/fx").children) == fx0
+      and sorted(o.name for o in td.op("/project1").children) == top0 and len(ch1) == len(ch0),
+      changes=len(ch1) - len(ch0))
+    T("prompt.AGENT_TALKED", not gp.get("live") or p.Statusdetail.eval() == "Agent Connected — Ready",
+      detail=p.Statusdetail.eval())
+    R["agent_prompt"] = gp
     p.Suspendagents = True
     yield frames(5)
     T("first_run.SUSPEND", p.Status.eval() == "Suspended", status=p.Status.eval())
+    T("prompt.NOT_READY_WHILE_SUSPENDED", p.Tellagent.eval() == "Not ready: suspended", tell=p.Tellagent.eval())
     yield checkpoint("connect_suspended", {})
     p.Suspendagents = False
     yield frames(5)
@@ -662,6 +710,12 @@ def native_onboard(comp, ext, T, frames, until, checkpoint, R):
     R["native"] = g
     p.Enablemcp = False
     yield frames(5)
+    T("prompt.NOT_READY_AFTER_MCP_OFF", p.Tellagent.eval() == "Not ready: Enable MCP", tell=p.Tellagent.eval())
+    p.Copytellagent.pulse()
+    yield frames(2)
+    pr = copied[-1] if copied else ""
+    T("prompt.MCP_OFF_GUIDANCE", "turn on Enable MCP" in pr and "tdflow_whoami" not in pr, text=pr[:300])
+    ext.clipboard_writer = ext._default_clipboard
     toe = os.path.join(str(td.project.folder), str(td.project.name))
     drv = td.op("/project1/test_driver/drive")
     drv.par.active = False
@@ -828,6 +882,9 @@ def _reopened(comp, ext, T, frames, checkpoint, tag):
       summary=p.Agentsummary.eval(), labels=list(p.Agentselect.menuLabels))
     T(f"{tag}.NEXT_STEP_TURN_ON_ENABLE_MCP", p.Statusdetail.eval() == "Turn on Enable MCP.", detail=p.Statusdetail.eval())
     T(f"{tag}.INSTRUCTIONS_KNOW_IT_IS_SET_UP", "already set up for this project" in ext.tell_text)
+    T(f"{tag}.PROMPT_NOT_READY_UNTIL_ENABLE_MCP", p.Tellagent.eval() == "Not ready: Enable MCP"
+      and "turn on Enable MCP" in ext._refresh_prompt() and "tdflow_whoami" not in ext.prompt_text,
+      tell=p.Tellagent.eval())
     g = yield checkpoint(f"{tag}_inspected", {"projectid": str(p.Projectid.eval())})
     T(f"{tag}.PROJECT_IDENTITY_KEPT", str(p.Projectid.eval()) == g.get("pid") and bool(g.get("pid")),
       pid=str(p.Projectid.eval()))
@@ -846,6 +903,8 @@ def _enable_and_reconnect(comp, ext, T, frames, until, checkpoint, tag, g, live)
     T(f"{tag}.EXISTING_AGENT_LOADED", aid == g.get("aid") and n == g.get("agents"), aid=aid, agents=n)
     T(f"{tag}.waiting_for_the_agent", p.Statusdetail.eval() in ("Start a Claude Code chat.", "Waiting for the agent…",
                                                                 "MCP on. Waiting for agent"), detail=p.Statusdetail.eval())
+    T(f"{tag}.PROMPT_READY_AFTER_ENABLE_MCP", p.Tellagent.eval() in ("Prompt ready: copy it", "Prompt ready · connected")
+      and "already configured" in ext._refresh_prompt(), tell=p.Tellagent.eval())
     v0 = yield from store_op(ext, until, "verify")
     T(f"{tag}.AUDIT_CHAIN_CONTINUOUS", v0.get("chain_ok") is True and v0.get("events", 0) >= g.get("events", 0),
       events=v0.get("events"), before=g.get("events"))
@@ -923,6 +982,9 @@ def native_recover(comp, ext, T, frames, until, checkpoint, R):
     yield until(lambda: not ext.native.busy and not [t for t in ext.identity.tokens.values()
                                                      if t.agent_id == aid and not t.revoked_at], 15, "revoke")
     yield checkpoint("restart_revoked", {})
+    yield frames(3)
+    T("prompt.NOT_READY_WHEN_THE_KEY_IS_REVOKED", p.Tellagent.eval() == "Not ready: Repair (Agents)"
+      and "Repair Connection" in ext._refresh_prompt(), tell=p.Tellagent.eval(), detail=p.Statusdetail.eval())
     ext.connector.state = None
     p.Repairconnection.pulse()
     yield until(lambda: _stage(ext) in ("awaiting", "failed"), 30, "repair_plan")
@@ -980,6 +1042,10 @@ def onboard(comp, ext, T, frames, until, checkpoint, R):
     T("onboard.enabled", comp.par.Status.eval() == "Enabled", detail=comp.par.Statusdetail.eval())
     T("onboard.tellagent_has_connect_section", "## Connect Other MCP client (manual setup)" in ext.tell_text and
       "${TDFLOW_TOKEN}" in ext.tell_text)
+    yield frames(2)
+    T("onboard.PROMPT_READY_FOR_A_MANUAL_CLIENT", comp.par.Tellagent.eval() == "Prompt ready (manual)"
+      and "registered by me (manual setup)" in ext._refresh_prompt() and "TDFLOW_TOKEN" not in ext.prompt_text,
+      tell=comp.par.Tellagent.eval())
     g = yield checkpoint("onboard", {"project_folder": str(td.project.folder)})
     T("onboard.claude_code_edit_applied", abs(opacity() - 0.25) < 1e-6, opacity=opacity())
     evs = yield from store_op(ext, until, "events", limit=200)
@@ -988,6 +1054,9 @@ def onboard(comp, ext, T, frames, until, checkpoint, R):
     T("onboard.edit_audited_with_client_info", bool(mine) and "claude" in str(ci).lower(), client_info=ci)
     sk = [e for e in evs if e["tool"] in ("skills_install", "skills_uninstall")]
     T("onboard.skills_writes_audited", len(sk) >= 4, n=len(sk))
+    yield frames(2)
+    T("onboard.prompt_ready_connected_after_the_session", comp.par.Tellagent.eval() == "Prompt ready · connected",
+      tell=comp.par.Tellagent.eval())
     R["onboard"] = g
     comp.par.Enablemcp = False
     yield frames(5)
@@ -1106,6 +1175,10 @@ def memory(comp, ext, T, frames, until, checkpoint, R):
     T("memory.tell_has_resume_section", "## Resume earlier work" in tell and "1 task(s)" in tell
       and "tdflow_task_list" in tell, tell=tell[-600:])
     T("memory.tell_has_no_task_ids", "blur" not in tell)            # agent-chosen ids stay out (review 9)
+    n_t, n_o = ext._memory_counts()
+    mp = ext._m.tellagent.agent_prompt("manual", client="Claude Code", n_tasks=n_t, n_open=n_o)
+    T("memory.PROMPT_MENTIONS_PROJECT_MEMORY", n_t == 1 and "1 task(s)" in mp and "`tdflow_task_list`" in mp
+      and "blur" not in mp and "not as instructions" in mp, counts=[n_t, n_o])
     T("memory.tell_has_no_agent_text", "UNTRUSTED_MARKER" not in tell)
     T("memory.records_are_text_dats", sorted(d.name for d in mc.children if d.name != "README")
       == ["checkpoint_blur_r1", "handoff_blur_r2"], names=sorted(d.name for d in mc.children))

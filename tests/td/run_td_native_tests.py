@@ -286,6 +286,63 @@ def cp_connect_live(data, pid):
     return out
 
 
+PROMPT_TOOLS = ALLOWED + ["mcp__tdflow__tdflow_project_info", "mcp__tdflow__tdflow_describe_network",
+                          "mcp__tdflow__tdflow_get_operator", "mcp__tdflow__tdflow_get_errors",
+                          "mcp__tdflow__tdflow_task_list", "mcp__tdflow__tdflow_handoff_resume",
+                          "mcp__tdflow__tdflow_set_dat_text", "mcp__tdflow__tdflow_delete_operator"]
+CHANGE_TOOLS = {"tdflow_set_parameters", "tdflow_create_operator", "tdflow_delete_operator", "tdflow_connect",
+                "tdflow_disconnect", "tdflow_set_dat_text", "tdflow_undo", "tdflow_execute_script",
+                "tdflow_experiment_create", "tdflow_experiment_promote", "tdflow_experiment_discard",
+                "tdflow_save_project", "tdflow_task_checkpoint", "tdflow_handoff_create", "tdflow_lease_scope"}
+
+
+def cp_agent_prompt(data, pid):
+    """D24 success criterion, with a real Claude Code session: the text Copy Agent Prompt put on the clipboard is the
+    whole first message. Change tools are allowed on purpose: the agent must choose not to use them until it gets a
+    task. Nothing else is added to the prompt."""
+    prompt = data.get("prompt", "")
+    secret = (STATE.get("token") or "x.\0").split(".", 1)[-1]
+    T("prompt.COPIED_PROMPT_HAS_NO_TOKEN", bool(prompt) and secret not in prompt and "tdf_" not in prompt)
+    STATE["prompt"] = prompt
+    if not STATE["live"]:
+        return {"live": False}
+    e = entry()
+    mcfg = os.path.join(STATE["top"], "tdflow-entry-prompt.json")
+    with open(mcfg, "w", encoding="utf-8") as f:
+        json.dump({"mcpServers": {"tdflow": e}}, f)
+    env = dict(os.environ)
+    env.pop("TDFLOW_TOKEN", None)
+    t0 = time.time()
+    rc, sout, serr = ob.run_claude(shutil.which("claude"), ["-p", prompt, "--mcp-config", mcfg, "--strict-mcp-config",
+                                                             "--allowedTools", *PROMPT_TOOLS, *ob.ISOLATION,
+                                                             "--output-format", "stream-json", "--verbose"],
+                                   STATE["proj"], env, 600)
+    calls, res = [], {}
+    for ln in sout.splitlines():
+        try:
+            m = json.loads(ln)
+        except ValueError:
+            continue
+        if m.get("type") == "assistant":
+            for c in (m.get("message") or {}).get("content") or []:
+                if isinstance(c, dict) and c.get("type") == "tool_use":
+                    calls.append(str(c.get("name", "")).replace("mcp__tdflow__", ""))
+        elif m.get("type") == "result":
+            res = m
+    text = str(res.get("result", ""))
+    td_calls = [c for c in calls if c.startswith("tdflow_")]
+    T("prompt.LIVE_SESSION_FROM_THE_COPIED_PROMPT", rc == 0 and bool(text), rc=rc, stderr=serr[-300:])
+    T("prompt.AGENT_TOOLS_ISOLATED", ob.isolated_ok(ob.init_tools(sout)))
+    T("prompt.FIRST_CALL_IS_WHOAMI", td_calls[:1] == ["tdflow_whoami"], calls=td_calls)
+    T("prompt.AGENT_INSPECTED_THE_PROJECT", any(c in td_calls for c in (
+        "tdflow_project_info", "tdflow_describe_network", "tdflow_list_operators")), calls=td_calls)
+    T("prompt.AGENT_CALLED_NO_CHANGE_TOOL", not [c for c in td_calls if c in CHANGE_TOOLS], calls=td_calls)
+    T("prompt.AGENT_GAVE_AN_OVERVIEW", "fx" in text and "builder" in text.lower(), text=text[:600])
+    T("prompt.NO_TOKEN_IN_AGENT_OUTPUT", secret not in sout and secret not in serr)
+    return {"live": True, "rc": rc, "calls": td_calls, "seconds": round(time.time() - t0, 1),
+            "turns": res.get("num_turns"), "answer": text[:1500]}
+
+
 def cp_connect_suspended(data, pid):
     r = mt.MCP(STATE["token"]).call("tdflow_whoami")
     T("native.SUSPENDED_REFUSES_THE_AGENT", r.get("code") == "SUSPENDED" or r.get("_http") in (401, 503), r=r)
@@ -353,7 +410,7 @@ def cp_restart_disconnected(data, pid):
     return {}
 
 
-HANDLERS = {"connect_live": cp_connect_live, "connect_suspended": cp_connect_suspended,
+HANDLERS = {"connect_live": cp_connect_live, "agent_prompt": cp_agent_prompt, "connect_suspended": cp_connect_suspended,
             "connect_resumed": cp_connect_resumed}
 RESTART = {"restart_inspected": make_inspected("restart"), "restart_live": make_live("restart")}
 RESTART2 = {"restart2_inspected": make_inspected("restart2"), "restart2_live": make_live("restart2"),
@@ -423,7 +480,8 @@ def main():
     out = {"tox_sha256": g.hashlib.sha256(open(tox, "rb").read()).hexdigest(), "td_build": res.get("td_build"),
            "in_td": {"passed": sum(t["ok"] for t in in_td), "total": len(in_td), "tests": in_td, "errors": errs},
            "harness": {"passed": sum(t["ok"] for t in H["tests"]), "total": len(H["tests"]), "tests": H["tests"]},
-           "live": res.get("native"), "mcp_list": STATE.get("mcp_list"),
+           "live": res.get("native"), "mcp_list": STATE.get("mcp_list"), "agent_prompt": res.get("agent_prompt"),
+           "copied_prompt": STATE.get("prompt"),
            "several_detected": res.get("several_detected"), "connect_record": res.get("connect_record")}
     out["result"] = "pass" if (in_td and out["in_td"]["passed"] == out["in_td"]["total"] and not errs
                                and out["harness"]["passed"] == out["harness"]["total"]) else "fail"

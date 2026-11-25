@@ -184,6 +184,14 @@ This file lists every check that exists, how to run it, and its last **executed 
 - Visual review 6/6 `screens.*`: the real dialog is not modified, the text fits, the buttons are visible (capture reviewed), Approve connects, and TouchDesigner stays responsive.
 
 Package zip `807de04e…`. Not published. CI: not observed |
+| 2026-11-24 | TouchDesigner 2025.32440 + Claude Code CLI 2.1.289 + VS Code extension engine 2.1.331 (candidate `bb4995dd…`, the rc5 tree before commit) | **rc5 tree suites (Copy Agent Prompt, D24)** | Unit 473 pass (3 skipped). 1B 82/82 + 217/217; 1A 59/59 + 71/71 (the real clipboard gets the prompt, not the guide; the label is renamed); gate (`--only gate,gate_crash,gate_restart,perf_worker,gate_bench`) 48/48 + 80/80 (one overflow check runs only when the timing produces `OUTCOME_UNRECORDED`); memory 52/52 + 182/182 (the prompt names the task counts, not ids); onboarding 7/7 + 47/47 (`Prompt ready (manual)`, then connected).
+- **Native 90/90 + 73/73.**
+  - Every readiness state: not ready before Connect Agent; `Prompt ready: copy it` once set up; `Prompt ready · connected`; suspended; MCP off; after each restart not ready until Enable MCP, then ready; revoked credential → `Not ready: Repair (Agents)`.
+  - **A live `claude -p` session given only the copied prompt**, with change tools allowed, called `tdflow_whoami` → `tdflow_project_info` (refused outside its scope, reported) → `tdflow_describe_network`. It reported role `builder` and scope `/project1/fx/**`, gave an overview and changed nothing (0 audited changes, no operator created). 22 s, 5 turns, no token in the output.
+- The first native run, before the review 21 fixes, passed 90/90 + 73/73 too.
+- Visual review 6/6 `screens.*`; the capture shows **Copy Agent Prompt** and `Not ready: Connect Agent` / `Prompt ready: copy it`, both within the default width.
+
+Not published. CI: not observed |
 
 ## Local environment facts (file inspection only, 2026-11-22)
 

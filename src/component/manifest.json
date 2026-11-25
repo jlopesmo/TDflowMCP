@@ -340,23 +340,23 @@
       "type": "Str",
       "label": "Tell Your Coding Agent",
       "readonly": true,
-      "default": "Not checked yet",
-      "help": "State of the instructions for your coding agent",
+      "default": "Not ready: Connect Agent",
+      "help": "Whether Copy Agent Prompt gives a ready first message for a new coding-agent chat (Prompt ready) or, not ready yet, a short recovery message with the next step",
       "section": true
     },
     {
       "page": "TDflowMCP",
       "name": "Copytellagent",
       "type": "Pulse",
-      "label": "Copy Instructions",
-      "help": "Copy the instructions for your coding agent"
+      "label": "Copy Agent Prompt",
+      "help": "Copy a ready-to-paste first message for a new coding-agent chat: connect with the existing tdflow server, call tdflow_whoami, give a brief project overview, make no changes until you assign a task. Never contains a token"
     },
     {
       "page": "TDflowMCP",
       "name": "Viewinstructions",
       "type": "Pulse",
       "label": "View Full Instructions",
-      "help": "Open the full instructions in a viewer"
+      "help": "Open the full setup, connection, repair and resume instructions in a viewer"
     },
     {
       "page": "TDflowMCP",

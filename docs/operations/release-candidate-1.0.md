@@ -1,6 +1,13 @@
 # TDflowMCP 1.0 release candidate: changelog, compatibility and acceptance checklist
 
-**Current candidate: `1.0.0rc4`** (owner D23: the rc3 restart finding explained and fixed, automated acceptance, UX-08/UX-09, review 20; [record](../research/2026-11-24-rc4-restart-and-acceptance.md)). It follows `1.0.0rc3` (one-click agent connection, owner D22, [ADR-0015](../decisions/0015-consent-based-client-connection.md)), whose hands-on owner acceptance passed connection, real agent work and suspension, and found the restart display issue. It replaces `1.0.0rc2` (`132e8c3`, package `TDflowMCP-1.0.0rc2-132e8c3317`, tox `dfabfaca…`); the owner's acceptance of rc2 found that first-time users still handled tokens, environment variables and MCP configuration. Commit and package hashes for rc3 are in the [validation index](../icm/validation-index.md) and [current state](../icm/current-state.md#commit-record).
+**Current candidate: `1.0.0rc5`** (owner D24: **Copy Agent Prompt**, a state-aware first message for a new coding-agent chat; [record](../research/2026-11-24-copy-agent-prompt.md)). It follows `1.0.0rc4`, with nothing else changed. rc4 was owner D23: the rc3 restart finding explained and fixed, automated acceptance, UX-08/UX-09, review 20; [record](../research/2026-11-24-rc4-restart-and-acceptance.md)). It follows `1.0.0rc3` (one-click agent connection, owner D22, [ADR-0015](../decisions/0015-consent-based-client-connection.md)), whose hands-on owner acceptance passed connection, real agent work and suspension, and found the restart display issue. It replaces `1.0.0rc2` (`132e8c3`, package `TDflowMCP-1.0.0rc2-132e8c3317`, tox `dfabfaca…`); the owner's acceptance of rc2 found that first-time users still handled tokens, environment variables and MCP configuration. Commit and package hashes for rc3 are in the [validation index](../icm/validation-index.md) and [current state](../icm/current-state.md#commit-record).
+
+## Changes in rc5
+- **Copy Agent Prompt** (formerly Copy Instructions, TDflowMCP page): copies a short first message for a new chat.
+  - When the connection is ready, the agent uses the existing `tdflow` server, calls `tdflow_whoami`, gives a brief overview, checks memory when relevant and authorized, respects approvals and changes nothing until given a task.
+  - Otherwise it is a recovery message with the one next step. It never claims a connection.
+- **Tell Your Coding Agent** shows `Prompt ready · connected`, `Prompt ready: copy it`, `Prompt ready (manual)` or `Not ready: <step>`.
+- **View Full Instructions** and the Setup page keep the full technical text.
 
 ## Changes in rc3
 - **Connect Agent → Approve → start working** for Claude Code (CLI and VS Code extension):
@@ -99,6 +106,7 @@ No other compatibility is claimed.
   3. Save, restart TouchDesigner and VS Code, repeat step 2.
   4. Optionally Disconnect Agent and check that `~/.claude.json` no longer has `tdflow`.
 
+- [ ] **rc5: Copy Agent Prompt in the VS Code chat** (optional owner check, **not executed by an agent**). After Connect Agent, pulse Copy Agent Prompt, paste into a new Claude Code chat in VS Code, and check that the agent calls `tdflow_whoami`, gives an overview and waits. The same text was validated with the Claude Code CLI (`prompt.*`, validation index).
 - [ ] **macOS:** automatic setup not validated (no Mac).
 - [ ] **CI evidence:** no GitHub Actions run has been observed (B3). Release procedure step 1 requires observed CI.
 - [ ] **Latest TD build:** not tested (release procedure step 1 asks for the minimum and the latest build).

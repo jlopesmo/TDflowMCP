@@ -277,7 +277,8 @@ def run(comp, ext, T, frames, until, checkpoint, R, restart=False):
       dispatch=diag["dispatch_threads"])
     T("frame.no_errors", diag["frame_errors"] == 0, last=diag["last_frame_error"])
     params = {p.name: str(p.eval()) for p in comp.customPars}
-    yield checkpoint("scan", {"params": params, "tell": ext.tell_text, "tellagent_dat": comp.op("tellagent").text,
+    yield checkpoint("scan", {"params": params, "tell": ext.tell_text + ext._refresh_prompt(),
+                              "tellagent_dat": comp.op("tellagent").text,
                               "events": events, "token_rows": [list(r) for r in tokens_rows], "diagnostics": diag})
     # Revocation is immediate (harness revoked one token); disabling MCP closes /mcp.
     yield checkpoint("revoked", {})
