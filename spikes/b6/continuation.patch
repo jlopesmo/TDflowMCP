@@ -1,0 +1,692 @@
+diff --git a/src/component/manifest.json b/src/component/manifest.json
+index f0e2b8a..e5c4514 100644
+--- a/src/component/manifest.json
++++ b/src/component/manifest.json
+@@ -48,6 +48,9 @@
+     "tdflowmcp.net.pyhttp": {
+       "path": "src/tdflowmcp/net/pyhttp.py"
+     },
++    "tdflowmcp.pipeline": {
++      "path": "src/tdflowmcp/pipeline.py"
++    },
+     "tdflowmcp.policy": {
+       "path": "src/tdflowmcp/policy.py"
+     },
+diff --git a/src/td_adapter/extension.py b/src/td_adapter/extension.py
+index 1e9e80c..e238288 100644
+--- a/src/td_adapter/extension.py
++++ b/src/td_adapter/extension.py
+@@ -50,7 +50,7 @@ class TDflowMCPExt:
+         self._main = threading.main_thread()
+         self.manifest = ownerComp.op("loader").module.install_from_comp(ownerComp)
+         from tdflowmcp import SKILL_VERSION, __version__, admin, auditworker, compat, controller, engine, identity, \
+-            policy, protocol, setupapi, skills, storage, store, tellagent, tools
++            pipeline, policy, protocol, setupapi, skills, storage, store, tellagent, tools
+         from tdflowmcp.net import bindverify, evidence, oslisteners
+         from tdflowmcp.net.pyhttp import EmbeddedHTTPTransport, MainStepError, Response, error
+         from tdflowmcp_td import tdops
+@@ -114,6 +114,11 @@ class TDflowMCPExt:
+         self._auth_fail_seen, self._last_burst = 0, 0.0
+         self.store_error = ""
+         self.frame_cost = collections.deque(maxlen=2000)   # OnFrame cost (ms), main-thread impact
++        # B6: 'worker' = verified audit-worker baseline (handler-thread orchestration); 'continuation' =
++        # main-thread continuation (fewer GIL handoffs). Selected per process, never by agents.
++        self.pipeline_mode = "continuation" if os.environ.get("TDFLOW_PIPELINE") == "continuation" else "worker"
++        self._cont = pipeline.Continuations()
++        self._cont.owner = self._main.ident
+         self._root_text = self._read_root()
+         c = controller
+         deps = c.Deps(
+@@ -341,9 +346,12 @@ class TDflowMCPExt:
+             self.engine = None
+             return
+         self.tdops = self._m.tdops.TDAdapter(self.ownerComp, lambda: pol.root, lambda: None)
+-        self.engine = self._m.engine.Engine(self.store, self.identity, pol, self.registry, self.tdops,
+-                                            self.active_tools, lambda: self.suspended,
+-                                            on_audit_failure=self._flag_audit_failure)
++        eng = self._m.engine.Engine(self.store, self.identity, pol, self.registry, self.tdops,
++                                    self.active_tools, lambda: self.suspended,
++                                    on_audit_failure=self._flag_audit_failure,
++                                    continuation=self._cont if self.pipeline_mode == "continuation" else None)
++        eng.exec_gate = lambda: self.mcp_on and self.engine is eng
++        self.engine = eng
+         self.engine.audit_failed = self._audit_latched      # a rebuild never clears an audit failure
+ 
+     def _flag_audit_failure(self):
+@@ -766,8 +774,10 @@ class TDflowMCPExt:
+             # Mirror the kill switch before dispatching anything this frame: parameter callbacks may be
+             # deferred (review 6), and a queued request must never run after the switch was flipped.
+             self._apply_switch(bool(self.ownerComp.par.Suspendagents.eval()))
++            self._cont.poll()                 # B6: execute steps whose intent became durable (after the switch)
+             before = (self.ctl.state, self.ctl.error_code)
+             self.ctl.tick(self._dispatch)
++            self._cont.poll()                 # intents that became durable while this frame pumped
+             if self.mcp_on and self.ctl.state is not CS.SETUP:
+                 self._mcp_off("The listener stopped, so MCP was turned off.")
+             if self._mcp_wanted and not self.mcp_on and self.ctl.state is CS.SETUP:
+@@ -1218,4 +1228,5 @@ class TDflowMCPExt:
+                                                   "failed": w.failed, "queued": w.queued(), "stats": dict(w.stats)},
+                 "storage": None if d is None else {"status": d.status, "usable": d.usable, "reason": d.reason},
+                 "audit_failed": bool(self.engine and self.engine.audit_failed), "frame": self.FrameStats(),
+-                "pending": len(self._pending), "source_digest": self.manifest.get("source_digest")}
++                "pending": len(self._pending), "pipeline": self.pipeline_mode, "continuations": dict(self._cont.stats),
++                "source_digest": self.manifest.get("source_digest")}
+diff --git a/src/tdflowmcp/auditworker.py b/src/tdflowmcp/auditworker.py
+index 8a5ac40..6b908fd 100644
+--- a/src/tdflowmcp/auditworker.py
++++ b/src/tdflowmcp/auditworker.py
+@@ -224,6 +224,10 @@ class StoreProxy:
+     def args_hmac(self, args):
+         return self._w.args_hmac(args)
+ 
++    def submit(self, op, *a, **kw):
++        """Non-blocking (returns a Future): the only form the TD main thread may use."""
++        return self._w.submit(op, *a, **kw)
++
+     def __getattr__(self, op):
+         if op.startswith("_"):
+             raise AttributeError(op)
+diff --git a/src/tdflowmcp/engine.py b/src/tdflowmcp/engine.py
+index 2e49d58..7d842f5 100644
+--- a/src/tdflowmcp/engine.py
++++ b/src/tdflowmcp/engine.py
+@@ -86,7 +86,9 @@ class Engine:
+     def __init__(self, store: Store, identity: Identity, policy: Policy, registry: Registry, adapter: Adapter,
+                  active_tools: Sequence[str], suspended: Callable[[], bool], clock=time.perf_counter,
+                  on_audit_failure: Optional[Callable[[], None]] = None,
+-                 main: Optional[Callable[[Callable], object]] = None):
++                 main: Optional[Callable[[Callable], object]] = None,
++                 continuation=None, exec_gate: Optional[Callable[[], bool]] = None,
++                 wait_s: float = 8.0):
+         self.store, self.identity, self.policy, self.registry, self.adapter = store, identity, policy, registry, adapter
+         self.active = frozenset(active_tools)
+         self._suspended = suspended
+@@ -96,6 +98,11 @@ class Engine:
+         self.on_audit_failure = on_audit_failure or (lambda: None)
+         self.main = main or (lambda fn: fn())
+         self.audit_failed = False                  # sticky: an outcome could not be recorded
++        # B6 experiment: a pipeline.Continuations polled on TD's main thread. None = the verified baseline
++        # (handler-thread orchestration). exec_gate: "MCP still on and this engine still current".
++        self.continuation = continuation
++        self.exec_gate = exec_gate or (lambda: True)
++        self.wait_s = wait_s
+ 
+     def suspended(self) -> bool:
+         return self.audit_failed or bool(self._suspended())
+@@ -142,6 +149,8 @@ class Engine:
+             return self._run_identity_tool(tool, agent, args, base, t0)
+         if tool.resolver == "undo":
+             return self._undo(tool, agent, base, t0, m)
++        if self.continuation is not None:
++            return self._call_continued(tool, args, agent, token_id, base, t0, m)
+         # 1. Plan on the main thread: resolve + policy (pure facts come back, never TD objects).
+         try:
+             plan = m(lambda: self._plan(tool, args, agent))
+@@ -206,6 +215,104 @@ class Engine:
+             out.update(audit_seq=oseq, undo_label=label if reversible != "no" else None, reversible=reversible != "no")
+         return tool_result(out)
+ 
++
++    # ---- B6: main-thread continuation (same guarantees, fewer cross-thread handoffs) ----------------
++    def _call_continued(self, tool: Tool, args: dict, agent: Agent, token_id: str, base: dict, t0: float, m):
++        """Handler thread. The plan step (main) submits the intent; OnFrame executes once the intent is
++        durable and submits the outcome; this thread waits for the result and the durable outcome."""
++        from tdflowmcp.pipeline import CallBox
++        box, mutating, st = CallBox(), not tool.read_only, self.store
++
++        def execute_step(plan, b2):                      # main thread (Continuations.poll in OnFrame)
++            if not box.start():
++                return                                   # the handler gave up first: never executes
++            f = box.intent
++            if not f.ok():
++                return box.finish({"intent_failed": True})
++            seq, snap_id = f.result(0)
++            label = f"tdflow:{seq}" if mutating else ""
++            failure, detail = None, None
++            try:
++                if not self.exec_gate():
++                    raise MainNotRun("MCP_DISABLED")
++                if self.suspended():
++                    raise MainNotRun("SUSPENDED")
++                out = self._execute(tool, args, agent, token_id, plan, label, snap_id)
++                outcome, code, detail = "ok", None, out.pop("_audit", None)
++            except ToolFailure as fl:
++                out, outcome, code, detail, failure = None, "error", fl.code, fl.extra.get("_audit"), fl
++            except MainNotRun as e:
++                out, outcome, code = None, "aborted", _main_code(e)
++                failure = ToolFailure(code, "Nothing was executed (" + code + ").")
++            except Exception as e:                       # never leak internals to the agent
++                out, outcome, code, detail = None, "error", "INTERNAL_ERROR", {"exc": type(e).__name__}
++                failure = ToolFailure("INTERNAL_ERROR", "The operation failed inside TouchDesigner.")
++            reversible = (detail or {}).get("reversible", tool.reversible) if outcome == "ok" else "no"
++            fo = st.submit("append", "outcome", decision="ALLOW", outcome=outcome, error_code=code,
++                           duration_ms=int((self.clock() - t0) * 1000),
++                           undo_label=label if outcome == "ok" and reversible != "no" else None,
++                           detail=dict(detail or {}, intent_seq=seq, reversible=reversible), **b2)
++            box.finish({"out": out, "outcome": outcome, "code": code, "failure": failure, "seq": seq,
++                        "label": label, "reversible": reversible, "f_out": fo})
++
++        def plan_step():                                 # main thread (pump)
++            plan = self._plan(tool, args, agent)
++            if plan["deny"]:
++                return plan, None
++            b2 = dict(base, targets=plan["targets"][:50], policy_version=plan["policy_version"])
++            box.intent = st.submit("append_intent", plan.get("snapshot"), decision="ALLOW", rule_id=plan["rule"], **b2)
++            self.continuation.add(box.intent, lambda: execute_step(plan, b2))
++            return plan, b2
++
++        try:
++            plan, b2 = m(plan_step)
++        except (MainNotRun, MainUnknown) as e:           # planning changes nothing, so either is safe to report
++            return self._deny(base, _main_code(e), "M0", "TouchDesigner did not process the request", None)
++        if plan["deny"]:
++            d = plan["deny"]
++            if d.get("policy_version"):
++                base.update(policy_version=d["policy_version"])
++            if d.get("targets"):
++                base.update(targets=d["targets"])
++            return self._deny(base, d["code"], d["rule"], d["reason"], d["target"])
++        if not box.wait(self.wait_s) and box.cancel():
++            # Never started (intent still pending or the frame never came) and now never will.
++            try:
++                iseq = box.intent.result(2.0)[0]
++                st.append("outcome", decision="ALLOW", outcome="aborted", error_code="TDFLOW_TIMEOUT",
++                          detail={"intent_seq": iseq}, **b2)
++            except AuditUnavailable:
++                pass
++            return tool_error("TDFLOW_TIMEOUT", "TouchDesigner did not run the request in time; nothing was executed.")
++        if box.state == CANCELLED_STATE:
++            return tool_error("TDFLOW_TIMEOUT", "TouchDesigner did not run the request in time; nothing was executed.")
++        if not box.wait(self.wait_s):                    # started but never finished: may have run
++            self._audit_failure()
++            return tool_error("OUTCOME_UNKNOWN", "TouchDesigner did not confirm the operation in time; it may have "
++                                                 "run. Agents were suspended; check the audit log.")
++        v = box.value
++        if v.get("intent_failed"):
++            return tool_error("AUDIT_UNAVAILABLE", "The audit store is unavailable, so nothing was executed.")
++        try:
++            oseq = v["f_out"].result(self.wait_s)        # 4. durable outcome before success is reported
++        except AuditUnavailable:
++            oseq = None
++        outcome, seq, out = v["outcome"], v["seq"], v["out"]
++        if oseq is None and (mutating or outcome == "ok"):
++            self._audit_failure()                        # an execution is not durably accounted for
++        if oseq is None and outcome == "ok":
++            return tool_error("OUTCOME_UNRECORDED", "The operation ran, but its outcome could not be recorded "
++                              "durably, so all agents were suspended. The change is not reported as successful.",
++                              intent_seq=seq)
++        if outcome != "ok":
++            extra = dict(v["failure"].extra)
++            extra.pop("_audit", None)
++            return tool_error(v["failure"].code, v["failure"].message, audit_seq=oseq, **extra)
++        if mutating:
++            out.update(audit_seq=oseq, undo_label=v["label"] if v["reversible"] != "no" else None,
++                       reversible=v["reversible"] != "no")
++        return tool_result(out)
++
+     # ---- main-thread steps ---------------------------------------------------------------------
+     def _plan(self, tool: Tool, args: dict, agent: Agent) -> dict:
+         try:
+@@ -367,6 +474,9 @@ class Engine:
+                             "undone_tool": rec.get("tool"), "audit_seq": oseq})
+ 
+ 
++CANCELLED_STATE = "cancelled"
++
++
+ def _main_code(e) -> str:
+     c = getattr(e, "code", "") or "MAIN_UNAVAILABLE"
+     return c if c.startswith(("TDFLOW_", "SUSPENDED")) else "MAIN_UNAVAILABLE"
+diff --git a/src/tdflowmcp/pipeline.py b/src/tdflowmcp/pipeline.py
+new file mode 100644
+index 0000000..b71c698
+--- /dev/null
++++ b/src/tdflowmcp/pipeline.py
+@@ -0,0 +1,101 @@
++"""Main-thread continuation (owner decision B6, bounded experiment). Pure Python, no `td`.
++
++The audit-worker baseline orchestrates each call on an HTTP handler thread: plan (main) → intent (worker)
++→ execute (main) → outcome (worker). In TouchDesigner every cross-thread step costs about one frame,
++because a thread that finished waiting can resume only when TD releases the GIL.
++
++The continuation keeps the same guarantees with fewer handoffs. The plan step on the main thread
++*submits* the intent (never waits). ``OnFrame`` runs the execute step once that intent is confirmed
++durable, then *submits* the outcome. The handler thread only waits for the result and for the outcome
++to be durable.
++
++- ``Continuations``: futures with a callback, polled on the owner (main) thread within a time budget.
++- ``CallBox``: the handler thread's view of one call. ``start`` (main) and ``cancel`` (handler, on
++  timeout) race under a lock, so a cancelled call can never start executing afterwards.
++"""
++from __future__ import annotations
++
++import threading
++import time
++from typing import Any, Callable, List, Optional, Tuple
++
++PENDING, RUNNING, CANCELLED, DONE = "pending", "running", "cancelled", "done"
++
++
++class CallBox:
++    __slots__ = ("_lock", "_ev", "state", "value", "intent")
++
++    def __init__(self):
++        self._lock = threading.Lock()
++        self._ev = threading.Event()
++        self.state = PENDING
++        self.value: Any = None
++        self.intent = None                   # the intent Future (for a cancelled call's abort record)
++
++    def start(self) -> bool:
++        """Main thread, right before executing. False if the handler already gave up (nothing runs)."""
++        with self._lock:
++            if self.state != PENDING:
++                return False
++            self.state = RUNNING
++            return True
++
++    def cancel(self) -> bool:
++        """Handler thread, on timeout. True: the call never started and never will."""
++        with self._lock:
++            if self.state != PENDING:
++                return False
++            self.state = CANCELLED
++            self._ev.set()
++            return True
++
++    def finish(self, value):
++        with self._lock:
++            self.value = value
++            self.state = DONE
++            self._ev.set()
++
++    def wait(self, timeout: float) -> bool:
++        return self._ev.wait(timeout)
++
++
++class Continuations:
++    """``add`` from the main thread (inside a plan step); ``poll`` only on the owner thread (OnFrame)."""
++
++    def __init__(self, budget_s: float = 0.004, max_age_s: float = 30.0, clock=time.monotonic):
++        self._lock = threading.Lock()
++        self._items: List[Tuple[Any, Callable[[], None], float]] = []
++        self.budget_s, self.max_age_s, self.clock = budget_s, max_age_s, clock
++        self.owner: Optional[int] = None
++        self.stats = {"run": 0, "expired": 0, "errors": 0}
++
++    def add(self, fut, fn: Callable[[], None]):
++        with self._lock:
++            self._items.append((fut, fn, self.clock()))
++
++    def pending(self) -> int:
++        return len(self._items)
++
++    def poll(self) -> int:
++        """Run callbacks whose futures are done, oldest first, within the time budget."""
++        if self.owner is not None and threading.get_ident() != self.owner:
++            raise RuntimeError("continuations run only on the owner (main) thread")
++        end, n, now = time.perf_counter() + self.budget_s, 0, self.clock()
++        with self._lock:
++            ready = [it for it in self._items if it[0].done()]
++            stale = [it for it in self._items if not it[0].done() and now - it[2] > self.max_age_s]
++            keep = [it for it in self._items if it not in ready and it not in stale]
++            self._items = keep
++        self.stats["expired"] += len(stale)          # their handlers timed out and cancelled them
++        for i, (fut, fn, _) in enumerate(ready):
++            if time.perf_counter() >= end:
++                with self._lock:                     # over budget: the rest waits for the next frame
++                    self._items[:0] = ready[i:]
++                break
++            try:
++                fn()
++            except Exception:                        # a callback must never break the frame
++                self.stats["errors"] += 1
++            self.stats["run"] += 1
++            n += 1
++        return n
+diff --git a/src/tdflowmcp/store.py b/src/tdflowmcp/store.py
+index 3a456dc..f689fd1 100644
+--- a/src/tdflowmcp/store.py
++++ b/src/tdflowmcp/store.py
+@@ -393,6 +393,14 @@ class Store:
+         return agents, tokens, grants
+ 
+     # ---- DAT snapshots -------------------------------------------------------------------------
++    def append_intent(self, snapshot=None, **fields) -> tuple:
++        """One worker operation for the continuation pipeline: the DAT snapshot (if any), then the intent
++        that references it. Returns (intent seq, snapshot id or None); both are durable on return."""
++        snap_id = self.put_snapshot(*snapshot) if snapshot else None
++        if snap_id is not None:
++            fields["detail"] = {"snapshot": snap_id}
++        return self.append("intent", **fields), snap_id
++
+     def put_snapshot(self, path: str, op_id: int, before: str, before_sha: str, after_sha: str) -> int:
+         cur = self._c().execute("INSERT INTO snapshots(created_at, path, op_id, before_text, before_sha, after_sha) "
+                                 "VALUES (?,?,?,?,?,?)", (now_iso(), path, op_id, before, before_sha, after_sha))
+diff --git a/tests/td/run_td_gate_tests.py b/tests/td/run_td_gate_tests.py
+index 1c34b54..72feced 100644
+--- a/tests/td/run_td_gate_tests.py
++++ b/tests/td/run_td_gate_tests.py
+@@ -54,7 +54,14 @@ def timed(cli, name, args):
+ def load(threads=8, per=30, seq=30, tag="load"):
+     """Sequential calls (one client), then ``threads`` concurrent clients (writers + readers)."""
+     B = MCP(TOKENS["B"])
+-    seq_lat, errors = [], []
++    seq_lat, errors, ping_lat, list_lat = [], [], [], []
++    for i in range(seq):                       # B6 root cause: requests that never touch audit or main
++        t0 = time.perf_counter()
++        B.rpc("ping")
++        ping_lat.append((time.perf_counter() - t0) * 1000)
++        t0 = time.perf_counter()
++        B.rpc("tools/list")
++        list_lat.append((time.perf_counter() - t0) * 1000)
+     for i in range(seq):
+         ms, r = timed(B, "tdflow_set_parameters", {"path": "/project1/fx/level1", "values": {"opacity": (i % 50) / 100}})
+         seq_lat.append(ms)
+@@ -82,6 +89,7 @@ def load(threads=8, per=30, seq=30, tag="load"):
+         t.join(300)
+     wall = time.perf_counter() - t0
+     out = {"sequential": stats(seq_lat), "concurrent": stats(conc), "clients": threads, "calls": len(conc),
++           "ping": stats(ping_lat), "tools_list": stats(list_lat),
+            "throughput_calls_s": round(len(conc) / wall, 1) if wall else None, "errors": len(errors),
+            "error_codes": sorted(set(map(str, errors)))[:5]}
+     T(f"{tag}.all_calls_succeeded", not errors, **{k: out[k] for k in ("errors", "error_codes")})
+@@ -257,6 +265,8 @@ def main():
+     ap.add_argument("--baseline", default=os.path.join(ROOT, ".tmp", "wt-e15ec55", "build", "TDflowMCP.tox"))
+     ap.add_argument("--out", default=os.path.join(ROOT, "build", "td-gate-test-results.json"))
+     ap.add_argument("--only", default="")
++    ap.add_argument("--compare", type=int, default=0,
++                    help="B6: N alternating perf launches per pipeline (worker baseline vs continuation), same .tox")
+     a = ap.parse_args()
+     top = base.safe_dir(os.path.join(ROOT, ".tmp", "td-gate-tests"), ROOT)
+     if os.path.exists(top):
+@@ -275,9 +285,21 @@ def main():
+     gate_env = {"TDFLOW_PRIVATE_ROOT": priv}
+     modes = [m for m in ("gate", "gate_crash", "gate_restart", "perf_baseline", "perf_worker", "gate_bench")
+              if not a.only or m in a.only.split(",")]
++    if a.compare:
++        modes = [f"cmp_{p}_{i}" for i in range(a.compare) for p in (("worker", "continuation") if i % 2 == 0
++                                                                     else ("continuation", "worker"))]
+     for mode in modes:
+         run_dir = os.path.join(top, mode)
+         os.makedirs(run_dir)
++        if mode.startswith("cmp_"):
++            pipe = mode.split("_")[1]
++            pdir, dd = os.path.join(top, mode + "-project"), os.path.join(top, mode + "-datadir")
++            os.makedirs(pdir)
++            os.makedirs(dd)
++            mt.STATE["cookies"], mt.STATE["csrf"] = {}, None
++            results[mode] = launch("perf", tox, run_dir, pdir, {"TDFLOW_DATADIR": dd, "TDFLOW_PIPELINE": pipe,
++                                   "TDFLOW_PRIVATE_ROOT": os.path.join(top, mode + "-private")}, PERF)
++            continue
+         if mode == "gate_bench":
+             results[mode] = launch(mode, tox, run_dir, os.path.join(top, "bench-project"),
+                                    {"TDFLOW_DATADIR": os.path.join(top, "bench-datadir")}, {})
+@@ -306,11 +328,14 @@ def main():
+                 proj_files.append(os.path.relpath(os.path.join(d, f), proj))
+                 with open(os.path.join(d, f), "rb") as fh:
+                     blob += fh.read()
+-    T("storage.project_folder_never_holds_keys_or_credentials", proj_files and not any(
++    if "gate" not in results:                                 # e.g. --compare / --only: no gate project
++        proj_files = None
++    if proj_files is not None:
++      T("storage.project_folder_never_holds_keys_or_credentials", proj_files and not any(
+         os.path.basename(f) in ("audit.key", "credentials.sqlite", "checkpoints.jsonl") for f in proj_files),
+-      files=sorted(proj_files))
+-    T("storage.no_token_secret_in_project_folder", bool(blob) and not any(s in blob for s in secrets_))
+-    T("storage.no_token_digest_tables_in_project_db", b"CREATE TABLE tokens" not in blob)
++        files=sorted(proj_files))
++      T("storage.no_token_secret_in_project_folder", bool(blob) and not any(s in blob for s in secrets_))
++      T("storage.no_token_digest_tables_in_project_db", b"CREATE TABLE tokens" not in blob)
+     in_td = [dict(t, mode=m) for m, r in results.items() for t in (r.get("tests") or [])]
+     errs = [f"{m}: {e}" for m, r in results.items() for e in (r.get("errors") or [])]
+     extra = {m: {k: v for k, v in r.items() if k in ("onframe", "latency", "perf", "overflow", "crash", "storage",
+diff --git a/tests/td/td_runner_gate.py b/tests/td/td_runner_gate.py
+index bda8eb8..829f9c7 100644
+--- a/tests/td/td_runner_gate.py
++++ b/tests/td/td_runner_gate.py
+@@ -100,7 +100,8 @@ def perf(comp, ext, T, frames, until, checkpoint, R):
+     label("between")
+     g, load = yield from measured(ext, "load", "load", checkpoint)
+     R["perf"] = {"onframe_idle": idle, "onframe_load": load, "harness": g, "build": comp.par.Version.eval(),
+-                 "worker": hasattr(ext, "worker")}
++                 "worker": hasattr(ext, "worker"), "pipeline": getattr(ext, "pipeline_mode", None),
++                 "continuations": dict(getattr(getattr(ext, "_cont", None), "stats", {}) or {})}
+     comp.par.Enablemcp = False
+     yield frames(5)
+ 
+diff --git a/tests/unit/test_continuation.py b/tests/unit/test_continuation.py
+new file mode 100644
+index 0000000..1c3aa38
+--- /dev/null
++++ b/tests/unit/test_continuation.py
+@@ -0,0 +1,229 @@
++"""B6 main-thread continuation: same guarantees as the worker baseline, with an owner thread playing
++TouchDesigner's main thread (runs queued main steps and polls continuations once per simulated frame)."""
++import os
++import queue
++import shutil
++import tempfile
++import threading
++import time
++import unittest
++
++from tdflowmcp.auditworker import AuditWorker, StoreProxy
++from tdflowmcp.engine import Engine, MainNotRun, ToolFailure
++from tdflowmcp.identity import Identity
++from tdflowmcp.pipeline import CallBox, Continuations
++from tdflowmcp.policy import Policy
++from tdflowmcp.store import AuditUnavailable
++from tdflowmcp.tools import core_registry
++from tests.unit.test_protocol_engine import ALL, FakeAdapter
++
++SET = ("tdflow_set_parameters", {"path": "/project1/fx/a", "values": {"x": 1}})
++
++
++class Owner(threading.Thread):
++    """Main-thread stand-in: each 'frame' first polls continuations, then runs queued main steps."""
++
++    def __init__(self, cont, frame_s=0.016):
++        super().__init__(daemon=True)
++        self.cont, self.frame_s = cont, frame_s
++        self.jobs: "queue.Queue" = queue.Queue()
++        self.stop_ev, self.paused = threading.Event(), threading.Event()
++        self.step_ms = []
++        self.on_frame = []
++
++    def main(self, fn):                           # handler side of call_main
++        box, ev = {}, threading.Event()
++        self.jobs.put((fn, box, ev))
++        if not ev.wait(5):
++            raise MainNotRun("TDFLOW_TIMEOUT")
++        if "e" in box:
++            raise box["e"]
++        return box["r"]
++
++    def run(self):
++        self.cont.owner = threading.get_ident()
++        while not self.stop_ev.is_set():
++            time.sleep(self.frame_s)
++            if self.paused.is_set():
++                continue
++            for f in self.on_frame:
++                f()
++            t0 = time.perf_counter()
++            self.cont.poll()
++            while True:
++                try:
++                    fn, box, ev = self.jobs.get_nowait()
++                except queue.Empty:
++                    break
++                try:
++                    box["r"] = fn()
++                except BaseException as e:
++                    box["e"] = e
++                ev.set()
++            self.step_ms.append((time.perf_counter() - t0) * 1000)
++
++
++class Base(unittest.TestCase):
++    def setUp(self):
++        self.dir = tempfile.mkdtemp(prefix="tdflow-cont-")
++        self.w = AuditWorker(os.path.join(self.dir, "d"), owner_ident=-1).start()
++        self.assertTrue(self.w.ready.wait(5))
++        self.store = StoreProxy(self.w)
++        self.idn = Identity(self.store)
++        _, tok = self.idn.create_agent("A", "builder", ["/project1/fx/**"])
++        self.tid = self.idn.authenticate(tok)
++        self.cont = Continuations()
++        self.owner = Owner(self.cont)
++        self.owner.start()
++        time.sleep(0.05)
++        self.w.owner_ident = self.owner.ident            # the 'main thread' may never wait for the worker
++        self.ad = FakeAdapter()
++        self.susp, self.gate = [False], [True]
++        self.eng = Engine(self.store, self.idn, Policy("/project1"), core_registry(), self.ad, ALL,
++                          lambda: self.susp[0], main=self.owner.main, continuation=self.cont,
++                          exec_gate=lambda: self.gate[0], wait_s=2.0)
++
++    def tearDown(self):
++        self.owner.stop_ev.set()
++        self.owner.join(2)
++        self.w.owner_ident = -1
++        if self.w.available:
++            self.w.close().result(5)
++        shutil.rmtree(self.dir, ignore_errors=True)
++
++    def call(self, name=SET[0], args=None):
++        return self.eng.call(self.tid, name, dict(args or SET[1]))
++
++    def kinds(self):
++        return [e["kind"] for e in reversed(self.w.call("events", limit=100))]
++
++
++class ContinuationTests(Base):
++    def test_success_is_durable_and_ordered(self):
++        r = self.call()
++        self.assertFalse(r["isError"], r)
++        self.assertTrue(r["structuredContent"]["audit_seq"])
++        self.assertEqual(self.kinds(), ["intent", "outcome"])
++        self.assertEqual(len(self.ad.executed), 1)
++        self.assertEqual(self.ad.executed[0][1], "tdflow:1")      # undo label from the durable intent seq
++        self.assertTrue(self.w.call("verify")["ok"])
++
++    def test_concurrent_calls_and_owner_never_waits(self):
++        self.w.delay_s = 0.03                                     # slow disk
++        res = []
++        ths = [threading.Thread(target=lambda: res.append(self.call())) for _ in range(8)]
++        for t in ths:
++            t.start()
++        for t in ths:
++            t.join(30)
++        self.w.delay_s = 0
++        self.assertEqual(len(res), 8)
++        self.assertTrue(all(not r["isError"] for r in res), res)
++        self.assertLess(max(self.owner.step_ms), 25)            # far below 16 writes x 30 ms
++        k = self.kinds()
++        self.assertEqual((k.count("intent"), k.count("outcome")), (8, 8))
++
++    def test_kill_switch_between_intent_and_execute(self):
++        self.w.delay_s = 0.15
++        # Flipped while the intent is being written (a continuation is pending).
++        self.owner.on_frame.append(lambda: self.susp.__setitem__(0, bool(self.cont.pending() or self.susp[0])))
++        r = self.call()
++        self.w.delay_s = 0
++        self.assertEqual(r["structuredContent"]["code"], "SUSPENDED")
++        self.assertEqual(self.ad.executed, [])
++        ev = self.w.call("events", limit=5)
++        self.assertEqual((ev[0]["kind"], ev[0]["outcome"]), ("outcome", "aborted"))
++
++    def test_exec_gate_closed_means_not_run(self):
++        self.w.delay_s = 0.1
++        self.owner.on_frame.append(lambda: self.gate.__setitem__(0, not self.cont.pending() and self.gate[0]))
++        r = self.call()
++        self.w.delay_s = 0
++        self.assertTrue(r["isError"])
++        self.assertEqual(self.ad.executed, [])
++
++    def test_revoked_between_plan_and_execute(self):
++        self.w.delay_s = 0.1
++        snap = dict(self.idn._snap)
++        self.owner.on_frame.append(lambda: setattr(self.idn, "_snap", {} if self.cont.pending() else self.idn._snap))
++        r = self.call()
++        self.w.delay_s = 0
++        self.assertEqual(r["structuredContent"]["code"], "DENIED")
++        self.assertEqual(self.ad.executed, [])
++        self.idn._snap = snap
++
++    def test_target_changed_between_plan_and_execute(self):
++        n = [0]
++        real = self.ad.resolve
++
++        def resolve(tool, args):
++            n[0] += 1
++            r = real(tool, args)
++            if n[0] == 2:
++                r.targets[0] = r.targets[0].__class__("update", "/project1/fx/other", change="param", param="x")
++            return r
++        self.ad.resolve = resolve
++        self.assertEqual(self.call()["structuredContent"]["code"], "PRECONDITION_CHANGED")
++        self.assertEqual(self.ad.executed, [])
++
++    def test_intent_overflow_fails_closed(self):
++        self.w._q.maxsize = 1
++        self.w.delay_s = 0.2
++        self.w.submit("events")                                  # occupies the worker
++        t0 = time.monotonic()
++        while self.w.queued() and time.monotonic() - t0 < 2:
++            time.sleep(0.005)
++        self.w.submit("events")                                  # fills the queue
++        r = self.call()
++        self.w.delay_s, self.w._q.maxsize = 0, 1024
++        self.assertEqual(r["structuredContent"]["code"], "AUDIT_UNAVAILABLE")
++        self.assertEqual(self.ad.executed, [])
++        self.assertFalse(self.eng.suspended())
++
++    def test_outcome_failure_suspends_and_is_not_success(self):
++        real = self.w._store.append
++
++        def failing(kind, **kw):
++            if kind == "outcome":
++                raise AuditUnavailable("DiskError")
++            return real(kind, **kw)
++        self.w._store.append = failing
++        r = self.call()
++        self.assertEqual(r["structuredContent"]["code"], "OUTCOME_UNRECORDED")
++        self.assertTrue(self.eng.suspended())
++
++    def test_handler_timeout_cancels_before_start(self):
++        self.eng.wait_s = 0.3
++        self.w.delay_s = 0.05
++        self.owner.paused.set()
++        out = {}
++        th = threading.Thread(target=lambda: out.setdefault("r", self.call()))
++        self.owner.paused.clear()
++        # Run the plan step, then stall the 'main thread' so the execute step never comes in time.
++        self.owner.on_frame.append(lambda: self.owner.paused.set() if self.cont.pending() else None)
++        th.start()
++        th.join(10)
++        self.w.delay_s = 0
++        self.assertEqual(out["r"]["structuredContent"]["code"], "TDFLOW_TIMEOUT")
++        self.owner.on_frame.clear()
++        self.owner.paused.clear()
++        time.sleep(0.2)                                          # the late continuation must not execute
++        self.assertEqual(self.ad.executed, [])
++        ev = self.w.call("events", limit=5)
++        self.assertEqual((ev[0]["kind"], ev[0]["outcome"]), ("outcome", "aborted"))
++
++    def test_callbox_start_cancel_race(self):
++        b = CallBox()
++        self.assertTrue(b.cancel())
++        self.assertFalse(b.start())
++        b2 = CallBox()
++        self.assertTrue(b2.start())
++        self.assertFalse(b2.cancel())
++
++    def test_poll_only_on_owner(self):
++        with self.assertRaises(RuntimeError):
++            self.cont.poll()
++
++
++if __name__ == "__main__":
++    unittest.main()

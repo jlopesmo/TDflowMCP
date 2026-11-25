@@ -1,0 +1,783 @@
+{
+  "schema": "tdflowmcp.component/1",
+  "name": "TDflowMCP",
+  "version_from": "src/tdflowmcp/__init__.py",
+  "min_td_build": "2025.32440",
+  "tags": [
+    "TDflowMCP"
+  ],
+  "modules": {
+    "tdflowmcp": {
+      "path": "src/tdflowmcp/__init__.py",
+      "package": true
+    },
+    "tdflowmcp.admin": {
+      "path": "src/tdflowmcp/admin.py"
+    },
+    "tdflowmcp.auditworker": {
+      "path": "src/tdflowmcp/auditworker.py"
+    },
+    "tdflowmcp.capabilities": {
+      "path": "src/tdflowmcp/capabilities.py"
+    },
+    "tdflowmcp.codemode": {
+      "path": "src/tdflowmcp/codemode.py"
+    },
+    "tdflowmcp.compat": {
+      "path": "src/tdflowmcp/compat.py"
+    },
+    "tdflowmcp.controller": {
+      "path": "src/tdflowmcp/controller.py"
+    },
+    "tdflowmcp.engine": {
+      "path": "src/tdflowmcp/engine.py"
+    },
+    "tdflowmcp.gate": {
+      "path": "src/tdflowmcp/gate.py"
+    },
+    "tdflowmcp.identity": {
+      "path": "src/tdflowmcp/identity.py"
+    },
+    "tdflowmcp.insights": {
+      "path": "src/tdflowmcp/insights.py"
+    },
+    "tdflowmcp.layout": {
+      "path": "src/tdflowmcp/layout.py"
+    },
+    "tdflowmcp.memory": {
+      "path": "src/tdflowmcp/memory.py"
+    },
+    "tdflowmcp.memrepo": {
+      "path": "src/tdflowmcp/memrepo.py"
+    },
+    "tdflowmcp.net": {
+      "path": "src/tdflowmcp/net/__init__.py",
+      "package": true
+    },
+    "tdflowmcp.net.bindverify": {
+      "path": "src/tdflowmcp/net/bindverify.py"
+    },
+    "tdflowmcp.net.evidence": {
+      "path": "src/tdflowmcp/net/evidence.py"
+    },
+    "tdflowmcp.net.oslisteners": {
+      "path": "src/tdflowmcp/net/oslisteners.py"
+    },
+    "tdflowmcp.net.oswindow": {
+      "path": "src/tdflowmcp/net/oswindow.py"
+    },
+    "tdflowmcp.net.pyhttp": {
+      "path": "src/tdflowmcp/net/pyhttp.py"
+    },
+    "tdflowmcp.policy": {
+      "path": "src/tdflowmcp/policy.py"
+    },
+    "tdflowmcp.protocol": {
+      "path": "src/tdflowmcp/protocol.py"
+    },
+    "tdflowmcp.schema": {
+      "path": "src/tdflowmcp/schema.py"
+    },
+    "tdflowmcp.setupapi": {
+      "path": "src/tdflowmcp/setupapi.py"
+    },
+    "tdflowmcp.skills": {
+      "path": "src/tdflowmcp/skills.py"
+    },
+    "tdflowmcp.storage": {
+      "path": "src/tdflowmcp/storage.py"
+    },
+    "tdflowmcp.store": {
+      "path": "src/tdflowmcp/store.py"
+    },
+    "tdflowmcp.tellagent": {
+      "path": "src/tdflowmcp/tellagent.py"
+    },
+    "tdflowmcp.tools": {
+      "path": "src/tdflowmcp/tools.py"
+    },
+    "tdflowmcp_td": {
+      "path": "src/td_adapter/__init__.py",
+      "package": true
+    },
+    "tdflowmcp_td.tdops": {
+      "path": "src/td_adapter/tdops.py"
+    },
+    "tdflowmcp.approvals": {
+      "path": "src/tdflowmcp/approvals.py"
+    },
+    "tdflowmcp.dashboard": {
+      "path": "src/tdflowmcp/dashboard.py"
+    },
+    "tdflowmcp.readiness": {
+      "path": "src/tdflowmcp/readiness.py"
+    },
+    "tdflowmcp_td.native": {
+      "path": "src/td_adapter/native.py"
+    },
+    "tdflowmcp.connect": {
+      "path": "src/tdflowmcp/connect.py"
+    },
+    "tdflowmcp_td.connection": {
+      "path": "src/td_adapter/connection.py"
+    }
+  },
+  "dats": {
+    "loader": {
+      "path": "src/td_adapter/loader.py"
+    },
+    "TDflowMCPExt": {
+      "path": "src/td_adapter/extension.py"
+    },
+    "troubleshooting": {
+      "path": "src/setup/troubleshooting.json"
+    },
+    "web_index_html": {
+      "path": "src/setup/web/index.html",
+      "serve": "/setup/",
+      "content_type": "text/html; charset=utf-8"
+    },
+    "web_app_css": {
+      "path": "src/setup/web/app.css",
+      "serve": "/setup/app.css",
+      "content_type": "text/css; charset=utf-8"
+    },
+    "web_app_js": {
+      "path": "src/setup/web/app.js",
+      "serve": "/setup/app.js",
+      "content_type": "text/javascript; charset=utf-8"
+    },
+    "tellagent": {
+      "text": "",
+      "runtime": true,
+      "note": "Runtime copy of the Tell Your Coding Agent text (no secrets)"
+    },
+    "clients": {
+      "path": "src/integrations/clients.json"
+    },
+    "skill_tdflow_core": {
+      "path": "src/skills/tdflow-core/SKILL.md"
+    },
+    "ui_index_html": {
+      "path": "src/dashboard/index.html",
+      "serve": "/ui/",
+      "content_type": "text/html; charset=utf-8"
+    },
+    "ui_app_css": {
+      "path": "src/dashboard/app.css",
+      "serve": "/ui/app.css",
+      "content_type": "text/css; charset=utf-8"
+    },
+    "ui_app_js": {
+      "path": "src/dashboard/app.js",
+      "serve": "/ui/app.js",
+      "content_type": "text/javascript; charset=utf-8"
+    },
+    "diagnostics": {
+      "text": "",
+      "runtime": true,
+      "note": "Runtime diagnostics report shown by View Diagnostics (no secrets, no absolute paths)"
+    },
+    "agents_view": {
+      "text": "",
+      "runtime": true,
+      "note": "Runtime agent list shown by View Agents (never tokens)"
+    },
+    "approval_view": {
+      "text": "",
+      "runtime": true,
+      "note": "Runtime view of one approval request (cleared after the decision)"
+    },
+    "connect_view": {
+      "text": "",
+      "runtime": true,
+      "note": "Runtime connection plan / details shown by Connect Agent and View Connection Details (no secrets)"
+    }
+  },
+  "callbacks": {
+    "frame_exec": {
+      "type": "execute",
+      "path": "src/td_adapter/callbacks_execute.py"
+    },
+    "par_exec": {
+      "type": "parameterexecute",
+      "path": "src/td_adapter/callbacks_parexec.py"
+    }
+  },
+  "extension": {
+    "dat": "TDflowMCPExt",
+    "class": "TDflowMCPExt",
+    "promote": true
+  },
+  "parameters": [
+    {
+      "page": "TDflowMCP",
+      "name": "Version",
+      "type": "Str",
+      "label": "Version",
+      "readonly": true,
+      "default": "{version}",
+      "help": "Component version"
+    },
+    {
+      "page": "TDflowMCP",
+      "name": "Compatsummary",
+      "type": "Str",
+      "label": "System Check",
+      "readonly": true,
+      "default": "not run",
+      "help": "Latest diagnostics: Ready / Not ready with passed, warning, failed and pending counts. Pending checks need a listener or a connection and are never counted as passed"
+    },
+    {
+      "page": "TDflowMCP",
+      "name": "Rundiagnostics",
+      "type": "Pulse",
+      "label": "Run Diagnostics",
+      "help": "Run the system checks now (always available; safe: never starts the listener, never installs or changes anything). Shows Running…, then the result. Details: View Diagnostics (Advanced)"
+    },
+    {
+      "page": "TDflowMCP",
+      "name": "Lastcheck",
+      "type": "Str",
+      "label": "Last Check",
+      "readonly": true,
+      "default": "not run yet",
+      "help": "When the checks last ran (automatic on load, or manual)"
+    },
+    {
+      "page": "TDflowMCP",
+      "name": "Enablemcp",
+      "type": "Toggle",
+      "label": "Enable MCP",
+      "default": false,
+      "help": "Turn the MCP endpoint on or off (127.0.0.1 only). It turns on only after the checks pass and an agent exists: with no agent yet it stays off and Next Step says to pulse Connect Agent. Connect Agent also turns it on. Off after every reload, until you turn it on",
+      "section": true
+    },
+    {
+      "page": "TDflowMCP",
+      "name": "Suspendagents",
+      "type": "Toggle",
+      "label": "Suspend Agents",
+      "default": false,
+      "help": "Emergency stop: refuse every agent request at once, including queued ones"
+    },
+    {
+      "page": "TDflowMCP",
+      "name": "Status",
+      "type": "Str",
+      "label": "Status",
+      "readonly": true,
+      "default": "Off",
+      "help": "Current state: Off, Setup, Enabled, Suspended or Error"
+    },
+    {
+      "page": "TDflowMCP",
+      "name": "Statusdetail",
+      "type": "Str",
+      "label": "Next Step",
+      "readonly": true,
+      "default": "Environment checks pending. Pulse Run Diagnostics.",
+      "help": "What is happening now and what to do next"
+    },
+    {
+      "page": "TDflowMCP",
+      "name": "Codingagent",
+      "type": "Menu",
+      "label": "Coding Agent",
+      "help": "Which coding agent to connect. Auto looks for installed agents (names and folders only; it never runs them) and asks if it finds several",
+      "default": "auto",
+      "menu": [
+        "auto",
+        "claude-code",
+        "codex",
+        "cursor",
+        "vscode-copilot",
+        "other"
+      ],
+      "menu_labels": [
+        "Auto (Recommended)",
+        "Claude Code",
+        "OpenAI Codex",
+        "Cursor",
+        "VS Code Copilot",
+        "Other MCP Client"
+      ],
+      "section": true
+    },
+    {
+      "page": "TDflowMCP",
+      "name": "Agentaccess",
+      "type": "Menu",
+      "label": "Agent Access",
+      "help": "What a new agent may do: Read Only (look), Builder (also change operators in its scope), Operator (also ask you to approve code-running changes)",
+      "default": "builder",
+      "menu": [
+        "observer",
+        "builder",
+        "operator"
+      ],
+      "menu_labels": [
+        "Read Only",
+        "Builder",
+        "Operator"
+      ]
+    },
+    {
+      "page": "TDflowMCP",
+      "name": "Allowedscope",
+      "type": "Str",
+      "label": "Allowed Scope",
+      "help": "Operators a new agent may work on, e.g. /project1/** (inside Project Root)",
+      "default": "/project1/**"
+    },
+    {
+      "page": "TDflowMCP",
+      "name": "Connectagent",
+      "type": "Pulse",
+      "label": "Connect Agent",
+      "help": "Connect your coding agent: checks the environment, shows exactly what will change, and after you approve sets up the agent's identity, protected credential and configuration (Claude Code), turns on MCP if you approved that, and waits for the agent's first request"
+    },
+    {
+      "page": "TDflowMCP",
+      "name": "Tellagent",
+      "type": "Str",
+      "label": "Tell Your Coding Agent",
+      "readonly": true,
+      "default": "Not ready: Connect Agent",
+      "help": "Whether Copy Agent Prompt gives a ready first message for a new coding-agent chat (Prompt ready) or, not ready yet, a short recovery message with the next step",
+      "section": true
+    },
+    {
+      "page": "TDflowMCP",
+      "name": "Copytellagent",
+      "type": "Pulse",
+      "label": "Copy Agent Prompt",
+      "help": "Copy a ready-to-paste first message for a new coding-agent chat: connect with the existing tdflow server, call tdflow_whoami, give a brief project overview, make no changes until you assign a task. Never contains a token"
+    },
+    {
+      "page": "TDflowMCP",
+      "name": "Viewinstructions",
+      "type": "Pulse",
+      "label": "View Full Instructions",
+      "help": "Open the full setup, connection, repair and resume instructions in a viewer"
+    },
+    {
+      "page": "TDflowMCP",
+      "name": "Connectedagents",
+      "type": "Str",
+      "label": "Connected Agents",
+      "help": "Agents whose authenticated requests arrived in the last 2 minutes, with the client's own name and version. A configured or registered agent that has not talked does not count",
+      "readonly": true,
+      "default": "none",
+      "section": true
+    },
+    {
+      "page": "TDflowMCP",
+      "name": "Manageagents",
+      "type": "Pulse",
+      "label": "Manage Agents",
+      "help": "Open the Agents page: agents, scopes, tokens and approvals"
+    },
+    {
+      "page": "TDflowMCP",
+      "name": "Opendashboard",
+      "type": "Pulse",
+      "label": "Open Dashboard",
+      "help": "Open the dashboard in your browser (starts the local listener if needed). TouchDesigner then asks you to approve the sign-in; the page shows the same code"
+    },
+    {
+      "page": "Agents",
+      "name": "Detectedclients",
+      "type": "Str",
+      "label": "Installed Agents",
+      "readonly": true,
+      "default": "not checked yet",
+      "section": true,
+      "help": "Coding agents found on this computer (names and folders only; never run): auto = set up by Connect Agent, manual = Copy Token and the instructions"
+    },
+    {
+      "page": "Agents",
+      "name": "Agentsummary",
+      "type": "Str",
+      "label": "Agents",
+      "readonly": true,
+      "default": "0 agent(s)",
+      "help": "Number of agents and how many are connected (an authenticated request in the last 2 minutes)",
+      "section": true
+    },
+    {
+      "page": "Agents",
+      "name": "Agentselect",
+      "type": "Menu",
+      "label": "Agent",
+      "help": "The agent the actions below apply to",
+      "default": "none",
+      "menu": [
+        "none"
+      ],
+      "menu_labels": [
+        "(no agents yet)"
+      ]
+    },
+    {
+      "page": "Agents",
+      "name": "Agentinfo",
+      "type": "Str",
+      "label": "Selected Agent",
+      "help": "Role, state, scopes, tokens and last request of the selected agent",
+      "readonly": true,
+      "default": "No agent selected"
+    },
+    {
+      "page": "Agents",
+      "name": "Viewagents",
+      "type": "Pulse",
+      "label": "View Agents",
+      "help": "Open a list of all agents (never shows tokens)"
+    },
+    {
+      "page": "Agents",
+      "name": "Agentscope",
+      "type": "Str",
+      "label": "Scope",
+      "help": "Scope for Add Scope / Remove Scope",
+      "default": "/project1/**"
+    },
+    {
+      "page": "Agents",
+      "name": "Addscope",
+      "type": "Pulse",
+      "label": "Add Scope",
+      "help": "Allow the selected agent its role's actions on Scope"
+    },
+    {
+      "page": "Agents",
+      "name": "Removescope",
+      "type": "Pulse",
+      "label": "Remove Scope",
+      "help": "Remove the selected agent's grant on Scope"
+    },
+    {
+      "page": "Agents",
+      "name": "Enableagent",
+      "type": "Pulse",
+      "label": "Enable Agent",
+      "help": "Allow the selected agent to work again"
+    },
+    {
+      "page": "Agents",
+      "name": "Disableagent",
+      "type": "Pulse",
+      "label": "Disable Agent",
+      "help": "Stop the selected agent (its tokens stop working)"
+    },
+    {
+      "page": "Agents",
+      "name": "Repairconnection",
+      "type": "Pulse",
+      "label": "Repair Connection",
+      "help": "For an agent set up by Connect Agent: give it a new credential and re-check its configuration (shows the plan first)",
+      "section": true
+    },
+    {
+      "page": "Agents",
+      "name": "Disconnectagent",
+      "type": "Pulse",
+      "label": "Disconnect Agent",
+      "help": "For an agent set up by Connect Agent: remove its configuration entry (or restore the one it replaced), delete its stored credential and revoke its tokens (asks first)"
+    },
+    {
+      "page": "Agents",
+      "name": "Rotatetoken",
+      "type": "Pulse",
+      "label": "New Token",
+      "help": "Manual fallback: revoke the agent's tokens and make a new one for Copy Token",
+      "section": true
+    },
+    {
+      "page": "Agents",
+      "name": "Copytoken",
+      "type": "Pulse",
+      "label": "Copy Token",
+      "help": "Manual fallback: copy a token made with New Token (or by Connect Agent for a client without automatic setup) to the clipboard once, within 2 minutes; kept out of Clipboard History and cleared after a minute"
+    },
+    {
+      "page": "Agents",
+      "name": "Revoketokens",
+      "type": "Pulse",
+      "label": "Revoke Tokens",
+      "help": "Revoke all tokens of the selected agent"
+    },
+    {
+      "page": "Agents",
+      "name": "Approvalsummary",
+      "type": "Str",
+      "label": "Pending Approvals",
+      "help": "Requests from agents waiting for your decision",
+      "readonly": true,
+      "default": "none waiting",
+      "section": true
+    },
+    {
+      "page": "Agents",
+      "name": "Viewapproval",
+      "type": "Pulse",
+      "label": "View Approval",
+      "help": "Show the oldest waiting request with its complete arguments"
+    },
+    {
+      "page": "Agents",
+      "name": "Approverequest",
+      "type": "Pulse",
+      "label": "Approve Request",
+      "help": "Approve the request shown by View Approval"
+    },
+    {
+      "page": "Agents",
+      "name": "Denyrequest",
+      "type": "Pulse",
+      "label": "Deny Request",
+      "help": "Deny the request shown by View Approval"
+    },
+    {
+      "page": "Web",
+      "name": "Opensetup",
+      "type": "Pulse",
+      "label": "Open Setup",
+      "help": "Open the Setup page in your browser; approve the sign-in in TouchDesigner (same code)"
+    },
+    {
+      "page": "Web",
+      "name": "Webdashboard",
+      "type": "Pulse",
+      "label": "Open Dashboard",
+      "help": "Open the dashboard in your browser; approve the sign-in in TouchDesigner (same code)"
+    },
+    {
+      "page": "Web",
+      "name": "Websession",
+      "type": "Str",
+      "label": "Browser Session",
+      "help": "Signed-in browser sessions",
+      "readonly": true,
+      "default": "none"
+    },
+    {
+      "page": "Web",
+      "name": "Setupurl",
+      "type": "Str",
+      "label": "Setup URL",
+      "readonly": true,
+      "default": "",
+      "help": "Address of the Setup Assistant while it is running",
+      "section": true
+    },
+    {
+      "page": "Web",
+      "name": "Pairingrequest",
+      "type": "Str",
+      "label": "Pairing Request",
+      "readonly": true,
+      "default": "",
+      "help": "Match code of a browser that asks to pair (only for a URL you typed yourself)"
+    },
+    {
+      "page": "Web",
+      "name": "Approvepairing",
+      "type": "Pulse",
+      "label": "Approve Pairing",
+      "help": "Approve the pending browser pairing request if its code matches the Setup page"
+    },
+    {
+      "page": "Web",
+      "name": "Rejectpairing",
+      "type": "Pulse",
+      "label": "Reject Pairing",
+      "help": "Reject the pending browser pairing request"
+    },
+    {
+      "page": "Web",
+      "name": "Endbrowsersession",
+      "type": "Pulse",
+      "label": "End Browser Session",
+      "help": "Sign every browser out"
+    },
+    {
+      "page": "Advanced",
+      "name": "Buildinfo",
+      "type": "Str",
+      "label": "Build",
+      "help": "TouchDesigner build, Python and interface versions",
+      "readonly": true,
+      "default": ""
+    },
+    {
+      "page": "Advanced",
+      "name": "Viewdiagnostics",
+      "type": "Pulse",
+      "label": "View Diagnostics",
+      "help": "Open the full diagnostics report with fixes"
+    },
+    {
+      "page": "Advanced",
+      "name": "Viewconnection",
+      "type": "Pulse",
+      "label": "View Connection Details",
+      "help": "Technical details of each connection: configuration file, MCP entry, credential store, backups (no secrets)"
+    },
+    {
+      "page": "Advanced",
+      "name": "Stopserver",
+      "type": "Pulse",
+      "label": "Stop Server",
+      "help": "Stop the listener",
+      "section": true
+    },
+    {
+      "page": "Advanced",
+      "name": "Port",
+      "type": "Int",
+      "label": "Port",
+      "default": 9480,
+      "min": 1024,
+      "max": 65535,
+      "help": "Listener port. Never changed automatically; changing it stops the listener"
+    },
+    {
+      "page": "Advanced",
+      "name": "Portstatus",
+      "type": "Str",
+      "label": "Port Status",
+      "readonly": true,
+      "default": "not checked",
+      "help": "free / this component / in use by another process"
+    },
+    {
+      "page": "Advanced",
+      "name": "Projectroot",
+      "type": "Str",
+      "label": "Project Root",
+      "default": "/project1",
+      "help": "Agents can only see and change operators inside this component",
+      "section": true
+    },
+    {
+      "page": "Advanced",
+      "name": "Datalocation",
+      "type": "Menu",
+      "label": "Data Location",
+      "default": "project",
+      "menu": [
+        "project",
+        "private"
+      ],
+      "menu_labels": [
+        "Project Folder (.tdflowmcp)",
+        "Private Storage"
+      ],
+      "help": "Project Folder: a git-ignored .tdflowmcp folder next to the .toe (unsaved, read-only, network and cloud-synced folders fall back to private storage). Changing it requires Confirm Move."
+    },
+    {
+      "page": "Advanced",
+      "name": "Datadir",
+      "type": "Str",
+      "label": "Data Location In Use",
+      "readonly": true,
+      "default": "(not opened)",
+      "help": "Where this project's audit log, sessions and recovery snapshots are stored (credentials and keys always stay in private per-user storage)"
+    },
+    {
+      "page": "Advanced",
+      "name": "Datastatus",
+      "type": "Str",
+      "label": "Data Status",
+      "readonly": true,
+      "default": "not opened",
+      "help": "Storage decision and anything that needs your confirmation"
+    },
+    {
+      "page": "Advanced",
+      "name": "Confirmmove",
+      "type": "Pulse",
+      "label": "Confirm Move",
+      "help": "This project was moved/renamed or its data location changed: verify and adopt or copy its audit log (the old copy is left untouched)"
+    },
+    {
+      "page": "Advanced",
+      "name": "Claimproject",
+      "type": "Pulse",
+      "label": "Claim As New Project",
+      "help": "Treat this project as new: new identity and empty audit log; existing data is left untouched; agents need new tokens"
+    },
+    {
+      "page": "Advanced",
+      "name": "Createprojectmemory",
+      "type": "Pulse",
+      "label": "Create Project Memory",
+      "help": "Create the optional tdflowProject component (project memory for task checkpoints and handoffs) under Project Root. Agents change it only through TDflowMCP's memory tools",
+      "section": true
+    },
+    {
+      "page": "Advanced",
+      "name": "Claimprojectmemory",
+      "type": "Pulse",
+      "label": "Claim Project Memory",
+      "help": "Accept the tdflowProject's current records as authoritative after a copy, an older save or edits outside TDflowMCP (memory is read-only for agents until you do)"
+    },
+    {
+      "page": "Advanced",
+      "name": "Projectid",
+      "type": "Str",
+      "label": "Project ID",
+      "readonly": true,
+      "default": "",
+      "help": "TDflowMCP identity of this project (saved in the .toe; not a secret)"
+    },
+    {
+      "page": "Advanced",
+      "name": "Loglevel",
+      "type": "Menu",
+      "label": "Log Level",
+      "default": "info",
+      "menu": [
+        "error",
+        "warning",
+        "info",
+        "debug"
+      ],
+      "help": "Diagnostic log level"
+    }
+  ],
+  "active_tools": [
+    "tdflow_approval_status",
+    "tdflow_capabilities",
+    "tdflow_capture_top",
+    "tdflow_connect",
+    "tdflow_create_operator",
+    "tdflow_delete_operator",
+    "tdflow_describe_network",
+    "tdflow_disconnect",
+    "tdflow_execute_script",
+    "tdflow_experiment_create",
+    "tdflow_experiment_discard",
+    "tdflow_experiment_promote",
+    "tdflow_get_dat_text",
+    "tdflow_get_errors",
+    "tdflow_get_operator",
+    "tdflow_get_parameters",
+    "tdflow_handoff_create",
+    "tdflow_handoff_resume",
+    "tdflow_lease_scope",
+    "tdflow_list_operators",
+    "tdflow_project_info",
+    "tdflow_session_list",
+    "tdflow_save_project",
+    "tdflow_session_note",
+    "tdflow_set_dat_text",
+    "tdflow_set_parameters",
+    "tdflow_task_checkpoint",
+    "tdflow_task_list",
+    "tdflow_undo",
+    "tdflow_whoami"
+  ]
+}

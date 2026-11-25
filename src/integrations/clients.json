@@ -1,0 +1,201 @@
+{
+  "schema": "tdflowmcp.clients/1",
+  "policy": "Consent-based (owner D22, ADR-0015): TDflowMCP changes a coding agent's configuration only after the user approved the exact plan in TouchDesigner, and only for clients marked 'automatic' (Claude Code: one user-scope 'tdflow' entry with a headersHelper; the token stays in the OS-protected store). Other clients get a manual fallback: the token is referenced as ${TDFLOW_TOKEN} (or the client's own environment syntax) and never written into any file. 'verified' requires a recorded live test (docs/icm/validation-index.md).",
+  "facts_checked": "2026-11-24",
+  "server_name": "tdflow",
+  "clients": [
+    {
+      "id": "claude-code",
+      "display": "Claude Code",
+      "support": "primary",
+      "docs": [
+        "https://code.claude.com/docs/en/mcp",
+        "https://code.claude.com/docs/en/cli-reference",
+        "https://code.claude.com/docs/en/skills",
+        "https://code.claude.com/docs/en/vs-code"
+      ],
+      "mcp": {
+        "transport": "http",
+        "config_file_note": "Project scope: .mcp.json at the project root (shared via version control). User/local scope: ~/.claude.json via 'claude mcp add'. ${VAR} is expanded in 'headers'.",
+        "json": {
+          "mcpServers": {
+            "tdflow": {
+              "type": "http",
+              "url": "{url}",
+              "headers": {
+                "Authorization": "Bearer ${TDFLOW_TOKEN}"
+              }
+            }
+          }
+        },
+        "add_command": {
+          "bash": "claude mcp add --transport http --scope user tdflow {url} --header 'Authorization: Bearer ${TDFLOW_TOKEN}'",
+          "zsh": "claude mcp add --transport http --scope user tdflow {url} --header 'Authorization: Bearer ${TDFLOW_TOKEN}'",
+          "powershell": "claude mcp add --transport http --scope user tdflow {url} --header 'Authorization: Bearer ${TDFLOW_TOKEN}'"
+        },
+        "add_command_note": "Single quotes keep ${TDFLOW_TOKEN} literal in bash, zsh and PowerShell, so the token itself is never stored. Documented form; the live test used the JSON form.",
+        "check": "claude mcp list"
+      },
+      "skills": {
+        "format": "skill-md",
+        "user_dir": "~/.claude/skills",
+        "project_dir": ".claude/skills"
+      },
+      "version_command": "claude --version",
+      "verified": {
+        "client_version": null,
+        "date": null,
+        "evidence": null
+      },
+      "detect": [
+        "claude"
+      ],
+      "automatic": {
+        "platforms": [
+          "win32",
+          "darwin"
+        ],
+        "verified_platforms": [
+          "win32"
+        ],
+        "config": "~/.claude.json (or $CLAUDE_CONFIG_DIR/.claude.json), top-level mcpServers.tdflow (user scope: no project trust prompt)",
+        "mechanism": "headersHelper: a fixed command that reads this project's token from the OS-protected store (Windows DPAPI file; macOS Keychain) for the project the listener announces; Claude Code runs it on each connection and again after a 401",
+        "shared_by": [
+          "Claude Code CLI",
+          "Claude Code VS Code extension (and other editor hosts of the extension)"
+        ],
+        "reload": "conversations started afterwards; or /mcp > Reconnect",
+        "windows_shell": "cmd.exe (observed 2026-11-24: CLI 2.1.289 and VS Code extension 2.1.330)"
+      }
+    },
+    {
+      "id": "codex",
+      "display": "OpenAI Codex CLI",
+      "support": "documented",
+      "docs": [
+        "https://learn.chatgpt.com/docs/extend/mcp",
+        "https://learn.chatgpt.com/docs/config-file/config-reference"
+      ],
+      "mcp": {
+        "transport": "http",
+        "config_file_note": "~/.codex/config.toml (shared by the Codex CLI, IDE extension and desktop app; CODEX_HOME). bearer_token_env_var names the variable that holds the token.",
+        "toml": "[mcp_servers.tdflow]\nurl = \"{url}\"\nbearer_token_env_var = \"TDFLOW_TOKEN\"",
+        "add_command": {
+          "bash": "codex mcp add tdflow --url {url} --bearer-token-env-var TDFLOW_TOKEN",
+          "zsh": "codex mcp add tdflow --url {url} --bearer-token-env-var TDFLOW_TOKEN",
+          "powershell": "codex mcp add tdflow --url {url} --bearer-token-env-var TDFLOW_TOKEN"
+        }
+      },
+      "skills": null,
+      "facts_note": "Vendor docs (developers.openai.com/codex now redirects to learn.chatgpt.com) and the local codex-cli 0.160.0 help, 2026-11-24. Not live-tested.",
+      "verified": {
+        "client_version": null,
+        "date": null,
+        "evidence": null
+      },
+      "detect": [
+        "codex"
+      ],
+      "manual_reason": "Codex reads its token from an environment variable when it starts"
+    },
+    {
+      "id": "cursor",
+      "display": "Cursor",
+      "support": "documented",
+      "docs": [
+        "https://cursor.com/docs/context/mcp"
+      ],
+      "mcp": {
+        "transport": "http",
+        "config_file_note": "~/.cursor/mcp.json (all projects); restart Cursor or toggle the server after editing.",
+        "json": {
+          "mcpServers": {
+            "tdflow": {
+              "url": "{url}",
+              "headers": {
+                "Authorization": "Bearer ${env:TDFLOW_TOKEN}"
+              }
+            }
+          }
+        }
+      },
+      "skills": null,
+      "verified": {
+        "client_version": null,
+        "date": null,
+        "evidence": null
+      },
+      "detect": [
+        "cursor"
+      ],
+      "manual_reason": "Cursor reads its token from an environment variable when it starts"
+    },
+    {
+      "id": "vscode-copilot",
+      "display": "VS Code (GitHub Copilot)",
+      "support": "documented",
+      "docs": [
+        "https://code.visualstudio.com/docs/agents/reference/mcp-configuration",
+        "https://code.visualstudio.com/docs/copilot/customization/mcp-servers"
+      ],
+      "mcp": {
+        "transport": "http",
+        "config_file_note": "~/.copilot/mcp-config.json (Copilot user file, also the Copilot CLI's; COPILOT_HOME). The variable must be in VS Code's environment when it starts.",
+        "json": {
+          "mcpServers": {
+            "tdflow": {
+              "type": "http",
+              "url": "{url}",
+              "headers": {
+                "Authorization": "Bearer ${TDFLOW_TOKEN}"
+              },
+              "tools": [
+                "*"
+              ]
+            }
+          }
+        }
+      },
+      "skills": null,
+      "verified": {
+        "client_version": null,
+        "date": null,
+        "evidence": null
+      },
+      "detect": [],
+      "manual_reason": "Copilot reads its token from an environment variable VS Code has at start",
+      "detect_note": "Detected by the github.copilot* extension folder only ('code' on PATH says nothing about Copilot)."
+    },
+    {
+      "id": "other",
+      "display": "Other MCP client",
+      "support": "generic",
+      "docs": "",
+      "mcp": {
+        "transport": "streamable-http",
+        "config_file_note": "Any MCP client that supports Streamable HTTP and a custom Authorization header: server name tdflow, URL {url}, header Authorization: Bearer <token from the TDFLOW_TOKEN environment variable>. Follow your client's documentation.",
+        "json": {
+          "mcpServers": {
+            "tdflow": {
+              "type": "http",
+              "url": "{url}",
+              "headers": {
+                "Authorization": "Bearer ${TDFLOW_TOKEN}"
+              }
+            }
+          }
+        }
+      },
+      "skills": {},
+      "detect": [],
+      "verified": {},
+      "manual_reason": "TDflowMCP cannot configure an unknown client"
+    }
+  ],
+  "token_env": {
+    "bash": "read -rs TDFLOW_TOKEN && export TDFLOW_TOKEN   # paste the token, press Enter (not echoed, not in history)",
+    "zsh": "read -rs TDFLOW_TOKEN && export TDFLOW_TOKEN   # paste the token, press Enter (not echoed, not in history)",
+    "powershell": "$env:TDFLOW_TOKEN = [Net.NetworkCredential]::new('', (Read-Host -AsSecureString 'TDflowMCP token')).Password   # this terminal only; Windows PowerShell 5.1 and 7"
+  },
+  "detect_policy": "Auto detection is read-only: it looks the names in 'detect' up on PATH (shutil.which) and lists known extension and configuration folder names (connect.discover). It never runs them, never reads their configuration and never reports paths; a hit is a hint, not proof that the client works."
+}

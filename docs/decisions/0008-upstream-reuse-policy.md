@@ -11,7 +11,7 @@
    - **8beeeaaat/touchdesigner-mcp, Pantani/tdmcp, r-spring/touchdesigner-mcp-server:** MIT. Reference only.
    - **johnsabath/touchdesigner-mcp, twozero-team/twozero-td-mcp:** no license detected, which means all rights reserved. **Do not copy.**
    - **@cloudflare/codemode:** MIT (per README). Pattern reference only.
-4. **Licensing of TDflowMCP itself (owner decision, 2026-11-22):** the repository stays **private**, and choosing a public license is deferred. Until a license is chosen, no reuse rights are granted.
+4. **Licensing of TDflowMCP itself:** The 2026-11-22 decision kept the repository private and deferred selecting a public license. **Superseding owner direction (2026-11-25):** the repository may be **public** so others can download and try the officially released `.tox` for evaluation. No open-source license has been selected and broader rights to modify, redistribute, commercialize or reuse the source are **not granted** by repository visibility. The final release notes and README must describe the evaluation scope accurately; formal public licensing is a separate owner decision.
 5. **Original `mcp_bridge.tox` (owner decision, 2026-11-22):** preserved as a **historical reference**. It is never source and never a runtime dependency.
    - The audit and extracted source are committed read-only under `reference/historical/mcp_bridge/`, with a provenance README (hashes, TD build, date).
    - The original `.tox` stays git-ignored (`.tmp/references/`), recorded by SHA-256. It embeds unreviewed historical log rows, so committing it requires an owner decision.

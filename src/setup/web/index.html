@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TDflowMCP Setup</title>
+<link rel="stylesheet" href="/setup/app.css">
+<script src="/setup/app.js" defer></script>
+</head>
+<body>
+<header>
+  <h1>TDflowMCP Setup</h1>
+  <p class="sub">Local setup assistant for this TouchDesigner project, reachable from this computer only. Changing agent access needs this browser to be paired from inside TouchDesigner.</p>
+</header>
+<main>
+  <section id="status-section" aria-labelledby="h-status">
+    <h2 id="h-status">Status</h2>
+    <p id="message" class="message" role="status">Loading…</p>
+    <dl id="status" data-state="loading">
+      <dt>State</dt><dd id="state">–</dd>
+      <dt>Component version</dt><dd id="version">–</dd>
+      <dt>TouchDesigner build</dt><dd id="td-build">–</dd>
+      <dt>Address</dt><dd id="url">–</dd>
+      <dt>Port</dt><dd id="port">–</dd>
+      <dt>Port status</dt><dd id="portstatus">–</dd>
+      <dt>Local-only check</dt><dd id="gate">–</dd>
+      <dt>MCP</dt><dd id="mcp">–</dd>
+      <dt>MCP endpoint</dt><dd id="endpoint">–</dd>
+    </dl>
+  </section>
+
+  <section id="admin-section" aria-labelledby="h-admin">
+    <h2 id="h-admin">Agents and access</h2>
+    <div id="pair-box">
+      <p class="hint">Managing agent tokens needs a paired browser. Pairing is approved inside TouchDesigner, so only someone at the TouchDesigner machine can grant it.</p>
+      <div class="row">
+        <button id="pair" type="button">Request pairing</button>
+        <span id="pair-status" role="status"></span>
+      </div>
+      <p id="pair-code" class="code" hidden></p>
+    </div>
+    <div id="admin" hidden>
+      <div class="row">
+        <span class="badge" id="admin-badge">Paired</span>
+        <button id="logout" type="button" class="secondary">Unpair this browser</button>
+      </div>
+      <h3>Create an agent token</h3>
+      <form id="token-form" autocomplete="off">
+        <label>Agent name <input id="t-name" maxlength="64" required value="Claude Code"></label>
+        <label>Role
+          <select id="t-role"><option value="builder">builder (read, create, update, delete)</option><option value="observer">observer (read only)</option></select>
+        </label>
+        <label>Scope <input id="t-scope" maxlength="256" required></label>
+        <fieldset id="t-actions"><legend>Actions (within the role)</legend>
+          <label><input type="checkbox" value="read" checked> read</label>
+          <label><input type="checkbox" value="create" checked> create</label>
+          <label><input type="checkbox" value="update" checked> update</label>
+          <label><input type="checkbox" value="delete" checked> delete</label>
+        </fieldset>
+        <label><input type="checkbox" id="t-cap-repo"> May write task records into the linked repository folder (only matters when project memory is in repository mode)</label>
+        <button type="submit">Create token</button>
+        <span id="token-status" role="status"></span>
+      </form>
+      <div id="token-once" hidden>
+        <p class="warn">This token is shown only once. Store it as the <code>TDFLOW_TOKEN</code> environment variable. Never paste it into project files or a committed config.</p>
+        <div class="row"><button id="copy-token" type="button">Copy token</button><span id="copy-token-status" role="status"></span></div>
+        <pre id="token-value" class="secret" tabindex="0"></pre>
+      </div>
+      <h3>Agents</h3>
+      <table id="agents"><thead><tr><th scope="col">Agent</th><th scope="col">Role</th><th scope="col">Scopes</th><th scope="col">Tokens</th></tr></thead><tbody></tbody></table>
+      <h3>Recent sessions</h3>
+      <table id="sessions"><thead><tr><th scope="col">Session</th><th scope="col">Agent</th><th scope="col">Last activity</th><th scope="col">Calls</th></tr></thead><tbody></tbody></table>
+      <p id="audit" class="hint"></p>
+      <h3>Project memory</h3>
+      <p class="hint">Task checkpoints and handoffs live in exactly one place: inside the tdflowProject component, or as files in a folder of this project (for example its Git repository). Switching shows a preview first and is recorded in the audit log. TDflowMCP never runs Git.</p>
+      <dl id="memory">
+        <dt>Where</dt><dd id="mem-authority">–</dd>
+        <dt>Folder</dt><dd id="mem-folder">–</dd>
+        <dt>Records</dt><dd id="mem-records">–</dd>
+        <dt>State</dt><dd id="mem-state">–</dd>
+      </dl>
+      <div id="mem-to-repo" hidden>
+        <label>Folder, relative to the project file (<code>.</code> for the project folder, <code>..</code> for its parent) <input id="mem-folder-input" maxlength="1024" value="."></label>
+        <button id="mem-plan-repo" type="button">Preview moving memory to this folder</button>
+      </div>
+      <div id="mem-to-embedded" hidden>
+        <button id="mem-plan-embedded" type="button">Preview moving memory back into the component</button>
+      </div>
+      <div id="mem-relink" hidden>
+        <p class="hint">The link to the folder is not usable (for example the project was not saved after the move, was saved somewhere else, or the folder's tdflow-project.json is missing). You can link the folder again; no record is changed.</p>
+        <label>Folder, relative to the project file <input id="mem-relink-input" maxlength="1024" value="."></label>
+        <button id="mem-plan-relink" type="button">Preview linking this folder again</button>
+      </div>
+      <div id="mem-preview" hidden>
+        <pre id="mem-plan" tabindex="0"></pre>
+        <div class="row"><button id="mem-confirm" type="button">Confirm</button><button id="mem-cancel" type="button" class="secondary">Cancel</button></div>
+      </div>
+      <span id="mem-status" role="status"></span>
+      <h3>Skills</h3>
+      <p class="hint">TDflowMCP Skills teach your coding agent how to use these tools safely (guidance only; the server enforces every rule). Installing shows a preview first, never overwrites files you changed, and is recorded in the audit log.</p>
+      <table id="skills"><thead><tr><th scope="col">Agent</th><th scope="col">Where</th><th scope="col">Installed</th><th scope="col">Bundled</th><th scope="col">Action</th></tr></thead><tbody></tbody></table>
+      <div id="skills-preview" hidden>
+        <pre id="skills-plan" tabindex="0"></pre>
+        <div class="row"><button id="skills-confirm" type="button">Confirm</button><button id="skills-cancel" type="button" class="secondary">Cancel</button></div>
+      </div>
+      <span id="skills-status" role="status"></span>
+    </div>
+  </section>
+
+  <section aria-labelledby="h-checks">
+    <h2 id="h-checks">Compatibility checks</h2>
+    <p id="summary" class="summary">–</p>
+    <table id="checks">
+      <thead><tr><th scope="col">Check</th><th scope="col">Result</th><th scope="col">Evidence</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <p class="hint">To re-run the checks, pulse <strong>Run Diagnostics</strong> on the component.</p>
+  </section>
+
+  <section aria-labelledby="h-trouble">
+    <h2 id="h-trouble">Troubleshooting</h2>
+    <div id="trouble"><p class="hint">No problems reported.</p></div>
+  </section>
+
+  <section aria-labelledby="h-agent">
+    <h2 id="h-agent">Tell Your Coding Agent</h2>
+    <p class="hint">Copy this text into your coding agent. It describes the current setup state and how to repair problems. It contains no secrets.</p>
+    <div class="row">
+      <button id="copy" type="button">Copy instructions</button>
+      <span id="copy-status" role="status"></span>
+    </div>
+    <pre id="tellagent" tabindex="0">–</pre>
+  </section>
+</main>
+<footer><p class="hint">Last updated <span id="updated">never</span>.</p></footer>
+</body>
+</html>

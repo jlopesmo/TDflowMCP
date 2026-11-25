@@ -1,0 +1,207 @@
+{
+  "schema": "tdflowmcp.troubleshooting/1",
+  "policy": "Diagnose and instruct only. TDflowMCP never installs software, never changes TouchDesigner or OS configuration, changes a coding agent's configuration only through Connect Agent after the user approved the exact plan, and never kills processes. allowed_actions may only contain TDflowMCP-internal, reversible actions.",
+  "entries": {
+    "td.build.older": {
+      "title": "TouchDesigner build is older than the oldest tested build",
+      "cause": "This TouchDesigner build predates 2025.32440, the oldest build TDflowMCP has been tested on. It may lack required APIs.",
+      "confirm": "Compare the build shown on the component's Version/Status with 2025.32440.",
+      "steps": [
+        "Use TouchDesigner 2025.32440 or newer (TDflowMCP never installs it).",
+        "Open your project with that build and pulse Run Diagnostics again."
+      ],
+      "docs": [
+        "https://derivative.ca/download"
+      ],
+      "allowed_actions": [
+        "rerun_checks"
+      ]
+    },
+    "td.build.tox_newer": {
+      "title": "Component was saved by a newer TouchDesigner build",
+      "cause": "A .tox saved by a newer build may not load or behave correctly in an older build.",
+      "confirm": "The check evidence shows both builds.",
+      "steps": [
+        "Use a TDflowMCP release built for your TouchDesigner build, or upgrade TouchDesigner yourself."
+      ],
+      "docs": [],
+      "allowed_actions": [
+        "rerun_checks"
+      ]
+    },
+    "py.version.mismatch": {
+      "title": "Unexpected embedded Python version",
+      "cause": "TDflowMCP requires TouchDesigner's bundled Python 3.11.x.",
+      "confirm": "Check the Python version in the check evidence.",
+      "steps": [
+        "Do not point TouchDesigner at a different Python installation for TDflowMCP.",
+        "Use a supported TouchDesigner build."
+      ],
+      "docs": [
+        "https://docs.derivative.ca/Python"
+      ],
+      "allowed_actions": [
+        "rerun_checks"
+      ]
+    },
+    "py.deps.missing": {
+      "title": "Required bundled Python modules are missing",
+      "cause": "A module that TouchDesigner normally bundles could not be imported; the installation or Python search path may be altered.",
+      "confirm": "The evidence lists the missing modules.",
+      "steps": [
+        "Check that TouchDesigner preferences do not replace the bundled Python modules.",
+        "Repair or reinstall TouchDesigner yourself if needed. TDflowMCP does not install packages."
+      ],
+      "docs": [
+        "https://docs.derivative.ca/Python"
+      ],
+      "allowed_actions": [
+        "rerun_checks"
+      ]
+    },
+    "net.capability.no_localaddress": {
+      "title": "This build cannot restrict the web server to this computer",
+      "cause": "The Web Server DAT transport was selected, but the Web Server DAT in this build has no Local Address parameter, so it would listen on every network interface. TDflowMCP will not start it (verified on 2025.32440 in spike S5).",
+      "confirm": "The evidence states that localaddress is missing.",
+      "steps": [
+        "Use the default embedded transport, which binds only to 127.0.0.1 on this build (verified in spike S6).",
+        "Only use the Web Server DAT transport on a build whose Web Server DAT has Local Address."
+      ],
+      "docs": [
+        "https://docs.derivative.ca/Web_Server_DAT"
+      ],
+      "allowed_actions": [
+        "rerun_checks"
+      ]
+    },
+    "net.bind.unverified": {
+      "title": "Loopback-only binding could not be verified",
+      "cause": "After starting, the listener did not prove it was bound only to 127.0.0.1, so it was closed immediately.",
+      "confirm": "The evidence lists the reasons (non-loopback listener, non-loopback connection, or table unavailable).",
+      "steps": [
+        "Do not try to work around this check; it protects your project from other computers.",
+        "The listener stays closed. Check whether another tool changed TouchDesigner networking settings, then turn on Enable MCP yourself to try once more; TDflowMCP never restarts it automatically."
+      ],
+      "docs": [],
+      "allowed_actions": [
+        "rerun_checks"
+      ]
+    },
+    "net.port.in_use": {
+      "title": "The TDflowMCP port is already in use",
+      "cause": "Another process (possibly another TDflowMCP instance) is listening on the configured port, on this computer only or on all network addresses. TDflowMCP never shares the port.",
+      "confirm": "The evidence says whether the other listener responds like TDflowMCP (this answer is unverified).",
+      "steps": [
+        "Close the other TouchDesigner project or tool using the port, or choose a different Port and confirm it.",
+        "Then pulse Repair Connection (Agents page) so Claude Code uses the new port; other agents: follow View Full Instructions."
+      ],
+      "docs": [],
+      "allowed_actions": [
+        "rerun_checks",
+        "propose_port"
+      ]
+    },
+    "fs.datadir.unwritable": {
+      "title": "Runtime data directory is not writable",
+      "cause": "TDflowMCP keeps credentials and keys in private per-user storage (%LOCALAPPDATA%\\TDflowMCP on Windows); the audit log is in .tdflowmcp next to the saved project, or in that private storage.",
+      "confirm": "The evidence names the directory in %LOCALAPPDATA% form.",
+      "steps": [
+        "Make sure your user account can write to %LOCALAPPDATA%\\TDflowMCP.",
+        "Ask your administrator if the folder is restricted."
+      ],
+      "docs": [],
+      "allowed_actions": [
+        "rerun_checks"
+      ]
+    },
+    "td.instances.multiple": {
+      "title": "More than one TDflowMCP component is enabled",
+      "cause": "Several enabled instances in one project compete for the port and confuse agents.",
+      "confirm": "The evidence shows how many are enabled.",
+      "steps": [
+        "Keep one TDflowMCP component enabled per project."
+      ],
+      "docs": [],
+      "allowed_actions": [
+        "rerun_checks"
+      ]
+    },
+    "agent.clients.unsupported": {
+      "title": "No supported coding agent selected",
+      "cause": "The selected coding agents are not yet verified with TDflowMCP.",
+      "confirm": "See Installed Agents on the Agents page.",
+      "steps": [
+        "Set Coding Agent to Claude Code for automatic setup; other agents use the short manual steps (View Full Instructions)."
+      ],
+      "docs": [],
+      "allowed_actions": [
+        "rerun_checks"
+      ]
+    },
+    "net.capability.bind_host": {
+      "title": "The listener address is not this computer only",
+      "cause": "TDflowMCP only ever binds the literal address 127.0.0.1. Any other configured address is refused.",
+      "confirm": "The evidence shows the configured address.",
+      "steps": [
+        "Reset the address to 127.0.0.1. Remote or network access is not supported."
+      ],
+      "docs": [],
+      "allowed_actions": [
+        "rerun_checks"
+      ]
+    },
+    "net.capability.no_exclusive_bind": {
+      "title": "Exclusive port binding is unavailable",
+      "cause": "Without exclusive binding another program could share the TDflowMCP port and intercept requests, so the listener is not started.",
+      "confirm": "The evidence states that exclusive binding is unavailable.",
+      "steps": [
+        "Use a supported TouchDesigner build on Windows 10/11 or macOS; report the build and OS to the TDflowMCP maintainers."
+      ],
+      "docs": [],
+      "allowed_actions": [
+        "rerun_checks"
+      ]
+    },
+    "sec.selftest.failed": {
+      "title": "A built-in security self-test failed",
+      "cause": "The component's own request-gate or binding checks did not behave as required, so MCP stays disabled.",
+      "confirm": "Pulse Run Diagnostics; the sec.selftest check stays fail.",
+      "steps": [
+        "Do not try to work around this check.",
+        "Report the TouchDesigner build and TDflowMCP version to the maintainers; use a released TDflowMCP build."
+      ],
+      "docs": [],
+      "allowed_actions": [
+        "rerun_checks"
+      ]
+    },
+    "fs.datadir.identity": {
+      "title": "This project's TDflowMCP data needs your confirmation",
+      "cause": "The project was moved, renamed or copied, its data location changed, or older TDflowMCP data was found. TDflowMCP never relocates or adopts audit data silently, so MCP stays disabled until you choose.",
+      "confirm": "Read Data Status on the component's Advanced page.",
+      "steps": [
+        "If you moved or renamed this project (or changed Data Location), pulse Confirm Move: the audit log is verified and copied (or adopted if it moved with the project); the old copy is left untouched.",
+        "If this is a copy that should be a separate project, pulse Claim As New Project: it gets a new identity and an empty audit log, and agents need to be connected again (Connect Agent).",
+        "Save the project afterwards so the component keeps its Project ID."
+      ],
+      "docs": [],
+      "allowed_actions": [
+        "rerun_checks"
+      ]
+    },
+    "audit.integrity.failed": {
+      "title": "The audit log failed verification",
+      "cause": "The hash chain or a keyed checkpoint in private storage does not match the audit database. The database may have been edited, replaced or restored from an older copy.",
+      "confirm": "View Diagnostics (Advanced page) shows which check failed.",
+      "steps": [
+        "Do not delete anything: keep the .tdflowmcp folder for investigation.",
+        "If you restored the project from a backup, restore the matching .tdflowmcp folder too, then run the checks again.",
+        "To start over, pulse Claim As New Project: the old log stays untouched and a new identity and log are created."
+      ],
+      "docs": [],
+      "allowed_actions": [
+        "rerun_checks"
+      ]
+    }
+  }
+}

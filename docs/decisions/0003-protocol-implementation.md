@@ -12,7 +12,7 @@ Implement a small protocol layer in `src/tdflowmcp/protocol/` using only the std
 - **Legacy compatibility:** the `initialize` / `notifications/initialized` flow for 2025-11-25 clients.
 - Phase 1 methods: `tools/list`, `tools/call`, `ping`. Resources and prompts come later.
 - A conformance test suite in `tests/unit/protocol/` derived from the specification's examples.
-- `jsonschema` is bundled in TD but not in plain CPython. CI therefore installs `jsonschema` from `requirements-dev.txt` as a test-only dependency. The pin is **provisional** at 4.23.0 (observed in the local 2025.32440 bundle) and must be re-pinned to the version bundled with the 2025.33230+ target, as observed in S1/S5. Runtime code must not require any other package, and must work with the TD-bundled version on the minimum supported build. If the minimum build bundles a different version, the pin follows it.
+- `jsonschema` is bundled in TD but not in plain CPython. CI therefore installs `jsonschema` from `requirements-dev.txt` as a test-only dependency. The pin is **provisional** at 4.23.0 (observed in the local 2025.32440 bundle) and matches the version bundled with the minimum build 2025.32440 (owner D10). It must follow the bundle if the minimum build changes. Runtime code must not require any other package, and must work with the TD-bundled version on the minimum supported build. If the minimum build bundles a different version, the pin follows it.
 
 ## Alternatives
 Vendor the SDK into a venv (Envoy approach); run the SDK in a sidecar process. Both remain fallbacks if conformance cost grows.
@@ -22,6 +22,8 @@ We own spec tracking. Mitigation: isolate the protocol layer behind an interface
 
 
 ## Validation gates
-- Protocol conformance unit tests pass in CI on Python 3.11 with the `jsonschema` version re-pinned to the 2025.33230+ bundle.
-- A live Claude Code session works against a disposable project, and the result is recorded in `validation-index.md`.
+- **Implemented in Phase 1B** ([record](../research/2026-11-22-phase-1b-mcp-core.md)): `src/tdflowmcp/protocol.py` (2026-07-28 stateless + legacy) and `schema.py`.
+  - **Deviation from this ADR:** runtime validation uses a stdlib JSON Schema *subset* validator rather than `jsonschema`, because plain CPython here has no `jsonschema` and nothing may be installed. Under TouchDesigner's Python a unit test checks every tool schema with the bundled `jsonschema` 4.23 and confirms both validators agree.
+- Protocol conformance unit tests pass locally on CPython 3.11.8 and TD Python 3.11.10, and both eras pass in the in-TD acceptance suite. CI runs are **not observed** (B3).
+- A live Claude Code session works against a disposable project, and the result is recorded in `validation-index.md`. **Open: Phase 1C item 21.** Running a client needs its configuration, which TDflowMCP never writes.
 - If the cost of tracking the spec becomes excessive, this ADR reopens and the SDK fallbacks are re-evaluated.

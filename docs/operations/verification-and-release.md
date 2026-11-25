@@ -34,4 +34,6 @@ Changes to policy, identity, gate, audit, exec or network require: new or update
 5. Publish a GitHub Release with assets. Verify by downloading the asset and checking the sha256.
 6. Record release evidence in `validation-index.md`.
 
+**Owner-approved v1.0.0 compatibility exception (2026-11-25):** For the initial **Windows** release only, the owner approved accepting the fully tested **TouchDesigner 2025.32440** build without running the latest TouchDesigner version. The newer-build requirement in release step 1 is waived **only for v1.0.0**. Do not claim compatibility with untested newer builds or macOS. Observed passing Windows and Ubuntu GitHub CI, a tested clean-tag binary, hash verification and owner release authorization are still mandatory. Later releases return to the normal compatibility policy unless separately approved.
+
 **Never:** release from `dev`, release an untested `.tox`, or claim compatibility with a TD build that was not tested.

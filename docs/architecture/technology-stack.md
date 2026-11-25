@@ -7,10 +7,11 @@
 | Layer | Proposed choice | Rationale | ADR |
 |---|---|---|---|
 | Host runtime | TouchDesigner's bundled Python 3.11 (verified present in local 2025.32440) | Zero install; same interpreter users already have | [0002](../decisions/0002-in-process-mcp-host.md) |
-| HTTP/WebSocket server | Web Server DAT (built-in) | Native, documented `localaddress` bind, TLS available; no server thread of our own (callback thread still to be confirmed in S1) | [0002](../decisions/0002-in-process-mcp-host.md) |
+| HTTP server (transport) | **Embedded stdlib Python HTTP server** (`http.server` + `socketserver` threads, bounded queue, main-thread `pump`) by default; Web Server DAT optional on builds with `localaddress` | Only option that binds loopback-only on 2025.32440 (S5/S6); no new dependency; responses can be deferred. Costs ≈ 1–2 frames of latency, own threads in TD; no WebSocket/TLS | [0002](../decisions/0002-in-process-mcp-host.md) |
 | MCP protocol | Hand-rolled JSON-RPC 2.0 + MCP 2026-07-28 + legacy `initialize` | SDK's deps (pydantic, uvicorn, anyio…) not bundled; PyPI may be blocked; main-thread model conflicts | [0003](../decisions/0003-protocol-implementation.md) |
-| Schema validation | `jsonschema` (4.23 observed in the local 2025.32440 bundle; **provisional** test-only CI pin, to be re-pinned to the 2025.33230+ bundle) | Already present at runtime; no new runtime dependency | [0003](../decisions/0003-protocol-implementation.md) |
+| Schema validation | `jsonschema` (4.23 observed in the local 2025.32440 bundle; test-only CI pin matching the minimum build 2025.32440) | Already present at runtime; no new runtime dependency | [0003](../decisions/0003-protocol-implementation.md) |
 | Audit + approvals + policy store | `sqlite3` (stdlib, bundled `_sqlite3.pyd`) | Transactions, queryable reports, single file | [0006](../decisions/0006-audit-store.md) |
+| Bind evidence | OS listening-socket table via `GetExtendedTcpTable` (`ctypes`, stdlib) plus non-loopback connection probes | Validated against `netstat` in S5; no subprocess or third-party package | [0002](../decisions/0002-in-process-mcp-host.md) |
 | Crypto primitives | `secrets`, `hashlib`, `hmac` (stdlib) | Token generation, hashing, constant-time compare | [0009](../decisions/0009-permission-model.md) |
 | Setup Assistant | One static HTML page + vanilla JS served at `/setup/` from embedded DATs; JSON endpoints | Available before MCP; no build, no CDN; same gate as MCP | [0010](../decisions/0010-setup-assistant-and-component-parameters.md) |
 | Component UI | TouchDesigner custom parameters (pulse/toggle/str/int/menu) | Native, self-contained; no external files at runtime | [0010](../decisions/0010-setup-assistant-and-component-parameters.md) |
@@ -30,7 +31,7 @@
 | Separate Node.js MCP server + TD bridge (8beeeaaat, Pantani pattern) | Two processes, two protocols, Node install, extra attack surface. Policy would be split from TD state | A client needs stdio only → add a thin **policy-free** stdio shim |
 | Official MCP Python SDK inside TD (Envoy pattern) | Heavy compiled deps not bundled; requires venv/PyPI; uvicorn worker thread + main-thread marshalling complexity | SDK offers a dependency-light, transport-agnostic core, or owner prefers spec-tracking over control |
 | Official SDK in a separate Python process | Same split-brain policy issue as Node; still needs deps | stdio shim requirements grow |
-| Raw sockets / `http.server` thread inside TD | Reimplements what Web Server DAT does; threads must not touch OPs | Web Server DAT spike fails (e.g. cannot stream/defer) |
+| Web Server DAT as the only transport | Cannot bind loopback-only on 2025.32440 (S5); no deferral API found | Kept as an optional transport on builds with `localaddress` if S1 shows a measurable advantage |
 | React/Vite dashboard | Requires npm and a build; work PC may block registry | Dashboard complexity outgrows vanilla modules (ADR) |
 | JSONL audit files | Simpler, but harder to query/report and to keep consistent with approvals | — |
 | OAuth 2.1 (TDMCP pattern) | Complex. Bearer tokens meet local single-user needs, and the spec permits | Clients require OAuth, or remote access is approved |

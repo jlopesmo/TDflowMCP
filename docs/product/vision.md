@@ -60,7 +60,7 @@ See [system design](../architecture/system-design.md). In short:
 ```
                      ┌──────────────── TDflowMCP.tox (inside TouchDesigner) ────────────────┐
  Custom parameters ─▶│ Component controller (state: Off / Setup / Enabled / Suspended)      │
- Browser ─/setup────▶│ Web Server DAT 127.0.0.1:9480 → gate → Setup Assistant | Dashboard   │
+ Browser ─/setup────▶│ transport 127.0.0.1:9480 → gate → Setup Assistant | Dashboard       │
  MCP client ─/mcp───▶│   → identity → MCP layer → tool registry → POLICY ENGINE → execution │
                      │ Compatibility · Agent integration · Continuity · Audit (SQLite)      │
                      └─────────────┬────────────────────────────────────────────────────────┘
