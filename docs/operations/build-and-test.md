@@ -66,9 +66,9 @@ python -I tests/td/run_td_dogfood.py --tasks handoff_start,handoff_resume   # 2A
 
 ## 4. Packaging (Phase 1C item 24)
 ```
-python -I tools/package_release.py [--commit HEAD]
+python -I tools/package_release.py [--commit HEAD] [--release-tag vX.Y.Z]
 ```
-Builds from a **clean detached worktree** of the commit (never the working tree) on TouchDesigner 2025.32440. It refuses the package unless `TDflowMCP.json` reports that commit, not dirty, TD 2025.32440 and no embedded hash mismatch. The output is `dist/TDflowMCP-<version>-<commit>/` (`TDflowMCP.tox`, `TDflowMCP.json`, `INSTALL.md` from [install.md](install.md), `SHA256SUMS`) plus a `.zip`. `dist/` is git-ignored. `.dev` versions are development packages, not releases.
+Builds from a **clean detached worktree** of the commit (never the working tree) on TouchDesigner 2025.32440. It refuses the package unless `TDflowMCP.json` reports that commit, not dirty, TD 2025.32440 and no embedded hash mismatch. The output is `dist/TDflowMCP-<version>-<commit>/` (`TDflowMCP.tox`, `TDflowMCP.json`, `INSTALL.md` from [install.md](install.md), `SHA256SUMS`) plus a `.zip`. `dist/` is git-ignored. `.dev` versions are development packages, not releases. With `--release-tag vX.Y.Z` it packages that tag and marks `TDflowMCP.json` as a release (`"release": true`, the tag recorded); it refuses unless the tag is annotated and the embedded version is exactly `X.Y.Z`. Without it, the manifest says development build.
 
 ## 5. Spikes
 `spikes/s4` (undo semantics), `spikes/s5`, `spikes/s6`. They are disposable and reproducible; see each README.

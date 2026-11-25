@@ -69,7 +69,7 @@ def build(plan):
     comp = root.create(td.baseCOMP, plan["name"])
     for tag in plan["tags"]:
         comp.tags.add(tag)
-    comp.comment = f"TDflowMCP {plan['version']} (development build, Phase 1A)"
+    comp.comment = f"TDflowMCP {plan['version']}" + (" (development build)" if ".dev" in plan["version"] else "")
     # Independent local timeline (spike S7): the component keeps running its frame callbacks, and so
     # keeps serving, while the user pauses the project timeline.
     loc = comp.create(td.baseCOMP, "local")

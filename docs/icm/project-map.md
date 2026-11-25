@@ -31,7 +31,7 @@ This map lists the repository's actual contents (Phase 1C). Planned directories 
 | `build/` | **Git-ignored** build output: `TDflowMCP.tox` (development build), `TDflowMCP.json`, `reproducibility.json`, test results | [build and test](../operations/build-and-test.md) | [security model §8](../architecture/security-model.md#8-network-posture), [setup assistant §3](../architecture/setup-assistant.md#3-compatibility-checks) |
 | `src/integrations/clients.json` | Coding-agent registry (support levels, the Claude Code automatic-setup facts, manual-fallback snippets and reasons, token-entry recipes), embedded as the `clients` DAT | [agent integration](../architecture/agent-integration.md) |
 | `src/skills/tdflow-core/SKILL.md` | TDflowMCP Skill v1.0 (authored independently), embedded and installed only by user consent | [ADR-0011](../decisions/0011-agent-integration-and-skills.md) |
-| `tools/package_release.py` | Packages the `.tox` from a clean worktree into git-ignored `dist/` (+ `INSTALL.md`, `SHA256SUMS`, zip) | [build and test](../operations/build-and-test.md) |
+| `tools/package_release.py` | Packages the `.tox` from a clean worktree into git-ignored `dist/` (+ `INSTALL.md`, `SHA256SUMS`, zip); `--release-tag` packages an annotated tag as a release | [build and test](../operations/build-and-test.md) |
 | `docs/operations/install.md` | End-user install guide (shipped in the package as `INSTALL.md`) | — |
 | `src/setup/troubleshooting.json` | Remediation entries for every warn/fail check; internal actions only | [ADR-0010](../decisions/0010-setup-assistant-and-component-parameters.md) |
 | `tests/unit/` | Unit tests for the core, including the boundary tests | [validation-index](validation-index.md) |

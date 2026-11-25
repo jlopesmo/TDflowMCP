@@ -140,7 +140,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, b"<!doctype html><script>sessionStorage.clear()</script>", "text/html")
         paired = self.headers.get("X-TDflow-CSRF") == CSRF
         if path == "/setup/api/status":
-            return self._send(200, {"state": "Enabled", "message": "MCP on (this computer only).", "version": "1.0.0rc6",
+            return self._send(200, {"state": "Enabled", "message": "MCP on (this computer only).", "version": "1.0.0",
                                     "td_build": "2025.32440", "url": "http://127.0.0.1:9480/setup/", "port": 9480,
                                     "portstatus": "in use by TDflowMCP", "gate": "SERVING", "mcp": "on",
                                     "endpoint": "http://127.0.0.1:9480/mcp", "summary": "Ready", "checks": []})
@@ -156,7 +156,7 @@ class Handler(BaseHTTPRequestHandler):
                                     "agents": len(STUB.agents), "approvals_pending": 0, "last_seq": 120,
                                     "audit": {"events": 120, "chain_ok": True, "checkpoints_ok": True, "ok": True,
                                               "unverified_tail": 0}, "storage": {"location": "project folder"},
-                                    "version": "1.0.0rc6", "td_build": "2025.32440"})
+                                    "version": "1.0.0", "td_build": "2025.32440"})
         if path == "/api/capabilities":
             return self._send(200, STUB.view())
         if path == "/api/agents":

@@ -8,7 +8,7 @@ This file lists every check that exists, how to run it, and its last **executed 
 |---|---|---|---|
 | Doc checker | `python tools/check_docs.py` | Required files, relative links/images + anchors, ADR status vs index, privacy patterns in `.md/.py/.yml/.yaml/.json/.txt` | See runs below |
 | Doc checker unit tests | `python -m unittest discover -s tests -t .` | `tools/check_docs.py` | See runs below |
-| CI workflow `docs.yml` | GitHub Actions on push to `dev`/`main` and on every pull request | Doc checker + all unit tests on Python 3.11, Ubuntu + Windows | **Observed 2026-11-25:** [PR #1 CI run 42](https://github.com/jlopesmo/TDflowMCP/actions/runs/45663833839) failed in unit tests on Ubuntu (3 Windows-helper-path test errors) and Windows (1 directory 8.3-alias assertion); documentation and secret scan passed on both. Corrections on `dev` (`4275b8a`, `fdbd857`); fresh CI conclusions pending. Earlier historical inability to observe CI is superseded. |
+| CI workflow `docs.yml` | GitHub Actions on push to `dev`/`main` and on every pull request | Doc checker + all unit tests on Python 3.11, Ubuntu + Windows | **Observed 2026-11-25:** [PR #1 CI run 42](https://github.com/jlopesmo/TDflowMCP/actions/runs/45663833839) failed in unit tests on Ubuntu (3 Windows-helper-path test errors) and Windows (1 directory 8.3-alias assertion); documentation and secret scan passed on both. Corrections on `dev` (`4275b8a`, `fdbd857`). **Passing since:** runs #51–#55, and the release commits ([v1.0.0 release](#2026-11-25-v100-release)). Earlier historical inability to observe CI is superseded. |
 | Independent documentation review | separate agent, read-only | All docs + tooling | Review 1 and review 2, see runs below |
 | Core unit tests (`tests/unit/`) | `python -m unittest discover -s tests -t .` (same command) | `net.bindverify`, `net.oslisteners`, `net.pyhttp` (real loopback sockets, ephemeral ports), `gate`, `compat`, troubleshooting data, `td`-free/no-subprocess boundaries | See runs below |
 | TD bundled-Python parity | `"C:\Program Files\Derivative\TouchDesigner.2025.32440\bin\python.exe" -m unittest discover -s tests -t .` | The same suite on TD's interpreter (no TouchDesigner process) | See runs below |
@@ -29,7 +29,7 @@ This file lists every check that exists, how to run it, and its last **executed 
 | One-click connection, simulated configuration | `python -I -m unittest discover -s tests -t .` (`tests/unit/test_connect.py`) | Claude Code plan/apply/undo on temporary files: preservation, concurrent writers, invalid, linked and surrogate files, backups, strict ownership. DPAPI vault. The **real Windows helper through `cmd.exe`** against a loopback stand-in: right project, squatter without proof, wrong key, other project, malformed answers, a PowerShell 7 parent | See runs below |
 | One-click connection, real clients (D22) | `python -I tests/td/run_td_native_tests.py [--no-live]` | Drop-in → diagnostics → Auto → Connect Agent → review/cancel/approve with a **disposable client home**. The Claude Code CLI and the VS Code extension's bundled engine use the written user-scope entry (`mcp list`). A live `claude -p` session with the same entry and no token in its environment. Suspend/resume; save + restart; reconnect without setup; revoke; repair; damaged file; Disconnect; token leak scan | See runs below |
 | Visual review incl. the real dialog | `python -I tests/td/run_td_ux_screens.py --capture tests/td/capture_td.ps1` | Captures the disposable TouchDesigner's own windows (parameter pages, the Connect Agent dialog); `screens.*` checks that the real dialog opens, TouchDesigner stays responsive and its button approves | See runs below |
-| Release package | `python -I tools/package_release.py` | Clean-worktree build on 2025.32440; commit, dirty and hash checks; `dist/` | See runs below |
+| Release package | `python -I tools/package_release.py [--release-tag vX.Y.Z]` | Clean-worktree build on 2025.32440; commit, dirty and hash checks; with a tag: annotated tag and exact version, manifest marked as a release; `dist/` | See runs below |
 | Policy branch coverage, S1, live sessions with other clients, macOS, the owner's real profile with the VS Code chat UI | — | — | **Not executed** (no coverage tool; S1 optional; Codex/Cursor/VS Code manual fallback documented only; no Mac; the real-profile acceptance needs the owner's own approval in TouchDesigner) |
 
 ## Runs
@@ -217,6 +217,12 @@ Package zip `dbfbebe2…`. Not published. CI: not observed |
 - Visual review 12/12. Browser checks 179/179.
 
 Package zip `25733376…`. Not published. CI: not observed |
+| 2026-11-25 | TouchDesigner 2025.32440 + Claude Code CLI 2.1.289 + VS Code extension engine 2.1.332 + Microsoft Edge headless (candidate tox `0336f24343721bfd…`, source digest `348683a0…`, the 1.0.0 tree on top of `5f86345` before the release commit; reproducible: source digest equal, expanded diff `.build`, `local/time/cframe.ts`) | **1.0.0 release-commit tree: version label only (rc6 → 1.0.0)** | Unit 496 pass on CPython 3.11.8 (3 skipped) and on TD Python 3.11.10 (2 skipped). 1B 89/89 + 246/246; 1A 59/59 + 71/71; gate (`--only gate,gate_crash,gate_restart,perf_worker,gate_bench`) 48/48 + 80/80; memory 52/52 + 182/182; onboarding 7/7 + 47/47 (live session, Skill 1.6 = expected 1.6).
+- Native 90/90 + 79/79 (live session `RESULT role=builder created=yes outside=denied`; CLI and extension engine `✔ Connected`).
+- Visual review 12/12 (`screens.*`, `signin.*`); the captured main page shows Version `1.0.0 (tools 1)`. Browser checks 179/179.
+- The counts equal the rc6 runs above.
+
+`check_docs` 0 problems; `scan_secrets` 0 findings. No independent review: the change is the version label, the node comment, the package manifest flag and documentation; no security, policy or UI code changed |
 
 ## Local environment facts (file inspection only, 2026-11-22)
 
@@ -238,3 +244,11 @@ Package zip `25733376…`. Not published. CI: not observed |
 - **Observed passing CI** on exact dev head `341094011c0a74074635fadc6d43cd9bb2d1795f`: [push run #51](https://github.com/jlopesmo/TDflowMCP/actions/runs/45665928515) and [PR run #52](https://github.com/jlopesmo/TDflowMCP/actions/runs/45665945561), both **success**, with Windows and Ubuntu jobs. Docs and secret checks pass; unit tests pass following fixes `4275b8a` and `fdbd857`. Earlier run #42 failed and remains historical evidence.
 - **Owner compatibility decision D26:** v1.0.0 is scoped to **Windows TouchDesigner 2025.32440** only. The owner explicitly waives the newer-build test for **this initial release only**. Newer builds and macOS are **unverified**. All other release checks still apply; never claim unobserved tests.
 - Public repo and [release PR #1](https://github.com/jlopesmo/TDflowMCP/pull/1) confirmed. GitHub default branch still dev. No official release asset or tag yet. Published package must come from clean tagged main and be verified independently.
+
+## 2026-11-25 v1.0.0 release
+
+Steps are listed in the order they were executed. A step that is not listed was **not executed**.
+
+- **`main` after PR #1:** `git fetch` showed `origin/main` = `5f8634552d108883515e52ecfe64903b08602feb`, a merge of `dev` (`326a1c1`) with an identical tree. Local `main` and `dev` were fast-forwarded to it; the working tree was clean.
+- **Post-merge CI observed:** [push run #55](https://github.com/jlopesmo/TDflowMCP/actions/runs/45666920078) on `5f86345`: **success**; the `ubuntu-latest` and `windows-latest` jobs each passed the documentation check, the secret scan and the unit tests (read from the public Actions API).
+- **Release-commit tree tested** before the commit: see the 1.0.0 row in the runs table above (candidate tox `0336f243…`, source digest `348683a0…`).

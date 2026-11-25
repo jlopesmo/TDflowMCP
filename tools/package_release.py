@@ -1,6 +1,6 @@
 """Package TDflowMCP.tox from a clean checkout (Phase 1C item 24). Runs OUTSIDE TouchDesigner.
 
-    python -I tools/package_release.py [--commit HEAD]
+    python -I tools/package_release.py [--commit HEAD] [--release-tag vX.Y.Z]
 
 1. Creates a detached git worktree of the commit under .tmp/ (the working tree is never used, so
    uncommitted changes cannot leak into a package).
@@ -10,6 +10,8 @@
 4. Writes dist/TDflowMCP-<version>-<short commit>/ with TDflowMCP.tox, TDflowMCP.json, INSTALL.md,
    SHA256SUMS, and a .zip of that folder. dist/ is git-ignored. Removes the worktree afterwards.
 Development versions (".dev") are packaged as development builds, never as releases.
+``--release-tag vX.Y.Z`` packages that tag and marks TDflowMCP.json as a release. It is refused unless the tag is
+annotated and the embedded version is exactly X.Y.Z (no candidate or development suffix).
 """
 from __future__ import annotations
 
@@ -39,7 +41,13 @@ def sha_file(p):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--commit", default="HEAD")
+    ap.add_argument("--release-tag", default="")
     a = ap.parse_args()
+    tag = a.release_tag
+    if tag:
+        if git("cat-file", "-t", f"refs/tags/{tag}") != "tag":
+            raise SystemExit(f"refusing to package: {tag} is not an annotated tag")
+        a.commit = f"refs/tags/{tag}^{{commit}}"
     commit = git("rev-parse", a.commit)
     short = commit[:10]
     wt = os.path.join(ROOT, ".tmp", f"release-{short}")
@@ -66,9 +74,13 @@ def main():
         tox = os.path.join(wt, "build", "TDflowMCP.tox")
         if sha_file(tox) != meta.get("sha256"):
             problems.append("tox sha256 does not match TDflowMCP.json")
+        version = meta["version"]
+        if tag and tag != f"v{version}":
+            problems.append(f"tag {tag} does not match the embedded version {version}")
+        if tag and not version.replace(".", "").isdigit():
+            problems.append(f"version {version} is not a final release version")
         if problems:
             raise SystemExit("refusing to package: " + "; ".join(problems))
-        version = meta["version"]
         name = f"TDflowMCP-{version}-{short}"
         out = os.path.join(ROOT, "dist", name)
         if os.path.exists(out):
@@ -76,6 +88,11 @@ def main():
         os.makedirs(out)
         shutil.copyfile(tox, os.path.join(out, "TDflowMCP.tox"))
         meta["package"] = {"name": name, "development_build": ".dev" in version, "from_clean_worktree": True}
+        if tag:
+            meta["release"] = True
+            meta["note"] = (f"Release build from the annotated tag {tag}. Verified only on Windows with "
+                            f"TouchDesigner {MIN_TD}.")
+            meta["package"]["tag"] = tag
         with open(os.path.join(out, "TDflowMCP.json"), "w", encoding="utf-8", newline="\n") as f:
             json.dump(meta, f, indent=2)
         shutil.copyfile(os.path.join(wt, "docs", "operations", "install.md"), os.path.join(out, "INSTALL.md"))

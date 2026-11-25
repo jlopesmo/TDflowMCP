@@ -30,7 +30,7 @@ Changes to policy, identity, gate, audit, exec or network require: new or update
 1. All gates green on `dev`, with **observed** CI evidence. In-TD tests are run on the **declared minimum TD build** and the latest TD build, with build numbers recorded.
 2. Changelog and `current-state.md` updated. Version bumped (SemVer).
 3. Owner approves the PR `dev → main`.
-4. Tag `vX.Y.Z` on `main`. Build `.tox` from the tag on a clean checkout. Generate `TDflowMCP.json` (version, TD build, sha256).
+4. Tag `vX.Y.Z` (annotated) on `main`. Build `.tox` from the tag on a clean checkout: `python -I tools/package_release.py --release-tag vX.Y.Z`. It generates `TDflowMCP.json` (version, TD build, sha256, tag, `"release": true`) and `SHA256SUMS`.
 5. Publish a GitHub Release with assets. Verify by downloading the asset and checking the sha256.
 6. Record release evidence in `validation-index.md`.
 

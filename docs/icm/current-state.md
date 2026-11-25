@@ -3,7 +3,7 @@
 **Observed 2026-11-23 (re-verified after a PC restart), branch `dev`; the one-click connection (1.0.0rc3, owner D22) was observed 2026-11-24.** Phase 1C (agent onboarding) is complete in the development build, together with the ADR-0006 audit worker and project-local storage** (owner D13). **Phase 2A increment 1 (project memory, checkpoints, verified handoffs) is implemented and verified in TD** (owner D17). A live Claude Code session connected using only the generated instructions, and the packaged component passes its in-TouchDesigner acceptance suites on **2025.32440**. Phases 1A and 1B are re-verified on the same build. **Phase 2A increments 2 and 3 are implemented and verified in TD** (restart persistence and identity; repository-mode memory with both remaining ADR-0013 gates), and the earlier unexplained hang is explained and handled (a minimized window). This file records evidence only. Plans live in the [roadmap](roadmap.md).
 
 ## Verified
-- **Repository:** private `jlopesmo/TDflowMCP`. `main` = `066dbd0` (Phase 0 foundation), **unchanged**. Development continues on `dev`.
+- **Repository:** public `jlopesmo/TDflowMCP` (owner direction 2026-11-25, [ADR-0008](../decisions/0008-upstream-reuse-policy.md)). `main` was `066dbd0` (Phase 0 foundation) until PR #1 merged the frozen rc6 state as `5f86345` on 2026-11-25; the release commits follow ([Release 1.0.0](#release-100--2026-11-25)). Development continues on `dev`.
 - **ADRs:**
   - 0002, 0003, 0006, 0007, 0009, 0010, 0012 and 0013: Conditionally Accepted, with their gates recorded.
   - **0011: Conditionally Accepted** (owner D13); its 1C gates passed.
@@ -177,11 +177,11 @@
   - per-grant `allowed_op_types` and `param_denylist` editing (grants themselves are editable);
   - task, decision and ICM record types (`tdflow_memory_get/put`), archiving (adding an agent-writable record type reopens owner condition D18);
 - **Not yet:**
-  - a 1.0 release (packages are `.dev` development builds);
+  - a published 1.0 download (the version is 1.0.0; tag and publication are tracked under [Release 1.0.0](#release-100--2026-11-25));
   - dev-mode file-synced DATs.
 
 ## Not observed / unverified
-- **CI:** no GitHub Actions run has been observed for any commit ([B3](roadmap.md#open-blockers-and-owner-actions)).
+- **CI before 2026-11-25:** no GitHub Actions run was observed for the commits recorded below as "CI: not observed". Runs have been observed since then ([validation index](validation-index.md), [Release 1.0.0](#release-100--2026-11-25)).
 - **Other clients:** Codex CLI, Cursor and VS Code Copilot connections are documented manual fallbacks only, with no live test. Client facts were re-checked against vendor documentation on 2026-11-24 ([client audit](../research/2026-11-24-one-click-connection.md#client-audit)).
 - **The Capabilities page on the owner's real profile** (rc6): automated with a stub API in headless Edge and against the real component API in the 1B suite; not opened by the owner yet.
 - **The owner's real profile with the Claude Code VS Code chat UI** (including pasting the rc5 Copy Agent Prompt there; the same text was validated with the Claude Code CLI): not executed by an agent. It requires the owner's own approval in TouchDesigner ([checklist](../operations/release-candidate-1.0.md)). The extension's engine is validated against the written configuration.
@@ -218,6 +218,8 @@
 - `0dd5bfd`: **Phase 2B increment 1** (approvals with identical re-call, the operator role, the `/ui/` governance dashboard), review 13. Pushed to `origin/dev` and observed with `git ls-remote` (`refs/heads/dev` = `0dd5bfd…`, `refs/heads/main` = `066dbd0…`, so `main` is unchanged). Verified on candidate `84f76d69…` built from the pre-commit tree; a clean build of the commit (tox `788925fa…`, `source_dirty` false) has the same source digest `14dac47f…`. No package was built. This record was added by the follow-up commit. CI: **not observed**.
 
 ## Next (owner direction D22: one-click connection; D20: finish TDflowMCP)
+The list below was written for rc6. Items 0, 2 and 4 are overtaken by [Release 1.0.0](#release-100--2026-11-25); the optional owner checks, macOS and the open owner questions remain.
+
 0. **1.0.0rc6** ([checklist](../operations/release-candidate-1.0.md)), **feature-frozen**: rc5 plus the Capabilities page, the main-page order and the sign-in codes (D25). The optional owner check of the Capabilities page on the real profile. rc5: Copy Agent Prompt (D24). The owner's remaining acceptance steps on the real profile, now including pasting the copied prompt into a VS Code Claude Code chat. The restart finding is explained and fixed; everything else is automated. **macOS** validation. Owner decision: OAuth 2.1, the route to automatic setup for Codex, Cursor and Copilot ([ADR-0015](../decisions/0015-consent-based-client-connection.md#alternatives)).
 1. **Phase 3 and 4:** done on `dev` (see above), except host-project source-first and file snapshots outside the project.
 2. **1.0 release candidate** `1.0.0rc1` (commit `348360a`, package `TDflowMCP-1.0.0rc1-348360a56b`, all suites pass on the packaged `.tox`): [checklist](../operations/release-candidate-1.0.md), awaiting the owner's acceptance. Dogfood round 3 (Phase 3/4 tools) passed.
@@ -239,3 +241,13 @@
 - **CI observed passing:** GitHub Actions [PR #52](https://github.com/jlopesmo/TDflowMCP/actions/runs/45665945561) and [push #51](https://github.com/jlopesmo/TDflowMCP/actions/runs/45665928515), both Windows and Ubuntu; docs checker, secret scan and unit tests pass after portable test fixes. Latest documentation-only head must also pass before merge.
 - **Release artifact:** tagged-source v1.0.0 binary and checksums still require a clean local TouchDesigner build, package tests, GitHub Release asset publication and independent download verification. No binary has yet been published; release receipts belong in the validation index.
 - **GitHub:** public repository; PR #1 proposes dev into main; default branch remains dev pending post-merge settings change. Public-source licensing remains deferred, but owner explicitly authorizes binary sharing for evaluation. `main` remains unchanged until actual merge.
+
+## Release 1.0.0 — 2026-11-25
+
+The two sections above are earlier checkpoints of the same day; this one supersedes their "pending" items. Evidence is in the [validation index](validation-index.md#2026-11-25-v100-release).
+
+- **Merged:** PR #1 merged `dev` into `main` as `5f86345` (trees identical). Post-merge CI [run #55](https://github.com/jlopesmo/TDflowMCP/actions/runs/45666920078) passed on Windows and Ubuntu.
+- **Version 1.0.0** (GitHub Issue #2): `1.0.0rc6` with the final version label. Also changed: the status API's `phase` (`1.0`), the component's node comment, the package manifest's release flag (`package_release.py --release-tag`), and the install guide's evaluation terms. No feature, tool, permission or security behaviour changed; the 1.0 feature freeze (D25) holds.
+- **Verified on the release-commit tree** (TouchDesigner 2025.32440, Windows): 496 unit tests on both Pythons; 1B, 1A, gate, memory, onboarding and native suites, the visual review and the browser checks all pass with the same counts as rc6; the Version parameter shows `1.0.0 (tools 1)`.
+- **Compatibility claimed:** Windows with TouchDesigner 2025.32440 only (owner D26). Newer builds and macOS: not verified.
+- **Not yet done at this commit:** CI on this commit, the annotated tag `v1.0.0`, the clean build from the tag, publication of the GitHub Release, verification of the public download, and the default-branch change. Each is recorded here and in the validation index only once observed.

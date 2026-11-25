@@ -1,6 +1,17 @@
 # TDflowMCP 1.0 release candidate: changelog, compatibility and acceptance checklist
 
-**Current candidate: `1.0.0rc6`** (owner D25: the **Capabilities** page and permission editing, the main-page order, the Browser sign-in codes; [record](../research/2026-11-25-capabilities-and-final-polish.md), [ADR-0016](../decisions/0016-capabilities-page-and-permission-editing.md)). **The 1.0 feature set is frozen** with this candidate ([roadmap](../icm/roadmap.md#10-feature-freeze-owner-d25-2026-11-25)). It follows `1.0.0rc5` (owner D24: **Copy Agent Prompt**, a state-aware first message for a new coding-agent chat; [record](../research/2026-11-24-copy-agent-prompt.md)), which followed `1.0.0rc4`. rc4 was owner D23: the rc3 restart finding explained and fixed, automated acceptance, UX-08/UX-09, review 20; [record](../research/2026-11-24-rc4-restart-and-acceptance.md)). It follows `1.0.0rc3` (one-click agent connection, owner D22, [ADR-0015](../decisions/0015-consent-based-client-connection.md)), whose hands-on owner acceptance passed connection, real agent work and suspension, and found the restart display issue. It replaces `1.0.0rc2` (`132e8c3`, package `TDflowMCP-1.0.0rc2-132e8c3317`, tox `dfabfaca…`); the owner's acceptance of rc2 found that first-time users still handled tokens, environment variables and MCP configuration. Commit and package hashes for rc3 are in the [validation index](../icm/validation-index.md) and [current state](../icm/current-state.md#commit-record).
+## Release 1.0.0 (2026-11-25)
+**Version `1.0.0` is `1.0.0rc6` with the final version label** (owner D26: Windows and TouchDesigner 2025.32440 only, for public evaluation). No feature, tool, permission or security behaviour changed. Changes from rc6:
+- the version is `1.0.0` (the Version parameter shows `1.0.0 (tools 1)`; `tdflow_whoami` reports `server_version` `1.0.0`), and the status API's `phase` is `1.0`;
+- the component's node comment is `TDflowMCP 1.0.0` (it said "development build, Phase 1A");
+- `tools/package_release.py --release-tag v1.0.0` marks the packaged `TDflowMCP.json` as a release and records the tag (it said "Development build" for every package);
+- the install guide states the evaluation terms and the single verified combination instead of "release candidate";
+- two CI-only test corrections made after rc6 (`4275b8a`, `fdbd857`), with no runtime change.
+
+Evidence for each step (tests, CI, tag, package hashes, publication) is in the [validation index](../icm/validation-index.md) and the [current state](../icm/current-state.md#release-100--2026-11-25).
+
+## Candidate history
+**Last candidate: `1.0.0rc6`** (owner D25: the **Capabilities** page and permission editing, the main-page order, the Browser sign-in codes; [record](../research/2026-11-25-capabilities-and-final-polish.md), [ADR-0016](../decisions/0016-capabilities-page-and-permission-editing.md)). **The 1.0 feature set is frozen** with this candidate ([roadmap](../icm/roadmap.md#10-feature-freeze-owner-d25-2026-11-25)). It follows `1.0.0rc5` (owner D24: **Copy Agent Prompt**, a state-aware first message for a new coding-agent chat; [record](../research/2026-11-24-copy-agent-prompt.md)), which followed `1.0.0rc4`. rc4 was owner D23: the rc3 restart finding explained and fixed, automated acceptance, UX-08/UX-09, review 20; [record](../research/2026-11-24-rc4-restart-and-acceptance.md)). It follows `1.0.0rc3` (one-click agent connection, owner D22, [ADR-0015](../decisions/0015-consent-based-client-connection.md)), whose hands-on owner acceptance passed connection, real agent work and suspension, and found the restart display issue. It replaces `1.0.0rc2` (`132e8c3`, package `TDflowMCP-1.0.0rc2-132e8c3317`, tox `dfabfaca…`); the owner's acceptance of rc2 found that first-time users still handled tokens, environment variables and MCP configuration. Commit and package hashes for rc3 are in the [validation index](../icm/validation-index.md) and [current state](../icm/current-state.md#commit-record).
 
 ## Changes in rc6
 - **Capabilities** tab on the dashboard. It shows:
@@ -50,7 +61,7 @@
 - Install guide rewritten for the TouchDesigner-first flow.
 - See the [record](../research/2026-11-23-first-run-ux.md).
 
-**Status:** candidate for the owner's acceptance (owner D20, D21). This is **not a release**: nothing is merged to `main`, tagged or published. The release steps that remain are the owner's ([verification and release §4](verification-and-release.md#4-release-proposed)).
+**Status:** rc6 was accepted for release by the owner (D26) and merged to `main` through PR #1 (`5f86345`). The release steps follow [verification and release §4](verification-and-release.md#4-release-proposed); what has been done is in the checklist below.
 
 ## Changelog (from the Phase 0 foundation on `main`, `066dbd0`)
 - **Component (1A):**
@@ -142,7 +153,9 @@ No other compatibility is claimed.
 - [x] **Observed GitHub CI:** final pre-authorization head `34109401` passed on Windows and Ubuntu: [push run #51](https://github.com/jlopesmo/TDflowMCP/actions/runs/45665928515) and [PR run #52](https://github.com/jlopesmo/TDflowMCP/actions/runs/45665945561). Earlier failing platform-specific unit tests were corrected without changing MCP runtime.
 - [x] **v1.0.0 exception — latest TD build not tested:** owner approved a Windows-only initial release whose **only verified TouchDesigner version is 2025.32440**. Release policy exception is recorded in [verification and release](verification-and-release.md#4-release-proposed). Newer builds and macOS remain unverified, not claimed compatible.
 - [x] Owner approved release preparation, public evaluation distribution and Windows-only compatibility exception (2026-11-25).
-- [ ] **Publication remains:** confirm CI on final docs head, merge PR `dev → main`, tag v1.0.0 on main, clean-build and validate the final-version `.tox`, upload GitHub Release assets, verify the downloaded SHA-256, update public README/download guidance and record receipt.
+- [x] CI on the final docs head (`326a1c1`: runs #53 and #54) and PR #1 merged `dev → main` as `5f86345`; post-merge [run #55](https://github.com/jlopesmo/TDflowMCP/actions/runs/45666920078) passed on Windows and Ubuntu.
+- [x] 1.0.0 (tree): version label `1.0.0`; unit tests, every in-TD suite, the visual review and the browser checks pass on the candidate build `0336f243…` with the same counts as rc6 (validation index).
+- [ ] **Publication remains:** CI on the release commit, the annotated tag `v1.0.0` on `main`, the clean build from the tag and its validation, the GitHub Release assets, verification of the downloaded SHA-256, the README download link and the receipt in the ICM.
 
 ## Known limits carried into 1.0
 These are listed in their records ([Code Mode](../research/2026-11-23-phase-3-code-mode.md#limits), [experiments](../research/2026-11-23-phase-3-experiments.md#limits), [Phase 4](../research/2026-11-23-phase-4-extensions.md#limits), [minimized window](../research/2026-11-23-phase-2b-increment-2.md#limits)):

@@ -5,11 +5,14 @@ through MCP. It works within the permissions you grant and keeps a tamper-eviden
 computer (127.0.0.1). It never installs software, and it changes your agent's configuration only after you approve
 the exact change in TouchDesigner.
 
-**This is a release candidate.** Use it in projects you can afford to experiment with.
+**Version 1.0.0, provided for evaluation.** It is verified only on **Windows** with TouchDesigner **2025.32440**.
+Newer TouchDesigner builds and macOS are not verified. Try it first in a copy of a project, or in one you can afford
+to experiment with. The repository has no open-source license yet: you may download and evaluate the component, but
+that does not grant rights to redistribute, modify or commercially reuse it.
 
 ## Requirements
-- TouchDesigner **2025.32440** or newer. Older builds get a warning and may enable MCP only if every security
-  self-test passes.
+- **Windows** and TouchDesigner **2025.32440**, the only verified combination. Newer builds may work but are not
+  tested. Older builds get a warning and may enable MCP only if every security self-test passes.
 - A coding agent with Streamable HTTP MCP support.
   - **Claude Code** (CLI or the VS Code extension) is set up automatically and is tested on Windows. macOS automatic
     setup is implemented but not tested yet.
