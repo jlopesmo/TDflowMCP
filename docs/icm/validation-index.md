@@ -290,4 +290,25 @@ Steps are listed in the order they were executed. A step that is not listed was 
   - the public API lists the four assets as `uploaded`, with sizes equal to the local files and **GitHub's own SHA-256 digests equal to the four hashes above**;
   - each asset URL answers with the anonymous download redirect (HTTP 302).
 - **Byte download of the assets: not executed from this network.** The network's gateway (Cisco Umbrella) intercepts `release-assets.githubusercontent.com` with a certificate this computer does not trust, so `curl`, Python and PowerShell refused the connection; certificate checking was not bypassed. **Owner decision (2026-11-25):** the owner downloads `TDflowMCP.tox` on another network or device and compares its SHA-256 with `466a1b5e…`. Until that is reported, the download check is **not observed** and Issue #2 stays open.
+- **CI on the receipt commit `b5db611`** (added afterwards): [push run #58](https://github.com/jlopesmo/TDflowMCP/actions/runs/45676114243) (`dev`) and [push run #59](https://github.com/jlopesmo/TDflowMCP/actions/runs/45676120619) (`main`), both **success** on `ubuntu-latest` and `windows-latest`.
 - **Repository settings observed through the public API:** the default branch is `main` (it was `dev` at the start of this work; the change was not made in this work). `main` is protected: force pushes and deletion are disabled, also for administrators, with no pull-request or status-check requirement (applied in this work at the owner's request).
+
+## 2026-11-25 1.0.1rc1 (one-click Codex): commit, package, CI
+
+Steps in the order they were executed. `main` (`b5db611`), the tag `v1.0.0` (`33af082`) and the published release were not touched: `git ls-remote` after every push showed them unchanged.
+
+- **Commit `2bb48e5390ab867dbe6930cb8a6e7260790818fc`** on `dev`: the implementation, tests, reviews and documents (the tree tested in the runs table above, candidate `b37e1d94…`). Pushed to `origin/dev` only.
+- **Package** `python -I tools/package_release.py --commit HEAD` (clean detached worktree, TouchDesigner 2025.32440): `dist/TDflowMCP-1.0.1rc1-2bb48e5390`.
+
+  | File | SHA-256 |
+  |---|---|
+  | `TDflowMCP.tox` | `95e53f84ec961f21a771eac3b261c5bcfd98ebaf0816d775ce0c6e14de92329e` |
+  | `TDflowMCP.json` | `b45f1a160ebc0938e9d2621bd45a5a4937feed150907d706d943755719b71be3` |
+  | `INSTALL.md` | `a0cbf4396d733e7766ff11a30ced73efbcc843e1c57444f85171a2f31f92c3bd` |
+  | zip | `8aee93bc5fc3c40833691c689dcaafb8a8595ae88ba79d66c2bb01befba58199` |
+
+  `TDflowMCP.json`: version `1.0.1rc1`, `source_commit` `2bb48e5…`, `source_dirty` false, no embedded hash mismatches, source digest `486e33beb42af628f6acc75fc4f37a7e88db5415701f452e9947dc7b9ec69600` (equal to the tested candidate), `release` false (a candidate; not published).
+- **Suites on the packaged `.tox`** (`95e53f84…`; TouchDesigner 2025.32440, Codex CLI 0.160.0, Codex VS Code extension 26.1120.50957 with engine 0.171.0-alpha.13.2, Claude Code CLI 2.1.289, VS Code extension engine 2.1.332, Edge headless): **Codex 55/55 + 64/64** (both engines; Connected Agents `Codex 0.160.0 · 0 s`; Claude Code `✓ Connected` next to it four times); 1B 89/89 + 246/246; 1A 59/59 + 71/71; gate (`--only gate,gate_crash,gate_restart,perf_worker,gate_bench`) 48/48 + 80/80; memory 52/52 + 182/182; onboarding 7/7 + 47/47; native 90/90 + 79/79; visual review 16/16 (captures looked at: the chooser's `Claude`, `Codex`, `Cancel` buttons and the Codex plan dialog are complete); browser checks 179/179. The result files record `tox_sha256` `95e53f84…`. The owner's real `~/.codex/config.toml` is unchanged (same hash, last modified 2026-11-18).
+- **CI [run #60](https://github.com/jlopesmo/TDflowMCP/actions/runs/45700728649) on `2bb48e5`: failed.** `windows-latest` passed everything; `ubuntu-latest` passed the documentation check and the secret scan and **failed the unit tests**. The log could not be read: GitHub serves job logs only to signed-in users.
+- **Commit `4a333ae`**: `tools/ci_unittest.py` runs the same test discovery in CI and publishes each failure as an annotation, which is public. **[Run #61](https://github.com/jlopesmo/TDflowMCP/actions/runs/45701884009) on `4a333ae`: failed the same way, and named the cause:** one error, `tests.unit.test_connect_codex.EntryTests.test_ownership`, `BAD_VAULT_PATH`: the test passed the Windows path `C:\elsewhere` to the helper builder, which is not an absolute path on Linux. A test assumption, not a product defect (Codex setup is Windows-only, and the product refuses a relative path by design).
+- **Fix:** the test uses a temporary-folder path. Committed together with this record; the CI result of that commit is recorded by the commit after it.

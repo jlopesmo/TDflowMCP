@@ -36,7 +36,7 @@ No other compatibility is claimed. The minimum Codex version for the header help
 - [x] Codex capability verified on the installed clients before any claim: both engines run `http_headers_helper`; how they run it was observed ([record](../research/2026-11-25-codex-one-click-connection.md#what-codex-documents-and-what-was-observed)).
 - [x] Unit tests (537), doc checker and secret scan pass on the candidate tree (validation index).
 - [x] Every in-TD suite, the Codex suite with real engines (55/55 + 64/64), the visual review and the browser checks pass on the candidate build `b37e1d94…` (validation index).
-- [ ] The same on the **packaged** `.tox`, built from a clean worktree of the candidate commit (validation index).
+- [x] The same on the **packaged** `.tox`, built from a clean worktree of the candidate commit `2bb48e5` (`dist/TDflowMCP-1.0.1rc1-2bb48e5390`, tox SHA-256 `95e53f84ec961f21a771eac3b261c5bcfd98ebaf0816d775ce0c6e14de92329e`, the same source digest as the tested candidate) (validation index).
 - [x] Independent security review 23 (0 High; 1 Medium and 8 Low fixed, 1 Low accepted) and a usability review (High and Medium addressed) ([record](../research/2026-11-25-codex-one-click-connection.md#independent-review-23-security)).
 - [ ] GitHub CI on the candidate commit, Windows and Ubuntu (validation index).
 - [ ] **Owner: Codex in VS Code on the real profile** (**not executed by an agent**: it needs your approval in TouchDesigner and a Codex chat). About five minutes, in a copy of a project or one you can experiment with:

@@ -165,7 +165,8 @@ class EntryTests(unittest.TestCase):
         self.assertFalse(C.codex_is_ours(dict(mine, url="http://127.0.0.1:9480/other"), mine))
         self.assertFalse(C.codex_is_ours(dict(mine, url="http://10.0.0.5:9480/mcp"), mine))
         self.assertFalse(C.codex_is_ours("x", mine))
-        self.assertFalse(C.codex_is_ours(C.codex_entry("win32", 9480, "codex", r"C:\elsewhere"), mine))
+        elsewhere = os.path.join(tempfile.gettempdir(), "elsewhere")       # absolute on every platform (CI: Ubuntu)
+        self.assertFalse(C.codex_is_ours(C.codex_entry("win32", 9480, "codex", elsewhere), mine))
 
 
 class ConfigTests(unittest.TestCase):
