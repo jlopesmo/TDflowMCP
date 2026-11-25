@@ -54,6 +54,11 @@ class ToolHost:
     def call_tool(self, name: str, arguments: dict, client_info: Optional[dict], meta: Optional[dict] = None) -> dict:
         raise NotImplementedError  # pragma: no cover
 
+    def hello(self, client_info: dict) -> None:
+        """Legacy-era handshake: the client's self-declared name and version (shown as the connected client, never
+        trusted). Legacy requests carry no clientInfo afterwards, so this is where it is learned (ADR-0017: Codex)."""
+        return None
+
 
 def handle(body: bytes, headers: Dict[str, str], host: ToolHost) -> Reply:
     h = {k.lower(): v for k, v in (headers or {}).items()}
@@ -82,6 +87,12 @@ def handle(body: bytes, headers: Dict[str, str], host: ToolHost) -> Reply:
     if method == "initialize":                                   # legacy era handshake
         req = params.get("protocolVersion")
         pv = req if req in LEGACY else LEGACY[0]
+        ci = params.get("clientInfo")
+        if isinstance(ci, dict):
+            try:
+                host.hello({"name": str(ci.get("name") or "")[:40], "version": str(ci.get("version") or "")[:24]})
+            except Exception:                                    # display only: never fails the handshake
+                pass
         return 200, _dump({"jsonrpc": "2.0", "id": mid, "result": {
             "protocolVersion": pv, "capabilities": {"tools": {"listChanged": False}},
             "serverInfo": SERVER_INFO, "instructions": INSTRUCTIONS}}), {}

@@ -12,6 +12,7 @@ public static class W {
   [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
   [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr dc, uint f);
+  [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
   [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L, T, R, B; }
   public static List<IntPtr> Of(uint pid) {
     var o = new List<IntPtr>();
@@ -20,6 +21,9 @@ public static class W {
   }
 }
 "@
+# Window sizes in real pixels: without this, a window on a display scaled above 100 % is captured magnified and
+# clipped (seen 2026-11-25 with a second monitor at 125 %).
+[void][W]::SetProcessDPIAware()
 $i = 0
 $files = @()
 foreach ($h in [W]::Of([uint32]$ProcId)) {

@@ -8,6 +8,7 @@ A source-first, AI-powered TouchDesigner development environment: an MCP server 
 > - MCP binds to `127.0.0.1` only, enforces agent scopes and approvals, and requires an intact durable security audit.
 > - The `.tox` is a release asset built from the `v1.0.0` tag. It is deliberately excluded from source Git history.
 > - Release record: [changelog, compatibility and checklist](docs/operations/release-candidate-1.0.md).
+> - **Version 1.0.1 is being released.** It adds the same one-click connection for **OpenAI Codex on Windows** (Coding Agent: Codex → Connect Agent → Approve → new Codex chat): [1.0.1 release record](docs/operations/release-candidate-1.0.1.md). Until its download is published and verified, the download below is v1.0.0, which does not have it.
 
 ## Download and first run
 

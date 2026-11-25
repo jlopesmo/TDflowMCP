@@ -1,0 +1,59 @@
+name: verify-release
+
+# Started by hand (Actions > verify-release > Run workflow, on main) after a GitHub Release is published. A
+# GitHub-hosted runner downloads the release's public assets anonymously and checks them against the hash recorded
+# when the package was built (tools/verify_release.py). This is the independent download check of
+# docs/operations/verification-and-release.md: the network the release is built on cannot make a trusted
+# connection to GitHub's asset host. Each file's SHA-256 and the verdict are published as annotations.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag, for example v1.0.1"
+        required: true
+        type: string
+      expect_sums_sha256:
+        description: "SHA-256 of the SHA256SUMS file recorded when the package was built (it covers every asset)"
+        required: true
+        type: string
+      expect_tox_sha256:
+        description: "Optional: the recorded SHA-256 of TDflowMCP.tox"
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    # Only the default branch's copy of the checker gives the verdict.
+    if: github.ref == 'refs/heads/main'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.11"
+      - name: Download the public assets without credentials and check them
+        shell: bash
+        env:
+          # Inputs reach the commands as environment variables, never as text of the command line.
+          TAG: ${{ inputs.tag }}
+          EXPECT_SUMS: ${{ inputs.expect_sums_sha256 }}
+          EXPECT_TOX: ${{ inputs.expect_tox_sha256 }}
+        run: |
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "The tag must be of the form vX.Y.Z"; exit 2; }
+          # The commit the tag points to, read anonymously from the public repository.
+          git fetch --quiet --depth=1 origin "refs/tags/$TAG:refs/tags/$TAG"
+          COMMIT="$(git rev-parse "refs/tags/$TAG^{commit}")"
+          python -I tools/verify_release.py "$TAG" --expect-sums-sha256 "$EXPECT_SUMS" \
+            --expect-tox-sha256 "$EXPECT_TOX" --expect-commit "$COMMIT"

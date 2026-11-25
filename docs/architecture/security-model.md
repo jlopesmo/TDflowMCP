@@ -89,9 +89,10 @@ The match code only prevents approving the wrong request. Holding it grants noth
 - That principal is never produced from an HTTP request: HTTP principals come only from the authenticator (`admin:<sid hash>`, `agent:<token id>`).
 - **Approvals:** Approve Request and Deny Request decide only the request that View Approval showed. The backend refuses a different argument digest (`APPROVAL_CHANGED`). The viewer is cleared after the decision or after 2 minutes, so agent arguments do not stay in a DAT that is saved with the project.
 - **Connect Agent (owner D22, [ADR-0015](../decisions/0015-consent-based-client-connection.md)):**
-  - For a client with automatic setup (Claude Code), the new token goes from the backend straight into the user's protected store, on a background thread. That store is a Windows DPAPI current-user file under the private root, or the macOS Keychain through `security -i` on stdin.
+  - For a client with automatic setup (Claude Code; Codex on Windows, [ADR-0017](../decisions/0017-codex-one-click-connection.md)), the new token goes from the backend straight into the user's protected store, on a background thread. That store is a Windows DPAPI current-user file under the private root, or the macOS Keychain through `security -i` on stdin. Each client has its own slot, so its own agent identity and token.
   - The token is never in memory longer than that step, and never in the clipboard, a parameter, a DAT, a log, the audit or the client's configuration.
-  - The client's `headersHelper` reads it for the project that the listener announces. It releases the token only after the listener proves this project's connect key: an HMAC over the helper's fresh nonce via `/.well-known/tdflowmcp-proof/<nonce>`. A port squatter therefore gets nothing (review 19).
+  - The client's headers helper (`headersHelper` for Claude Code, `http_headers_helper` for Codex) reads it for the project that the listener announces. It releases the token only after the listener proves this project's connect key: an HMAC over the helper's fresh nonce via `/.well-known/tdflowmcp-proof/<nonce>`. A port squatter therefore gets nothing (review 19).
+  - **When the helper fails:** for Claude Code it prints `{}` and the connection fails. For Codex it exits with status 1 and prints nothing, because Codex was observed to send its requests without credentials after an empty object, and to send no request at all after a non-zero exit (ADR-0017).
   - The helper's output bypasses PowerShell transcription.
   - The `connect_view` viewer is cleared after 2 minutes, because it is saved with the project, and paths in it are shown in `%LOCALAPPDATA%` form.
 - **Tokens for the manual fallback:** a token created there (Connect Agent for a client without automatic setup, New Token) stays in memory for at most 2 minutes and leaves it only through **Copy Token**. Copy Token writes it to the Windows clipboard with the formats that keep it out of Clipboard History and Cloud Clipboard and ask clipboard monitors to ignore it. If that is not possible, the copy is refused rather than made plainly. The clipboard is cleared after a minute if it still holds the token. The token is never written to a parameter, a DAT or a log.
@@ -99,7 +100,7 @@ The match code only prevents approving the wrong request. Holding it grants noth
 **Request rules:** because **cookies are not isolated by port** (SameSite treats other `127.0.0.1` ports as same-site), the cookie is never relied on alone. See the [per-route gate table](#81-per-route-gate-table). The canonical origin is `http://127.0.0.1:<port>`; requests to `localhost` are redirected to it.
 
 ### 2.6 OAuth 2.1
-Deferred (TDMCP uses it). It may be added behind the same identity interface if clients require it, which is an owner decision. It is the documented route to automatic, secret-free setup for Codex, Cursor and VS Code Copilot, which have no helper mechanism ([ADR-0015](../decisions/0015-consent-based-client-connection.md)).
+Deferred (TDMCP uses it). It may be added behind the same identity interface if clients require it, which is an owner decision. It is the documented route to automatic, secret-free setup for Cursor and VS Code Copilot, which have no helper mechanism ([ADR-0015](../decisions/0015-consent-based-client-connection.md)). Codex no longer needs it on Windows: it has a header helper ([ADR-0017](../decisions/0017-codex-one-click-connection.md)).
 
 ## 3. Permissions
 
@@ -210,7 +211,7 @@ TD's main thread cannot pre-empt running Python. Limits are therefore:
 | `/setup/api/*`, `/api/*` mutations | POST/PUT/DELETE | Valid Host + **Origin exactly canonical (a missing Origin is rejected)** + admin session cookie + `X-TDflow-CSRF` matching the session |
 | `/api/events` | WebSocket upgrade | As for mutations: exact Origin + session + CSRF token in the first message |
 | `/.well-known/tdflowmcp-proof/<nonce>` | GET | Valid Host; the nonce is exactly 32 lowercase hex characters. Unauthenticated by design; answered on a handler thread without TouchDesigner. Returns `{proof}` = HMAC-SHA256(project connect key, `tdflowmcp-proof|<project id>|<port>|<nonce>`), or 404 when no connection exists in this project. It grants nothing: it proves to Claude Code's headersHelper that this listener holds the key ([ADR-0015](../decisions/0015-consent-based-client-connection.md)) |
-| `/.well-known/tdflowmcp` | GET | Valid Host. Returns `{product, version}`, plus `connect` (the project's random, non-secret storage id `prj_…`, also its Projectid parameter) once the store is open. Claude Code's headersHelper uses it to pick that project's credential ([ADR-0015](../decisions/0015-consent-based-client-connection.md)). No project name, path or instance details |
+| `/.well-known/tdflowmcp` | GET | Valid Host. Returns `{product, version}`, plus `connect` (the project's random, non-secret storage id `prj_…`, also its Projectid parameter) once the store is open. The headers helper (Claude Code, Codex) uses it to pick that project's credential ([ADR-0015](../decisions/0015-consent-based-client-connection.md), [ADR-0017](../decisions/0017-codex-one-click-connection.md)). No project name, path or instance details |
 
 Responses never include `Access-Control-Allow-*` headers.
 
@@ -281,8 +282,10 @@ TD steps of all calls are serialized on TD's main thread (audit writes on the au
 - **No unauthorized changes:** TDflowMCP never installs packages or software, never changes TouchDesigner preferences or Python search paths, never edits firewall or OS settings, never writes client permission or approval settings, and never kills processes. File writes are limited to three cases, each user-confirmed from a preview and audited:
   - **Coding-agent connection (owner D22, [ADR-0015](../decisions/0015-consent-based-client-connection.md)):**
     - Only after the user approved the exact plan in a TouchDesigner dialog (or a second Connect Agent pulse within two minutes).
-    - Only for clients marked automatic (Claude Code): one user-scope `mcpServers.tdflow` entry with a fixed `headersHelper`.
+    - Only for clients marked automatic. Claude Code: one user-scope `mcpServers.tdflow` entry with a fixed `headersHelper`. Codex on Windows ([ADR-0017](../decisions/0017-codex-one-click-connection.md)): one `[mcp_servers.tdflow]` table with a fixed `http_headers_helper` in `~/.codex/config.toml`.
     - Other servers and settings are preserved; a backup goes to private storage first.
+    - The Codex file is TOML and is edited as text, so that comments and layout survive. The edited text must parse and must equal the file as it was except for TDflowMCP's own table; otherwise nothing is written (`CONFIG_UNSUPPORTED`, `CONFIG_INVALID`).
+    - A `tdflow` table counts as TDflowMCP's only if its URL and helper are the generated ones and it names no other credential source or transport, because Codex gives an explicit bearer token and OAuth precedence over the helper.
     - The write is atomic and read back; a changed plan is refused (`CONFIG_CHANGED`).
     - Undone by Disconnect, which removes only an entry that is still TDflowMCP's and restores one it replaced.
     - The credential goes only to the OS-protected store.

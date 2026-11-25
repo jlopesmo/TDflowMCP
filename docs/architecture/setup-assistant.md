@@ -52,7 +52,7 @@ The component **never listens until the user acts** (pulse or toggle). After the
 
 | Parameter | Type | Behaviour |
 |---|---|---|
-| `Detectedclients` "Installed Agents" | Str, read-only | What discovery found, and whether setup is automatic: `Claude Code (CLI, VS Code extension; automatic) · OpenAI Codex CLI (CLI; manual)` |
+| `Detectedclients` "Installed Agents" | Str, read-only | What discovery found, and whether setup is automatic: `Auto: Claude Code, Codex`, `Auto: Claude, Codex +1` (one more needs manual setup), or `Manual: Cursor, Copilot`; at most 26 characters. A Codex extension too old for automatic setup shows as `Codex (too old)` |
 | `Agentsummary` "Agents" | Str, read-only | `2 agents · 1 connected`. **rc4 (UX-09):** before the store is loaded (after reopening a project), `1 agent · not loaded` (from the non-secret summary) or `not loaded (MCP off)`, never `0 agents`; the agent menu shows `(not loaded yet)` |
 | `Agentselect` "Agent" | Menu (filled at runtime) | Every agent by name (`(disabled)` when disabled); selecting one fills Scope with its first scope |
 | `Agentinfo` "Selected Agent" | Str, read-only | `On · Builder · 1 token · 1 scope · seen 5 s ago` |
@@ -101,29 +101,29 @@ A Connect Agent step counts as newer than an older note (ties go to the step), s
 Errors always show. Texts are short, because the default parameter window is about 400 px wide (visual review).
 
 ### 2.2 Connect Agent
-Owner D22, [ADR-0015](../decisions/0015-consent-based-client-connection.md); implemented in `src/td_adapter/connection.py` and `src/tdflowmcp/connect.py`.
+Owner D22, [ADR-0015](../decisions/0015-consent-based-client-connection.md); Codex added by owner D27, [ADR-0017](../decisions/0017-codex-one-click-connection.md). Implemented in `src/td_adapter/connection.py` and `src/tdflowmcp/connect.py`.
 1. **Checks.** Run the checks; stop with the reason if the environment is not ready.
-2. **Agent.** Coding Agent: the selected client, or (Auto) the discovered ones. With several, a TouchDesigner dialog asks which to connect.
-3. **Fallback.** A client without automatic setup (Codex, Cursor, Copilot, Other) gets an agent and a token for **Copy Token** (Agents page) and the short manual instructions.
-4. **Plan.** For Claude Code, TouchDesigner shows the plan in a dialog, with details in `connect_view`. The plan names:
+2. **Agent.** Coding Agent: the selected client, or (Auto) the discovered ones. With several agents that can be set up automatically, a TouchDesigner dialog asks which one (one button each; agents that need manual setup are named in the plan instead). It says that nothing changes yet and marks an agent that is already connected. Each connected client keeps its own record, agent and key, so Claude Code and Codex can both be connected.
+3. **Fallback.** A client without automatic setup (Cursor, Copilot, Other; Codex outside Windows or with an extension older than the first tested build) gets an agent and a token for **Copy Token** (Agents page) and the short manual instructions.
+4. **Plan.** For Claude Code and Codex, TouchDesigner shows the plan in a dialog, with details in `connect_view`. The plan names:
    - the agent and the interfaces found;
-   - `~/.claude.json` (user scope) and the exact change, plus the other servers that stay;
+   - the file (`~/.claude.json`, user scope; or `~/.codex/config.toml`) and the exact change, plus the other servers that stay;
    - the backup;
    - access level and scope;
    - the protected credential store;
    - whether **Enable MCP** will be turned on;
    - how to undo.
-5. **Approval.** Approve, or Cancel (nothing changes). Without a dialog, a second pulse within 2 minutes approves. The plan expires after 2 minutes.
+5. **Approval.** Approve, or Cancel (nothing changes). Without a dialog, a second pulse within 2 minutes approves, but only while Coding Agent still names the agent of that plan: after a change of selection the pulse drops the plan and shows one for the new selection (review 23). The plan expires after 2 minutes.
 6. **Apply** (background thread):
    - audit intent;
    - create the agent and token, or rotate the existing agent's token (Repair);
    - store the credential (DPAPI / Keychain);
-   - write the entry (backup, atomic, read back; `CONFIG_CHANGED` if the approved change no longer applies);
+   - write the entry (backup, atomic, read back; `CONFIG_CHANGED` if the approved change no longer applies). For Codex the file is edited as text and refused when its layout is not one TDflowMCP edits (`Can't edit Codex settings`) or it is not valid TOML (`Error in Codex settings`), in both cases before the user is asked and without changing anything. View Connection Details then says that nothing was changed, why, and what to do;
    - record the connection in private settings;
    - audit `ok`.
    A failure revokes the new credential.
 7. **Enable MCP**, only if the approved plan said so; the usual live loopback verification runs.
-8. **Wait** for the agent's first authenticated request after this point (`Start a Claude Code chat.`; after 90 s without a request `No request: /mcp reconnect`). Then `Agent Connected — Ready`, with the client's own name and version under Connected Agents; audit `verified`.
+8. **Wait** for the agent's first authenticated request after this point (`Start a new Claude chat.` or `Start a new Codex chat.`; after 90 s without a request `No request: /mcp reconnect`, for Codex `No request: new Codex chat`; when requests arrive without a valid key `No key: Repair Connection`, for Codex `No key sent: update Codex`). Only requests of the agent being connected count, since another client's agent may be talking at the same time. Then `Agent Connected — Ready`, with the client's own name and version under Connected Agents (for example `Codex 0.160.0 · 3 s`); audit `verified`.
 9. **After a restart:** Next Step says `Turn on Enable MCP.`, and Connect Agent then only asks to turn on MCP.
 
 ## 3. Compatibility checks

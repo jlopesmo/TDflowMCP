@@ -1,11 +1,11 @@
 # Installing TDflowMCP
 
-TDflowMCP is a TouchDesigner component that lets a coding agent (Claude Code, and others) work in your project
+TDflowMCP is a TouchDesigner component that lets a coding agent (Claude Code, Codex, and others) work in your project
 through MCP. It works within the permissions you grant and keeps a tamper-evident audit log. It runs only on this
 computer (127.0.0.1). It never installs software, and it changes your agent's configuration only after you approve
 the exact change in TouchDesigner.
 
-**Version 1.0.0, provided for evaluation.** It is verified only on **Windows** with TouchDesigner **2025.32440**.
+**Version 1.0.1, provided for evaluation.** It is verified only on **Windows** with TouchDesigner **2025.32440**.
 Newer TouchDesigner builds and macOS are not verified. Try it first in a copy of a project, or in one you can afford
 to experiment with. The repository has no open-source license yet: you may download and evaluate the component, but
 that does not grant rights to redistribute, modify or commercially reuse it.
@@ -16,8 +16,11 @@ that does not grant rights to redistribute, modify or commercially reuse it.
 - A coding agent with Streamable HTTP MCP support.
   - **Claude Code** (CLI or the VS Code extension) is set up automatically and is tested on Windows. macOS automatic
     setup is implemented but not tested yet.
-  - Codex, Cursor and VS Code (GitHub Copilot) use a short manual setup. They are listed from their documentation and
-    are not tested yet.
+  - **Codex** (CLI or the VS Code extension) is set up automatically on **Windows** and is tested there. It needs a
+    recent Codex (tested: Codex CLI 0.160.0 and the VS Code extension 26.1120). On macOS and Linux, Codex uses the
+    manual setup. Codex running in a remote or cloud environment cannot use this connection.
+  - Cursor and VS Code (GitHub Copilot) use a short manual setup. They are listed from their documentation and are
+    not tested yet.
   - Any other MCP client works with the generic instructions.
 
 ## 1. Check the download
@@ -47,32 +50,53 @@ On the **TDflowMCP** page:
    - **Builder**: it can also change operators in its scope.
    - **Operator**: it can also *ask you* to approve code-running changes.
 3. **Allowed Scope:** the operators it may work on, for example `/project1/**`.
-4. Pulse **Connect Agent**. If several agents are installed, choose which one.
+4. Pulse **Connect Agent**. If several agents are installed (for example Claude Code and Codex), a dialog asks which
+   one. Nothing changes until you approve the plan that follows. You can connect the other one later: each agent
+   gets its own access and can be disconnected on its own.
 5. **Review and approve.** A TouchDesigner dialog shows exactly what will happen:
    - the agent's identity and permissions;
-   - the one entry added to Claude Code's settings (`~/.claude.json`); your other servers stay unchanged;
+   - the one entry (`tdflow`) added to your agent's settings: `~/.claude.json` for Claude Code,
+     `~/.codex/config.toml` for Codex (`~` is your user folder). Your other servers stay unchanged. If a `tdflow`
+     entry is already there, for example from an earlier manual Codex setup, the dialog says **REPLACES**: the old
+     entry is backed up and put back when you disconnect;
    - that a backup is kept;
    - that the credential stays in your account's protected store;
    - that **Enable MCP** will be turned on;
    - how to undo.
 
    Choose **Approve**, or **Cancel** (nothing changes).
-6. Next Step shows the progress, then **Start a Claude Code chat.** **Tell Your Coding Agent** now says
-   *Prompt ready: copy it*. Pulse **Copy Agent Prompt**, start a new conversation in the VS Code extension or a new
-   `claude` session in a terminal, and paste. The agent connects, checks its identity and permissions with
+6. Next Step shows the progress, then **Start a new Claude chat.** or **Start a new Codex chat.** **Tell Your
+   Coding Agent** now says *Prompt ready: copy it*. Pulse **Copy Agent Prompt**, start a **new** chat and paste:
+   - Claude Code: a new conversation in the VS Code extension, or a new `claude` session in a terminal.
+   - Codex: a new chat in the Codex panel in VS Code, or a new `codex` session in a terminal. A chat that was already
+     open does not have the connection.
+
+   The agent connects, checks its identity and permissions with
    `tdflow_whoami`, gives a short overview of the project and waits for your first task. It contains no token. (If
    Tell Your Coding Agent says *Not ready: …*, the copied text names the one step to do first.)
 7. When the agent's first request arrives, Next Step says **Agent Connected — Ready**, and **Connected Agents** shows
    the client and its version. A configured agent that has not talked is never shown as connected.
 
-There is no token to copy and nothing to type: Claude Code fetches the credential for this project by itself.
+There is no token to copy and nothing to type: Claude Code and Codex fetch the credential for this project by
+themselves.
+
+**If Codex does not connect.**
+- *Installed Agents* says `Codex (too old)`: the Codex VS Code extension is older than 26.1117. Update it, then pulse
+  Connect Agent again.
+- Next Step says *No key sent: update Codex*: this Codex is too old to fetch the key. Update Codex, then pulse
+  **Repair Connection** (Agents page).
+- Next Step says *Error in Codex settings* or *Can't edit Codex settings*: nothing was changed.
+  `~/.codex/config.toml` has an error, or has a `tdflow` entry written in a form TDflowMCP does not edit. **View
+  Connection Details** (Advanced page) says which and what to do; usually: fix the file, or remove your own `tdflow`
+  entry (`codex mcp remove tdflow`), and pulse Connect Agent again.
 
 **After restarting TouchDesigner,** MCP is off as always and the agents are not loaded yet. The Agents page says
 *1 agent · not loaded*, not zero. Next Step says *Turn on Enable MCP.*: turn it on (or pulse Connect Agent and
-approve), then pulse **Copy Agent Prompt** and paste it into a new Claude Code chat (or reconnect `tdflow` with
-`/mcp`). Nothing is set up again, and the same agent and key are used.
+approve), then pulse **Copy Agent Prompt** and paste it into a new Claude Code or Codex chat (in Claude Code you can
+instead reconnect `tdflow` with `/mcp`). Nothing is set up again, and the same agent and key are used.
 
-**Other agents (Codex, Cursor, VS Code Copilot, others).** These read their credential from an environment variable
+**Other agents (Cursor, VS Code Copilot, others; Codex on macOS or Linux).** These read their credential from an
+environment variable
 when they start, so they need one paste:
 1. Set **Coding Agent** to your agent, then pulse Connect Agent.
 2. On the **Agents** page, pulse **Copy Token** (within two minutes; kept out of Windows Clipboard History and cleared
@@ -81,7 +105,7 @@ when they start, so they need one paste:
    server.
 4. Turn on **Enable MCP**, then pulse **Copy Agent Prompt** and paste it as the agent's first message.
 
-**Undo:** Agents page, select the agent, then **Disconnect**. It removes the entry (or restores the one it replaced),
+**Undo:** Agents page, select the agent, then **Disconnect Agent**. It removes the entry (or restores the one it replaced),
 deletes the stored credential and revokes the agent's tokens. **Repair Connection** gives it a new credential if
 something went wrong.
 
@@ -90,7 +114,7 @@ Pulse **Manage Agents** (or open the **Agents** page):
 - pick an agent;
 - **Add Scope** / **Remove Scope**;
 - **Enable Agent** / **Disable Agent**;
-- **Repair Connection** / **Disconnect** (agents set up by Connect Agent);
+- **Repair Connection** / **Disconnect Agent** (agents set up by Connect Agent);
 - **New Token** and **Copy Token** (manual setup; New Token revokes its older tokens);
 - **Revoke Tokens**;
 - **View Agents**.
@@ -125,7 +149,8 @@ It may sit behind other windows, but do not minimize it: TouchDesigner runs no f
 
 ## Optional: Skills
 On the Setup page (Agents and access → Skills) you can install the TDflowMCP Skills for Claude Code, in your user
-folder or in this project. You see a preview first, and files you changed are never overwritten.
+folder or in this project. You see a preview first, and files you changed are never overwritten. There are no
+TDflowMCP Skills for Codex.
 
 ## Optional: project memory
 Pulse **Create Project Memory** (Advanced page) to let agents record task checkpoints and handoffs in a
@@ -159,7 +184,7 @@ the files; it never runs Git.
   Save the project afterwards.
 
 ## Removing TDflowMCP
-First pulse **Disconnect** for each connected agent (Agents page). That removes the Claude Code entry and the
-stored credential. Then delete the component. Your project's `.tdflowmcp/` folder and the private storage remain
-until you delete them yourself, because they hold the audit history. Manual connections are removed with the agent's
-own commands (for example `codex mcp remove tdflow`).
+First pulse **Disconnect Agent** for each connected agent (Agents page). That removes the `tdflow` entry from
+Claude Code's or Codex's settings (or puts back the one it replaced) and the stored credential. Then delete the component. Your project's `.tdflowmcp/` folder and the private storage remain
+until you delete them yourself, because they hold the audit history. Connections you set up by hand are removed
+with the agent's own commands (for example `codex mcp remove tdflow`).

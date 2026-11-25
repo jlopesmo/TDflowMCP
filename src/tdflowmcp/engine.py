@@ -173,6 +173,13 @@ class Engine:
             pass
 
     # ---- MCP host for one caller ---------------------------------------------------------------
+    def hello(self, token_id: str, client_info: dict) -> None:
+        """Handler thread: a legacy-era ``initialize`` from an authenticated caller. Keeps the client's self-declared
+        name and version for the Connected Agents line (legacy tool calls carry none)."""
+        agent = self.identity.agent_for_token(token_id)
+        if agent is not None:
+            self._mark_seen(agent.id, client_info if isinstance(client_info, dict) else None)
+
     def list_tools(self, token_id: str) -> List[dict]:
         agent = self.identity.agent_for_token(token_id)
         if agent is not None:

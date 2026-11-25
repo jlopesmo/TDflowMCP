@@ -28,4 +28,6 @@ jobs:
       - name: Secret scan
         run: python tools/scan_secrets.py
       - name: Unit tests
-        run: python -m unittest discover -s tests -t . -v
+        # Same tests as `python -m unittest discover -s tests -t . -v`; failures also become annotations, which
+        # are public (job logs are not), so a failure can be read from the Actions API without signing in.
+        run: python tools/ci_unittest.py

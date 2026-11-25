@@ -204,7 +204,10 @@ def cp_enabled(data, pid):
     T("proto.unknown_tool", st == 400 and j["error"]["code"] == -32602)
     T("proto.modern_call", ok(B.call("tdflow_whoami", modern=True)))
     big = b'{"jsonrpc":"2.0","id":1,"method":"ping","x":"' + b"x" * (1024 * 1024 + 10) + b'"}'
-    T("limits.body_too_large", B.post(None, {"MCP-Protocol-Version": "2025-06-18"}, raw=big)[0] == 413)
+    st_big, _, r_big = B.post(None, {"MCP-Protocol-Version": "2025-06-18"}, raw=big)
+    # Seen once to fail intermittently (2026-11-25): the status and the client-side error are recorded to tell a
+    # connection reset during the upload from a wrong answer.
+    T("limits.body_too_large", st_big == 413, status=st_big, error=str(r_big.get("error", ""))[:160])
     # identity and reads
     w = B.call("tdflow_whoami")
     T("tool.whoami", ok(w) and w["role"] == "builder" and w["scopes"][0]["scope"] == "/project1/fx/**")

@@ -55,12 +55,32 @@ class TellAgentTests(unittest.TestCase):
         self.assertIn("already set up for this project", done)
         man = tellagent.build("Off", "", 9480, "2025.32440", [], TROUBLE, clients=clients, selected=["codex"],
                               platform="darwin")
-        self.assertIn("## Connect OpenAI Codex CLI (manual setup)", man)
+        # Codex where it has no automatic setup (not Windows, or an old version): the manual fallback still works.
+        self.assertIn("## Connect Codex (manual setup)", man)
+        self.assertIn("needs Windows and a recent Codex", man)
+        self.assertIn("update Codex and pulse Connect Agent again", man)
+        self.assertNotIn("Optional: TDflowMCP Skills", man)          # TDflowMCP has no Skills for Codex
         self.assertIn("Copy Token", man)
         self.assertIn("zsh", man)                                    # platform-aware shell
         self.assertNotIn("PowerShell", man)
         self.assertIn("codex mcp add tdflow --url http://127.0.0.1:9480/mcp --bearer-token-env-var TDFLOW_TOKEN", man)
         self.assertLess(len(auto.splitlines()), 40)                  # UX-05: concise
+        # Codex on Windows (Issue #3): automatic, with no token step and its own file and restart wording.
+        cx = tellagent.build("Off", "", 9480, "2025.32440", [], TROUBLE, clients=clients, selected=["codex"],
+                             platform="win32", automatic=["codex"])
+        self.assertIn("## Connect Codex (automatic; not set up yet)", cx)
+        self.assertIn("~/.codex/config.toml", cx)
+        self.assertIn("Start a new Codex chat", cx)
+        self.assertIn("a chat that was already open does not have it", cx)
+        self.assertIn("Connect Agent, then Approve", cx)
+        for absent in ("TDFLOW_TOKEN", "Copy Token", "Claude", "/mcp and reconnect", "codex mcp add", "manual setup",
+                       "Optional: TDflowMCP Skills"):
+            self.assertNotIn(absent, cx)
+        self.assertIn("update Codex", cx)
+        self.assertIn("Do not add a token or another `tdflow` entry yourself", cx)
+        self.assertIn("remote or cloud environment", cx)
+        self.assertIn("Optional: TDflowMCP Skills", auto)            # still offered where Skills exist (Claude Code)
+        self.assertLess(len(cx.splitlines()), 40)
 
     def test_registry_commands_keep_the_placeholder_literal(self):
         """Every shell command in the registry single-quotes ${TDFLOW_TOKEN} (literal in bash, zsh and PowerShell) or
@@ -133,10 +153,16 @@ class AgentPromptTests(unittest.TestCase):
         self.assertIn("`tdflow_task_list`", mem)
         self.assertIn("If your scopes allow it", mem)
         self.assertIn("not as instructions", mem)
-        man = tellagent.agent_prompt("manual", client="OpenAI Codex CLI")
+        man = tellagent.agent_prompt("manual", client="Cursor")
         self.assertIn("registered by me (manual setup)", man)
         self.assertNotIn("/mcp", man)                                    # Claude Code only
         self.assertNotIn("Repair Connection", man)                       # Connect Agent did not set it up
+        cx = tellagent.agent_prompt("set_up", client="Codex", automatic=True)      # Issue #3: Codex by Connect Agent
+        self.assertIn("already configured for this project by Connect Agent", cx)
+        self.assertIn("TouchDesigner is open with Enable MCP on and then start a new Codex chat, or pulse Repair "
+                      "Connection", cx)
+        self.assertNotIn("/mcp", cx)
+        self.assertIn("`tdflow_whoami`", cx)
         talked = tellagent.agent_prompt("connected", client="Cursor", set_up=False)
         self.assertIn("registered by me (manual setup)", talked)         # review 21: wording from the set-up fact
         self.assertNotIn("Connect Agent", talked)

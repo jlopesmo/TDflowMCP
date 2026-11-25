@@ -74,14 +74,15 @@ def _native_flow(comp, ext, T, frames, until, checkpoint, calls):
     only way the token leaves TDflowMCP (the harness reads it from the clipboard, as a user would paste it); the
     Agents page rotates, disables and re-enables it; an approval is decided natively; Open Dashboard opens a
     page that pairs through a TouchDesigner dialog (owner D22: no secret in the launched URL).
-    Codex is selected: it has no automatic setup, so this is the manual fallback (Copy Token)."""
+    Cursor is selected: it has no automatic setup, so this is the manual fallback (Copy Token). (Codex was used
+    here until it got automatic setup on Windows, ADR-0017.)"""
     p = comp.par
-    p.Codingagent = "codex"
+    p.Codingagent = "cursor"
     p.Agentaccess = "observer"
     p.Allowedscope = "/project1/fx/**"
     yield frames(3)
-    T("native.instructions_for_the_selected_client", "Connect OpenAI Codex CLI (manual setup)" in ext.tell_text
-      and "Cursor" not in ext.tell_text and "Copy Token" in ext.tell_text)
+    T("native.instructions_for_the_selected_client", "Connect Cursor (manual setup)" in ext.tell_text
+      and "Codex" not in ext.tell_text and "Copy Token" in ext.tell_text)
     p.Connectagent.pulse()
     yield until(lambda: ext.native.handoff is not None, 20, "native_handoff")
     yield frames(2)
@@ -355,7 +356,7 @@ def _restart(comp, ext, T, frames, until, checkpoint, R):
     T("restart.audit_chain_ok", v["ok"] and v["checkpoints"] >= 1, verify=v)
     yield frames(3)
     labels = list(p.Agentselect.menuLabels)
-    T("restart.UX_AGENT_CREATED_IN_TD_PERSISTS", any("OpenAI Codex CLI (Read Only)" in x for x in labels), labels=labels)
+    T("restart.UX_AGENT_CREATED_IN_TD_PERSISTS", any("Cursor (Read Only)" in x for x in labels), labels=labels)
     yield checkpoint("restart_enabled", {"pid": os.getpid()})
     comp.par.Enablemcp = False
     yield frames(5)

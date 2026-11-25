@@ -83,7 +83,7 @@ def sha_text(text):
 
 
 def load():
-    if MODE in ("memory_restart", "native_restart", "native_restart2", "native_recover"):
+    if MODE in ("memory_restart", "native_restart", "native_restart2", "native_recover", "codex_restart"):
         # The reopened saved .toe already contains the component (loading the .tox again would add a second one).
         return td.op("/project1/TDflowMCP")
     comp = td.op("/project1").loadTox(TOX)
@@ -104,7 +104,7 @@ def script():
     ext = comp.ext.TDflowMCPExt
     if MODE != "native_screens":
         ext.connector.dialog_opener = lambda title, text, buttons, cb: False   # no real dialogs in automated runs
-    if MODE.startswith(("gate", "perf", "onboard", "dogfood", "memory", "native", "probe")):                 # audit-worker gate + 1B-vs-worker comparison
+    if MODE.startswith(("gate", "perf", "onboard", "dogfood", "memory", "native", "probe", "codex")):        # audit-worker gate + 1B-vs-worker comparison
         ext.launcher = lambda url: True
         yield from __import__("td_runner_gate").run(MODE, comp, ext, T, frames, until, checkpoint, R)
         return

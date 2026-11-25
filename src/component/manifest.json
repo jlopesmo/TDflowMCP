@@ -335,7 +335,7 @@
       "name": "Connectagent",
       "type": "Pulse",
       "label": "Connect Agent",
-      "help": "Connect your coding agent: checks the environment, shows exactly what will change, and after you approve sets up the agent's identity, protected credential and configuration (Claude Code), turns on MCP if you approved that, and waits for the agent's first request"
+      "help": "Connect your coding agent: checks the environment, shows exactly what will change, and after you approve sets up the agent's identity, protected credential and configuration (Claude Code; Codex on Windows), turns on MCP if you approved that, and waits for the agent's first request"
     },
     {
       "page": "TDflowMCP",
