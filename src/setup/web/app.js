@@ -102,7 +102,7 @@
     }
     $("pair-code").hidden = false;
     $("pair-code").textContent = r.data.match_code;
-    $("pair-status").textContent = "In TouchDesigner, approve this sign-in if it shows " + r.data.match_code + " (the dialog, or Web page > Approve Pairing).";
+    $("pair-status").textContent = "In TouchDesigner's Browser sign-in dialog, press the button listed next to the code below. Without the dialog: Web page > Approve Pairing, if it shows the same code.";
     clearInterval(pairTimer);
     pairTimer = setInterval(pollPairing, 1500);
   }

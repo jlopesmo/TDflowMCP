@@ -289,7 +289,10 @@ def cp_connect_live(data, pid):
 PROMPT_TOOLS = ALLOWED + ["mcp__tdflow__tdflow_project_info", "mcp__tdflow__tdflow_describe_network",
                           "mcp__tdflow__tdflow_get_operator", "mcp__tdflow__tdflow_get_errors",
                           "mcp__tdflow__tdflow_task_list", "mcp__tdflow__tdflow_handoff_resume",
-                          "mcp__tdflow__tdflow_set_dat_text", "mcp__tdflow__tdflow_delete_operator"]
+                          "mcp__tdflow__tdflow_set_dat_text", "mcp__tdflow__tdflow_delete_operator",
+                          "mcp__tdflow__tdflow_capabilities"]
+CAPS_QUESTION = ("What can you do in my TouchDesigner project through TDflowMCP, and what can't you do? Where can I see "
+                 "and change your permissions? Answer briefly. Do not change anything.")
 CHANGE_TOOLS = {"tdflow_set_parameters", "tdflow_create_operator", "tdflow_delete_operator", "tdflow_connect",
                 "tdflow_disconnect", "tdflow_set_dat_text", "tdflow_undo", "tdflow_execute_script",
                 "tdflow_experiment_create", "tdflow_experiment_promote", "tdflow_experiment_discard",
@@ -339,8 +342,43 @@ def cp_agent_prompt(data, pid):
     T("prompt.AGENT_CALLED_NO_CHANGE_TOOL", not [c for c in td_calls if c in CHANGE_TOOLS], calls=td_calls)
     T("prompt.AGENT_GAVE_AN_OVERVIEW", "fx" in text and "builder" in text.lower(), text=text[:600])
     T("prompt.NO_TOKEN_IN_AGENT_OUTPUT", secret not in sout and secret not in serr)
-    return {"live": True, "rc": rc, "calls": td_calls, "seconds": round(time.time() - t0, 1),
-            "turns": res.get("num_turns"), "answer": text[:1500]}
+    out = {"live": True, "rc": rc, "calls": td_calls, "seconds": round(time.time() - t0, 1),
+           "turns": res.get("num_turns"), "answer": text[:1500]}
+    # Owner D25: asked what it can do, the agent reports its own effective capabilities (not TDflowMCP's feature list)
+    # and gives the dashboard's Capabilities page address.
+    t1 = time.time()
+    rc2, sout2, serr2 = ob.run_claude(shutil.which("claude"), ["-p", CAPS_QUESTION, "--mcp-config", mcfg,
+                                                               "--strict-mcp-config", "--allowedTools", *PROMPT_TOOLS,
+                                                               *ob.ISOLATION, "--output-format", "stream-json",
+                                                               "--verbose"], STATE["proj"], env, 600)
+    calls2, res2 = [], {}
+    for ln in sout2.splitlines():
+        try:
+            m = json.loads(ln)
+        except ValueError:
+            continue
+        if m.get("type") == "assistant":
+            for c in (m.get("message") or {}).get("content") or []:
+                if isinstance(c, dict) and c.get("type") == "tool_use":
+                    calls2.append(str(c.get("name", "")).replace("mcp__tdflow__", ""))
+        elif m.get("type") == "result":
+            res2 = m
+    text2 = str(res2.get("result", ""))
+    td2 = [c for c in calls2 if c.startswith("tdflow_")]
+    low = text2.lower()
+    T("caps.LIVE_AGENT_ANSWERS", rc2 == 0 and bool(text2), rc=rc2, stderr=serr2[-300:])
+    T("caps.AGENT_CALLED_TDFLOW_CAPABILITIES", "tdflow_capabilities" in td2, calls=td2)
+    T("caps.AGENT_POINTED_TO_THE_CAPABILITIES_PAGE", "Capabilities" in text2 and ("Open Dashboard" in text2
+                                                                                 or "/ui/#capabilities" in text2),
+      text=text2[:800])
+    T("caps.AGENT_REPORTED_ITS_ROLE_AND_LIMITS", "builder" in low and any(
+        w in low for w in ("cannot", "can't", "not available", "denied", "not allowed", "needs your approval",
+                           "approval")), text=text2[:800])
+    T("caps.AGENT_CHANGED_NOTHING", not [c for c in td2 if c in CHANGE_TOOLS], calls=td2)
+    T("caps.NO_TOKEN_IN_AGENT_OUTPUT", secret not in sout2 and secret not in serr2)
+    out["capabilities"] = {"rc": rc2, "calls": td2, "seconds": round(time.time() - t1, 1),
+                           "turns": res2.get("num_turns"), "answer": text2[:1500]}
+    return out
 
 
 def cp_connect_suspended(data, pid):

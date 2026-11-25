@@ -17,6 +17,9 @@
     "tdflowmcp.auditworker": {
       "path": "src/tdflowmcp/auditworker.py"
     },
+    "tdflowmcp.capabilities": {
+      "path": "src/tdflowmcp/capabilities.py"
+    },
     "tdflowmcp.codemode": {
       "path": "src/tdflowmcp/codemode.py"
     },
@@ -243,13 +246,29 @@
     },
     {
       "page": "TDflowMCP",
+      "name": "Enablemcp",
+      "type": "Toggle",
+      "label": "Enable MCP",
+      "default": false,
+      "help": "Turn the MCP endpoint on or off (127.0.0.1 only). It turns on only after the checks pass and an agent exists: with no agent yet it stays off and Next Step says to pulse Connect Agent. Connect Agent also turns it on. Off after every reload, until you turn it on",
+      "section": true
+    },
+    {
+      "page": "TDflowMCP",
+      "name": "Suspendagents",
+      "type": "Toggle",
+      "label": "Suspend Agents",
+      "default": false,
+      "help": "Emergency stop: refuse every agent request at once, including queued ones"
+    },
+    {
+      "page": "TDflowMCP",
       "name": "Status",
       "type": "Str",
       "label": "Status",
       "readonly": true,
       "default": "Off",
-      "help": "Current state: Off, Setup, Enabled, Suspended or Error",
-      "section": true
+      "help": "Current state: Off, Setup, Enabled, Suspended or Error"
     },
     {
       "page": "TDflowMCP",
@@ -317,22 +336,6 @@
       "type": "Pulse",
       "label": "Connect Agent",
       "help": "Connect your coding agent: checks the environment, shows exactly what will change, and after you approve sets up the agent's identity, protected credential and configuration (Claude Code), turns on MCP if you approved that, and waits for the agent's first request"
-    },
-    {
-      "page": "TDflowMCP",
-      "name": "Enablemcp",
-      "type": "Toggle",
-      "label": "Enable MCP",
-      "default": false,
-      "help": "Turn the MCP endpoint on or off (agents can connect only while it is on; a live local-only security check runs every time)"
-    },
-    {
-      "page": "TDflowMCP",
-      "name": "Suspendagents",
-      "type": "Toggle",
-      "label": "Suspend Agents",
-      "default": false,
-      "help": "Emergency stop: refuse every agent request at once, including queued ones"
     },
     {
       "page": "TDflowMCP",
@@ -747,6 +750,7 @@
   ],
   "active_tools": [
     "tdflow_approval_status",
+    "tdflow_capabilities",
     "tdflow_capture_top",
     "tdflow_connect",
     "tdflow_create_operator",

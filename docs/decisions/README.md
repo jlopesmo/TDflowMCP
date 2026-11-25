@@ -25,6 +25,7 @@ Only Accepted ADRs bind implementation. Work that depends on a **Proposed** ADR 
 | [0013](0013-project-memory-model.md) | Shared project-memory model and optional `tdflowProject` COMP | Conditionally Accepted (owner 2026-11-22; raw-tool hard deny verified in 1B) |
 | [0014](0014-candidate-development-mode.md) | Candidate Development Mode (A/B self-development) | Conditionally Accepted (stage 1 only; stage 2 is research, gated by S8) |
 | [0015](0015-consent-based-client-connection.md) | Consent-based coding-agent connection and OS-protected credentials (amends 0011 decision 3) | Conditionally Accepted (owner D22, 2026-11-24) |
+| [0016](0016-capabilities-page-and-permission-editing.md) | Capabilities page, permission editing and agent self-report (amends 0005, 0009) | Conditionally Accepted (owner D25, 2026-11-25) |
 
 The requirements behind ADRs 0010–0013 are owner-approved. The designs of 0010–0013 are Conditionally Accepted (0011 on 2026-11-22, for Phase 1C).
 

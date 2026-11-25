@@ -864,6 +864,35 @@ def native_screens(comp, ext, T, frames, until, checkpoint, R):
       longest=max((len(x) for x in pop.par.Text.eval().splitlines()), default=0))
     yield frames(10)
     yield from shots("3-enabled")
+    # Owner D25: the real Browser sign-in dialog (number matching), with the widest characters of the code alphabet for
+    # the real code and both decoys (the product's own _pairing_dialog, with a deterministic random source).
+    import sys as _sys
+    import types as _types
+    mod = _sys.modules[type(ext).__module__]
+    real_secrets, seq = mod.secrets, iter("MWMWMWWMWMWM" * 4)
+    mod.secrets = _types.SimpleNamespace(choice=lambda s: next(seq), SystemRandom=lambda: _types.SimpleNamespace(
+        shuffle=lambda lst: None), token_urlsafe=real_secrets.token_urlsafe, token_hex=real_secrets.token_hex)
+    try:
+        ext._pairing_dialog("WWW-MMM")
+    finally:
+        mod.secrets = real_secrets
+    yield frames(20)
+    T("signin.REAL_DIALOG_OPENED", ext.connector.dialog is not None, dialog=ext.connector.dialog)
+    labels = [str(getattr(pop.par, f"Buttonlabel{i}").eval()) for i in range(1, 1 + int(pop.par.Buttons.eval()))]
+    text = pop.par.Text.eval()
+    T("signin.BUTTONS_ARE_NUMBERS_AND_DENY", labels == ["1", "2", "3", "Deny"], labels=labels)
+    T("signin.EVERY_CODE_ON_ITS_OWN_LINE", all(sum(1 for ln in text.splitlines() if c in ln) == 1
+                                               for c in ("WWW-MMM", "MWM-WMW", "WMW-MWM")), text=text)
+    T("signin.TEXT_FITS", all(len(x) <= 25 for x in text.splitlines()),
+      longest=max((len(x) for x in text.splitlines()), default=0))
+    T("signin.DIALOG_NOT_MODIFIED", abs(pop.par.w.eval() - 260) < 1, width=pop.par.w.eval())
+    yield checkpoint("screen_4-signin", {"stage": "4-signin", "page": "dialog"})
+    try:
+        pop.ext.PopDialogExt.OnButtonClicked(4)               # Deny
+    except Exception:
+        pass
+    yield frames(10)
+    T("signin.DENY_CLOSES_IT", ext.connector.dialog is None)
     p.Enablemcp = False
     yield frames(5)
 

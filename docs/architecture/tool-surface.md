@@ -6,7 +6,8 @@
 
 | Tool | Actions | Annotations | Purpose |
 |---|---|---|---|
-| `tdflow_whoami` | none | readOnly | Agent identity, role, effective scopes, `server_version`, `tool_surface_version`, `expected_skill_version` (`1.0` since 1C, `1.2` since 2A increment 3; the bundled Skills compare it), limits, `memory.repository_write` (increment 3) |
+| `tdflow_whoami` | none | readOnly | Agent identity, role, effective scopes, `server_version`, `tool_surface_version`, `expected_skill_version` (`1.0` since 1C, `1.2` since 2A increment 3; the bundled Skills compare it), limits, `memory.repository_write` (increment 3), `capabilities` (D25: the `tdflow_capabilities` tool name and the dashboard's Capabilities page address) |
+| `tdflow_capabilities` | none | readOnly | **D25 ([ADR-0016](../decisions/0016-capabilities-page-and-permission-editing.md))**: the caller's **own** effective capabilities, grouped: `your_capabilities` (`available`, `approval`) and `not_available_to_you` (`denied` with the reason, `not_implemented`, `protected`), a statement that this is not TDflowMCP's feature list, and `dashboard` (how the user opens the Capabilities page: Open Dashboard in TouchDesigner; the address for reference, no credential). Always listed, also without scopes; audited like every call |
 | `tdflow_project_info` | none (fixed summary) | readOnly | TD build, project name, top-level COMP names under the host root **filtered to those the agent can read**, FPS, cook state |
 | `tdflow_list_operators` | read `path/*` | readOnly | Children with type, family, readable `inputs` and node position `x`/`y` (dogfood 1), paginated; protected subtrees filtered |
 | `tdflow_get_operator` | read `path` | readOnly | Type, flags, inputs/outputs, errors/warnings, `x`/`y`, `cook_count` (errors exist only after a cook) |

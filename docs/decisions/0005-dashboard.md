@@ -22,3 +22,6 @@ Phase 2B (results for increment 1 in the [record](../research/2026-11-23-phase-2
 - An approval executes only on the identical re-call, with targets and policy re-checked. **Passed** in unit tests and in TD (`approval.*`).
 - Report export verifies against the checkpoint. **Passed** in unit tests (covered, not covered after a later event, tampering detected); a report is built in TD.
 - A request with a wrong Origin, a missing CSRF token or another-port Origin is rejected. **Passed** (gate unit tests; `approval.decide_needs_csrf` in TD).
+
+## Amendment (owner D25, 2026-11-25): Capabilities page
+A **Capabilities** tab shows a capability matrix (TDflowMCP support, each role, the selected agent) and edits roles, scopes and dedicated permissions through preview, explicit confirmation of more access and the one permission backend ([ADR-0016](0016-capabilities-page-and-permission-editing.md)). The page stays a view and decision surface: the engine enforces every rule. Also fixed: the `hidden` attribute was overridden by author `display` rules, so the "not running frames" warning and both Suspend and Resume always showed.

@@ -445,6 +445,36 @@ class Store:
     def grant_remove(self, agent_id: str, grant_id: int) -> bool:
         return self._cc().execute("DELETE FROM grants WHERE agent_id=? AND id=?", (agent_id, int(grant_id))).rowcount == 1
 
+    def permissions_apply(self, agent_id: str, role: str, rewrite: Iterable[Tuple[int, str]], remove: Iterable[int],
+                          add: Iterable[Tuple[str, str, str]], capabilities: Iterable[str],
+                          display_name: Optional[str] = None) -> int:
+        """Owner D25: one permission change (role, grants, dedicated permissions) in a single transaction, and the
+        agent's open approvals cancelled in the same transaction (review 14). Returns the number cancelled."""
+        c = self._cc()
+        c.execute("BEGIN IMMEDIATE")
+        try:
+            if c.execute("UPDATE agents SET role=? WHERE id=?", (role, agent_id)).rowcount != 1:
+                raise KeyError("agent")
+            if display_name:
+                c.execute("UPDATE agents SET display_name=? WHERE id=?", (display_name, agent_id))
+            for gid in remove:
+                c.execute("DELETE FROM grants WHERE agent_id=? AND id=?", (agent_id, int(gid)))
+            for gid, actions in rewrite:
+                c.execute("UPDATE grants SET actions=? WHERE agent_id=? AND id=?", (actions, agent_id, int(gid)))
+            for scope, actions, effect in add:
+                c.execute("INSERT INTO grants(agent_id, scope, actions, effect) VALUES (?,?,?,?)",
+                          (agent_id, scope, actions, effect))
+            c.execute("DELETE FROM capabilities WHERE agent_id=?", (agent_id,))
+            for name in sorted(set(capabilities)):
+                c.execute("INSERT INTO capabilities(agent_id, name) VALUES (?,?)", (agent_id, name))
+            n = c.execute("UPDATE approvals SET state='cancelled', args='' WHERE agent_id=? AND "
+                          "state IN ('pending','approved')", (str(agent_id),)).rowcount
+            c.execute("COMMIT")
+            return n
+        except BaseException:
+            c.execute("ROLLBACK")
+            raise
+
     def token_rows(self) -> List[tuple]:
         """For tests and diagnostics: (token_id, salt, digest). Never contains a secret."""
         return [tuple(r) for r in self._cc().execute("SELECT token_id, salt, digest FROM tokens").fetchall()]

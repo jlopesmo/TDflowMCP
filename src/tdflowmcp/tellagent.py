@@ -148,7 +148,10 @@ def build(state: str, error_code: str, port: int, td_build: str, checks: Sequenc
         f"- TDflowMCP component v{version} is installed in a TouchDesigner {td_build or '(unknown build)'} project.",
         f"- State: {_state_sentence(state, error_code, port)}",
         (f"- MCP endpoint: http://127.0.0.1:{port}/mcp (Streamable HTTP, server name `tdflow`). Call tdflow_whoami "
-         "first to see your scopes; every change is audited."
+         "first to see your scopes; every change is audited. When the user asks what you can do, call "
+         "tdflow_capabilities: it lists your own effective capabilities (and what is not available to you, and why), "
+         "and how the user opens the dashboard's Capabilities page (Open Dashboard in TouchDesigner), where they see "
+         "everything TDflowMCP supports and can change your permissions."
          if state in ("Enabled", "Suspended") else
          "- MCP is not on yet. The user connects you from TouchDesigner: Connect Agent, then Approve (see below)."),
         f"- Compatibility checks: {summary(checks) if checks else 'not run yet (pulse Run Diagnostics)'}.",
@@ -324,7 +327,8 @@ def agent_prompt(key: str, client: str = "", automatic: bool = False, version: s
         f"tools are loaded on demand). If there are none, stop and tell me{reconnect}; do not install anything, create "
         "configuration or edit the `tdflow` entry.",
         "Call `tdflow_whoami`. Tell me in two lines which agent you are and the role and scopes it reports: those are "
-        "your permissions, and the server enforces them.",
+        "your permissions, and the server enforces them. (Whenever I ask what you can do, use `tdflow_capabilities` "
+        "and tell me how to open its Capabilities page from TouchDesigner.)",
         "Call `tdflow_project_info`, then `tdflow_describe_network` on the components you may read, and give me a "
         "brief overview of the project (a few bullets). A refusal outside your scopes is expected: mention it once.",
     ]

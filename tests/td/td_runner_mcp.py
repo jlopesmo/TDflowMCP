@@ -45,6 +45,30 @@ def fixtures():
     return {"level_opacity": lvl.par.opacity.eval()}
 
 
+def _caps_native(comp, ext, T, frames, until, checkpoint, g):
+    """Owner D25: a role changed on the dashboard's Capabilities page shows on TouchDesigner's Agents page at once, and
+    a scope added there shows on the page (checked by the harness at 'caps_native'). One backend, no second copy."""
+    p = comp.par
+    aid = (g or {}).get("cap_agent")
+    T("caps.harness_changed_an_agent", bool(aid), g=g)
+    if not aid:
+        return
+    ext.native.refresh_menu()
+    p.Agentselect = aid
+    yield until(lambda: "Read Only" in p.Agentinfo.eval(), 10, "caps_native_role")
+    T("caps.NATIVE_SHOWS_THE_WEB_ROLE_CHANGE", ext.identity.agents[aid].role == "observer"
+      and "Read Only" in p.Agentinfo.eval(), info=p.Agentinfo.eval())
+    p.Agentscope = "/project1/zz_native/**"
+    ext.native.scope(True)
+    yield until(lambda: not ext.native.busy and any(gr.scope == "/project1/zz_native/**"
+                                                    for gr in ext.identity.agents[aid].grants), 15, "caps_native_scope")
+    T("caps.native_scope_added", any(gr.scope == "/project1/zz_native/**" for gr in ext.identity.agents[aid].grants))
+    yield checkpoint("caps_native", {"agent": aid})
+    yield until(lambda: ext.identity.agents[aid].role == "builder", 10, "caps_native_restored")
+    yield until(lambda: "Builder" in p.Agentinfo.eval(), 10, "caps_native_restored_info")
+    T("caps.NATIVE_SHOWS_THE_RESTORE", "Builder" in p.Agentinfo.eval(), info=p.Agentinfo.eval())
+
+
 def _native_flow(comp, ext, T, frames, until, checkpoint, calls):
     """UX assignment: the TouchDesigner-only workflow (no browser). Connect Agent creates the agent; Copy Token is the
     only way the token leaves TDflowMCP (the harness reads it from the clipboard, as a user would paste it); the
@@ -126,10 +150,18 @@ def _native_flow(comp, ext, T, frames, until, checkpoint, calls):
     code = g.get("match_code") or "?"
     shown = dialogs[-1] if dialogs else ("", "", [], None)
     # Review 19: number matching: the dialog offers the real code among two decoys; the user picks the page's code.
-    T("web.SIGN_IN_DIALOG_MATCHES_THE_CODE", len(shown[2]) == 4 and shown[2][-1] == "Deny" and code in shown[2]
-      and len(set(shown[2])) == 4, buttons=shown[2])
-    if shown[3] and code in shown[2]:
-        shown[3](shown[2].index(code))                        # the user picks the code the page shows
+    # Owner D25: the codes are numbered lines of the text (TouchDesigner's 260 px dialog clipped them as buttons); the
+    # buttons carry the numbers.
+    import re as _re
+    listed = [(int(mm.group(1)), mm.group(2)) for mm in
+              (_re.match(r"^\s*Button (\d):\s+([A-Z0-9]{3}-[A-Z0-9]{3})$", ln) for ln in str(shown[1]).splitlines()) if mm]
+    pick = next((n for n, c in listed if c == code), None)
+    T("web.SIGN_IN_DIALOG_MATCHES_THE_CODE", shown[2] == ["1", "2", "3", "Deny"] and len(listed) == 3
+      and [n for n, _ in listed] == [1, 2, 3] and len({c for _, c in listed}) == 3 and pick is not None,
+      buttons=shown[2], listed=listed)
+    T("web.SIGN_IN_BUTTONS_ARE_SHORT", all(len(b) <= 4 for b in shown[2]), buttons=shown[2])
+    if shown[3] and pick is not None:
+        shown[3](pick - 1)                                    # the user picks the number of the page's code
     yield until(lambda: ext.admin.active_sessions() > 0, 10, "web_pair_approved")
     yield frames(3)
     yield checkpoint("web_paired", {})
@@ -156,8 +188,17 @@ def run(comp, ext, T, frames, until, checkpoint, R, restart=False):
     comp.par.Enablemcp = True
     yield until(lambda: comp.par.Status.eval() == "Setup" and not comp.par.Enablemcp.eval(), 15, "enable_refused")
     yield frames(10)
-    T("enable.refused_without_agent", not comp.par.Enablemcp.eval() and "agent.token" in comp.par.Statusdetail.eval(),
+    T("enable.refused_without_agent", not comp.par.Enablemcp.eval()
+      and comp.par.Statusdetail.eval() == "No agent: Connect Agent" and ext.mcp_on is False,
       detail=comp.par.Statusdetail.eval(), status=comp.par.Status.eval())
+    # Owner D25: Run Diagnostics and Enable MCP are the first two actionable controls of the main page; Suspend Agents
+    # follows at once, and the connection controls come after them.
+    page = next(pg for pg in comp.customPages if pg.name == "TDflowMCP")
+    acts = [q.name for q in page.pars if not q.readOnly]
+    T("order.run_diagnostics_then_enable_mcp", acts[:3] == ["Rundiagnostics", "Enablemcp", "Suspendagents"]
+      and acts.index("Enablemcp") < min(acts.index(n) for n in ("Codingagent", "Agentaccess", "Connectagent")),
+      actionable=acts)
+    T("order.refusal_fits_the_window", len(comp.par.Statusdetail.eval()) <= 26)
     T("enable.no_browser_for_enable", calls == [])
     g = yield checkpoint("setup_ready", {"pid": os.getpid()})
     code = (g or {}).get("match_code")
@@ -198,7 +239,8 @@ def run(comp, ext, T, frames, until, checkpoint, R, restart=False):
     yield checkpoint("suspended", {})
     comp.par.Suspendagents = False
     yield frames(3)
-    yield checkpoint("resumed", {})
+    g = yield checkpoint("resumed", {})
+    yield from _caps_native(comp, ext, T, frames, until, checkpoint, g)
     yield from _native_flow(comp, ext, T, frames, until, checkpoint, calls)
     last_seq = (yield from store_op(ext, until, "events", limit=1))[0]["seq"]
     yield checkpoint("queue_block", {})                   # harness sends a call 0.5 s after this answer

@@ -53,7 +53,7 @@ class TDflowMCPExt:
         self.manifest = ownerComp.op("loader").module.install_from_comp(ownerComp)
         from tdflowmcp import SKILL_VERSION, __version__, admin, auditworker, compat, controller, engine, identity, \
             policy, protocol, setupapi, skills, storage, store, tellagent, tools
-        from tdflowmcp import approvals, connect, dashboard, memory, memrepo, readiness
+        from tdflowmcp import approvals, capabilities, connect, dashboard, memory, memrepo, readiness
         from tdflowmcp.net import bindverify, evidence, oslisteners, oswindow
         from tdflowmcp.net.pyhttp import EmbeddedHTTPTransport, MainStepError, Response, error
         from tdflowmcp_td import connection, native, tdops
@@ -64,7 +64,8 @@ class TDflowMCPExt:
                                         store=store, tools=tools, tdops=tdops, auditworker=auditworker,
                                         storage=storage, MainStepError=MainStepError, skills=skills,
                                         memory=memory, memrepo=memrepo, oswindow=oswindow, approvals=approvals, dashboard=dashboard,
-                                        readiness=readiness, native=native, connect=connect, connection=connection)
+                                        readiness=readiness, native=native, connect=connect, connection=connection,
+                                        capabilities=capabilities)
         self.skill_version = SKILL_VERSION
         self.version = __version__
         old = _REGISTRY.instances.get(ownerComp.id)
@@ -438,6 +439,12 @@ class TDflowMCPExt:
                                             on_audit_failure=self._flag_audit_failure)
         self.engine.audit_failed = self._audit_latched      # a rebuild never clears an audit failure
         self.engine.code_mode = bool(getattr(self, "_code_mode", False))   # ADR-0004: off by default
+        self.engine.dashboard_page = self._capabilities_page      # D25: an address, never a credential
+
+    def _capabilities_page(self):
+        """Any thread: the dashboard's Capabilities page on this computer (the MCP endpoint's own host and port; the
+        page itself needs a browser paired in TouchDesigner)."""
+        return f"http://127.0.0.1:{int(self.ctl.port)}/ui/#capabilities"
 
     def _flag_audit_failure(self):
         """Any thread (usually a handler thread): picked up by OnFrame (no TD access here)."""
@@ -1050,10 +1057,15 @@ class TDflowMCPExt:
                 decoys.add(d)
         choices = list(decoys) + [code]
         secrets.SystemRandom().shuffle(choices)
-        text = ("A browser is asking to sign in to TDflowMCP's web pages.\n\n"
-                "Choose the code that the page you just opened shows.\n"
-                "If no page opened, or none of these codes is on it, choose Deny.")
-        self.connector.dialog_opener("Browser sign-in", text, choices + ["Deny"],
+        self._pair_choices = list(choices)
+        # Owner D25: TouchDesigner's dialog is a fixed 260 px and cannot fit three 7-character codes plus Deny as
+        # buttons (they were clipped and pushed Deny out of view). The codes are listed in the text, one per numbered
+        # line, and the buttons carry only the numbers. The user still picks the page's code among the decoys.
+        text = ("A browser asks to sign in to TDflowMCP's web pages.\n\n"
+                "Which code does the page you just opened show?\n\n"
+                + "\n".join(f"Button {i + 1}:  {c}" for i, c in enumerate(choices)) +
+                "\n\nPress that button. A wrong button denies. No page, or no code matches: Deny.")
+        self.connector.dialog_opener("Browser sign-in", text, [str(i + 1) for i in range(len(choices))] + ["Deny"],
                                      lambda i: self._pairing_decision(i is not None and choices[i] == code,
                                                                       expect=code,
                                                                       mismatch=i is not None and choices[i] != code))
@@ -1196,8 +1208,12 @@ class TDflowMCPExt:
         ok, blockers = self._m.compat.mcp_enable_allowed(self.checks, self.identity.has_enabled_agent(),
                                                          self._static_facts.get("selftest", False))
         if not ok:
-            return self._refuse_mcp("MCP stays disabled until these checks pass: " + ", ".join(blockers) +
-                                    (". No agent yet: pulse Connect Agent." if "agent.token" in blockers else "."))
+            if blockers == ["agent.token"]:          # owner D25: no agent yet is the common first-run case
+                self._audit_async("mcp", outcome="refused", error_code="NO_AGENT")
+                return self._refuse_mcp("No agent: Connect Agent")
+            # Review 22: the parameter window shows ~26 characters; the failing checks are in View Diagnostics.
+            self._audit_async("mcp", outcome="refused", error_code="CHECKS_FAILED", detail={"blockers": blockers[:10]})
+            return self._refuse_mcp("Not ready: see Diagnostics")
         w, eng = self.worker, self.engine
         self._enabling = True
         detail = {"root": eng.policy.root, "tools": list(self.active_tools)}
@@ -1702,6 +1718,8 @@ class TDflowMCPExt:
                                "expiry_s": APR.EXPIRY_S})
                 if p == "/api/settings":
                     return ok(self._dash_settings())
+                if p == "/api/capabilities":
+                    return ok(self._capabilities_view(st, idn))
                 if p == "/api/memory":
                     return self._memory_api(ctx, "status", {}, st)
                 return E(404, "NOT_FOUND")
@@ -1789,8 +1807,14 @@ class TDflowMCPExt:
                 aid = str(body.get("agent_id", ""))[:32]
                 if aid not in idn.agents:
                     return refuse("NOT_FOUND", "no such agent", 404)
+                web = str(ctx.principal) != "admin:touchdesigner"     # in TouchDesigner the pulse is the confirmation
                 with self._admin_lock:
                     if p.endswith("add"):
+                        if web and str(body.get("effect", "allow")) == "allow" and body.get("confirm_escalation") is not True:
+                            st.append("admin", tool="grant_add", agent_id=aid, outcome="refused",
+                                      error_code="CONFIRMATION_REQUIRED")
+                            return refuse("CONFIRMATION_REQUIRED", "an allow grant gives the agent more access: confirm "
+                                                                   "it explicitly (or use the Capabilities page)")
                         scope = str(body.get("scope", ""))[:256]
                         root = self._root_text
                         if not (scope == root + "/**" or scope == root or scope.startswith(root + "/")):
@@ -1808,16 +1832,113 @@ class TDflowMCPExt:
                     gid = body.get("grant_id")
                     if not isinstance(gid, int) or isinstance(gid, bool):
                         return refuse("INVALID_" + "ARGS", "grant_id is needed", 400)
+                    if web and body.get("confirm_escalation") is not True and any(
+                            g["id"] == gid and g["effect"] == "deny" for g in st.grants_of(aid)):
+                        st.append("admin", tool="grant_remove", agent_id=aid, outcome="refused",
+                                  error_code="CONFIRMATION_REQUIRED")
+                        return refuse("CONFIRMATION_REQUIRED", "removing a deny gives the agent more access: confirm it "
+                                                               "explicitly (or use the Capabilities page)")
                     st.append("admin", tool="grant_remove", agent_id=aid, detail={"grant_id": gid})
                     done = idn.remove_grant(aid, gid)
                     return ok({"ok": done, "grants": st.grants_of(aid)}, 200 if done else 404)
             if p == "/api/settings":
                 return self._dash_settings_set(body, st, ok, refuse)
+            if p in ("/api/permissions/preview", "/api/permissions/apply"):
+                return self._permissions_api(p.rsplit("/", 1)[-1], body, ctx, st, idn, ok, refuse)
             return E(404, "NOT_FOUND")
         except DB.BadQuery as e:
             return refuse("BAD_QUERY", "not a valid value for: " + str(e)[:40], 400)
         except AU:
             return E(503, "AUDIT_UNAVAILABLE")
+
+    # -- capabilities (owner D25, ADR-0016): one matrix, one permission backend ----------------------------------
+    def _cap_facts(self):
+        eng = self.engine
+        if eng is not None:
+            return eng.capability_facts()
+        return {"active": frozenset(self.active_tools), "code_mode": bool(getattr(self, "_code_mode", False)),
+                "approvals": True, "root": self._root_text}
+
+    def _capabilities_view(self, st, idn):
+        """Handler thread. Every row comes from the stored grants (the same authority a change is checked against)."""
+        C = self._m.capabilities
+        facts, seen, now = self._cap_facts(), self._seen(), time.time()
+        within = self._m.readiness.CONNECTED_WITHIN_S
+        rows = []
+        for a in list(idn.agents.values()):
+            v = seen.get(a.id)
+            rows.append((a, st.grants_of(a.id), bool(v and now - v["last"] <= within and a.enabled)))
+        return C.dashboard_view(rows, facts, self._root_text,
+                                {"mcp": bool(self.mcp_on), "suspended": bool(self.suspended),
+                                 "code_mode": bool(facts.get("code_mode"))}, self._capabilities_page())
+
+    def _permissions_api(self, op, body, ctx, st, idn, ok, refuse):
+        """Handler thread. Preview: the effective result of a change, nothing stored. Apply: the previewed change
+        exactly (its digest), an explicit confirmation when it gives more access, durable audit first, the agent's
+        open approvals cancelled in the same transaction, then the outcome recorded."""
+        C = self._m.capabilities
+        aid = str(body.get("agent_id", ""))[:32]
+        change = body.get("change")
+        with self._admin_lock:
+            a = idn.agents.get(aid)
+            if a is None:
+                return refuse("NOT_FOUND", "no such agent", 404)
+            rows = st.grants_of(aid)
+            via = "touchdesigner" if str(ctx.principal) == "admin:touchdesigner" else "dashboard"
+
+            def refused(code, message, status=409):
+                # Review 22 (security 4): refused applies are audited too (a replayed or stolen session shows up).
+                if op == "apply":
+                    st.append("admin", tool="permission_change", agent_id=aid, outcome="refused", error_code=code,
+                              detail={"via": via})
+                return refuse(code, message, status)
+            try:
+                pv = C.preview(a, rows, change if isinstance(change, dict) else None, self._root_text,
+                               self._cap_facts())
+            except C.ChangeError as e:
+                return refused(e.code, e.message, 400)
+            if op == "preview":
+                return ok(pv)
+            if not pv["changes_anything"]:
+                return refused("NO_CHANGE", "this change would not alter anything", 400)
+            if str(body.get("digest", "")) != pv["digest"]:
+                return refused("PREVIEW_CHANGED", "the agent's permissions changed since the preview; preview again")
+            if pv["escalation"] and body.get("confirm_escalation") is not True:
+                return refused("CONFIRMATION_REQUIRED", "this gives the agent more access (" +
+                               "; ".join(pv["escalation_reasons"]) + "): confirm it explicitly")
+            st.append("admin", tool="permission_change", agent_id=aid,                   # durable first
+                      detail={"plan": pv["plan"], "escalation": pv["escalation"], "reasons": pv["escalation_reasons"],
+                              "digest": pv["digest"], "via": via})
+            try:
+                cancelled = idn.apply_permissions(aid, pv["plan"])
+            except (ValueError, KeyError) as e:
+                st.append("admin", tool="permission_change", agent_id=aid, outcome="refused",
+                          error_code="INVALID_CHANGE", detail={"why": str(e)[:120]})
+                return refuse("INVALID_CHANGE", "the change could not be applied; nothing changed", 400)
+            except self._m.identity.StoredNotLoaded as e:
+                try:
+                    st.append("admin", tool="permission_change", agent_id=aid, outcome="unknown",
+                              error_code="STORED_NOT_LOADED", detail={"approvals_cancelled": e.cancelled})
+                except self._m.store.AuditUnavailable:
+                    pass
+                return refuse("STORED_NOT_LOADED", "the change was stored, but could not be loaded: this agent is "
+                                                   "blocked until MCP is turned off and on again", 500)
+            except Exception as e:
+                try:
+                    st.append("admin", tool="permission_change", agent_id=aid, outcome="error",
+                              error_code="APPLY_FAILED", detail={"exc": type(e).__name__})
+                except self._m.store.AuditUnavailable:
+                    pass
+                return refuse("APPLY_FAILED", "the change could not be stored; nothing changed", 500)
+            new = idn.agents.get(aid)
+            eng = self.engine
+            st.append("admin", tool="permission_change", agent_id=aid, outcome="ok",
+                      detail={"approvals_cancelled": cancelled, "role": new.role if new else None,
+                              "policy_version": eng.policy.version(new) if (eng is not None and new) else None})
+            rows2 = st.grants_of(aid)
+        return ok({"ok": True, "agent_id": aid, "approvals_cancelled": cancelled, "role": new.role,
+                   "grants": rows2, "capabilities": sorted(new.capabilities),
+                   "matrix": C.agent_view(C.agent_from_rows(new, rows2), self._cap_facts())})
 
     def _dash_overview(self, st, idn):
         """Handler thread. State published by the main thread (``_publish``) plus live flags and the audit summary."""

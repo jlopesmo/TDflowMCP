@@ -27,3 +27,6 @@ Target resolution is security-critical. Each resolver needs dedicated tests cove
 - **Revision (review 6):** creation uses an **allowlist** of operator types in Phase 1. Reference, file and Python-style parameters, wires into DATs, and DAT text without the user's `tdflowdata` tag are classified as `execute`. Clone and shortcut parameters are denied.
 - The policy engine's branch-coverage target is **not measured** (no coverage tool available; none installed).
 - Any bypass found in review blocks Phase 1C. **Review 6 found three High classification gaps; all are fixed and re-tested** ([review 6](../research/2026-11-22-phase-1b-review.md)).
+
+## Amendment (owner D25, 2026-11-25): changing an agent's role
+An agent's role can change after creation, through preview and apply ([ADR-0016](0016-capabilities-page-and-permission-editing.md)): allow grants with the old role's full action set get the new role's set, narrowed grants keep only actions the new role has, deny grants never change, and allow grants never exceed the role. The change and the cancellation of the agent's open approvals are one transaction; more access needs explicit confirmation. Evaluation (§3.2 of the security model) is unchanged.

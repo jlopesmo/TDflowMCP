@@ -31,3 +31,6 @@ Phase 1C acceptance: Claude Code connects using only the generated text, and a S
 - **Skills round-trip: passed** on a disposable home and project folder. Preview/confirm, stale preview refused, modified file never overwritten, uninstall keeps modified files, unlisted target refused, audited. Junction rejection is unit-tested on Windows.
 - **Version mismatch: surfaced** on the Setup page and to the agent (`expected_skill_version`).
 - Codex CLI, Cursor and VS Code Copilot remain `documented` (no live test).
+
+## Amendment (owner D25, 2026-11-25): agents report their own capabilities
+`tdflow_capabilities` lets an agent report its own effective capabilities and send the user to the dashboard's Capabilities page through Open Dashboard; Skill 1.6, the full instructions and the Copy Agent Prompt say so ([ADR-0016](0016-capabilities-page-and-permission-editing.md)). The generated texts still contain no secret and no claim about the agent's permissions: the server reports them.

@@ -45,3 +45,6 @@ The first hands-on acceptance of 1.0.0rc1 showed the initial configuration was c
   - The built component shows the Setup page from `Opensetup` in the real default browser, and nothing listens before the pulse.
   - Every acceptance criterion in [phase-1](../milestones/phase-1-core-server.md) is verified in TD.
   - Parameter naming changes: `Runchecks` → `Rundiagnostics` (owner wording). Added `Statusdetail` and `Setupurl`.
+
+## Amendment (owner D25, 2026-11-25): main page order and refusal text
+On the TDflowMCP page, **Run Diagnostics** and **Enable MCP** are the first two actionable controls, with **Suspend Agents** directly after them; the connection controls follow. The preconditions to enable MCP are unchanged; the refusal says `No agent: Connect Agent` (no agent yet) or `Not ready: see Diagnostics`, both within the parameter window's width, and both are audited. The Browser sign-in dialog lists the codes as numbered lines and uses short buttons ([record](../research/2026-11-25-capabilities-and-final-polish.md)).

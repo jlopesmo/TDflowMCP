@@ -37,6 +37,7 @@
       <button type="button" role="tab" data-tab="activity">Activity</button>
       <button type="button" role="tab" data-tab="sessions">Sessions</button>
       <button type="button" role="tab" data-tab="agents">Agents</button>
+      <button type="button" role="tab" data-tab="capabilities">Capabilities</button>
       <button type="button" role="tab" data-tab="memory">Memory</button>
       <button type="button" role="tab" data-tab="reports">Reports</button>
       <button type="button" role="tab" data-tab="settings">Settings</button>
@@ -109,6 +110,71 @@
       <div id="token-once" hidden>
         <p class="warn">This token is shown only once. Store it as the <code>TDFLOW_TOKEN</code> environment variable. Never paste it into project files.</p>
         <pre id="token-value" class="secret" tabindex="0"></pre>
+      </div>
+    </section>
+
+    <section data-panel="capabilities" hidden>
+      <div class="caps-head">
+        <h2>Capabilities</h2>
+        <label class="inline-label">Agent <select id="c-agent"></select></label>
+        <span id="c-state" class="hint" role="status"></span>
+        <button id="c-jump" type="button" class="secondary small">Change permissions</button>
+      </div>
+      <p class="hint">What TDflowMCP supports, what each role can be given, and what the selected agent can do now. The component checks every call itself, on every operator path; this page shows permissions and changes them through the same backend as the Agents tab and TouchDesigner.</p>
+      <ul id="c-legend" class="legend" aria-label="Legend"></ul>
+      <p id="c-banner" class="banner" role="alert" hidden></p>
+      <div class="caps-layout">
+        <div class="caps-main">
+          <div class="caps-scroll">
+            <table id="caps" class="caps">
+              <caption class="sr-only">Capabilities by group: TDflowMCP support, each role, and the selected agent</caption>
+              <thead>
+                <tr class="colgroups"><td colspan="2"></td><th scope="col">TDflowMCP</th><th scope="colgroup" colspan="3">Most each role can be given</th><th scope="col">This agent now</th></tr>
+                <tr><th scope="col">Group</th><th scope="col">Capability</th><th scope="col">Supported</th><th scope="col">Read Only</th><th scope="col">Builder</th><th scope="col">Operator</th><th scope="col" id="c-agent-col">Selected agent</th></tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <p id="c-detail" class="caps-detail" role="status">Select a capability to see which tools provide it and why it has its status.</p>
+          <div class="caps-fixed">
+            <div><h3>Always protected <span class="hint">(for every agent; no permission changes these)</span></h3><ul id="c-protected"></ul></div>
+            <div><h3>Not implemented</h3><ul id="c-future"></ul></div>
+          </div>
+        </div>
+        <aside class="caps-edit" aria-labelledby="c-edit-title">
+          <h3 id="c-edit-title">Change permissions</h3>
+          <p class="hint" id="c-edit-who">–</p>
+          <div id="c-result" hidden>
+            <h4>Effect of this change</h4>
+            <ul id="c-diff"></ul>
+            <h4>Scopes after this change</h4>
+            <ul id="c-scopes-after" class="grants-after"></ul>
+            <ul id="c-notes" class="hint"></ul>
+            <p id="c-escalation" class="warn" hidden></p>
+            <label class="check" id="c-confirm-wrap" hidden><input type="checkbox" id="c-confirm"> I confirm: give this agent more access</label>
+            <div class="row"><button id="c-apply" type="button">Apply change</button></div>
+          </div>
+          <p id="c-status" role="status"></p>
+          <form id="c-form" autocomplete="off">
+            <label>Role
+              <select id="c-role"></select>
+            </label>
+            <p id="c-role-acts" class="hint"></p>
+            <fieldset>
+              <legend>Scopes (a deny overrides an allow)</legend>
+              <ul id="c-grants" class="grants"></ul>
+              <div class="add-grant">
+                <label>Scope <input id="c-scope" maxlength="256"></label>
+                <div class="acts" id="c-acts" role="group" aria-label="Actions"></div>
+                <label>Effect <select id="c-effect"><option value="allow">allow</option><option value="deny">deny</option></select></label>
+                <button id="c-add" type="button" class="secondary small">Add scope</button>
+              </div>
+            </fieldset>
+            <label class="check"><input type="checkbox" id="c-cap-repo"> May record tasks into a linked repository folder</label>
+            <p class="hint">Code Mode is a project setting (Settings tab), not a per-agent permission. Protected and not-implemented capabilities cannot be enabled.</p>
+            <div class="row"><button id="c-preview" type="submit">Preview change</button><button id="c-reset" type="button" class="secondary">Reset</button></div>
+          </form>
+        </aside>
       </div>
     </section>
 

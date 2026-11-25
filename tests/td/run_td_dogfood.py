@@ -42,7 +42,7 @@ TOOLS = ["tdflow_connect", "tdflow_create_operator", "tdflow_delete_operator", "
          "tdflow_task_list", "tdflow_task_checkpoint", "tdflow_handoff_create", "tdflow_handoff_resume",
          # Phase 3/4 (2026-11-23)
          "tdflow_describe_network", "tdflow_capture_top", "tdflow_experiment_create", "tdflow_experiment_promote",
-         "tdflow_experiment_discard", "tdflow_lease_scope", "tdflow_approval_status"]
+         "tdflow_experiment_discard", "tdflow_lease_scope", "tdflow_approval_status", "tdflow_capabilities"]
 ALLOWED = [f"mcp__tdflow__{t}" for t in TOOLS] + ["Skill"]
 SESSION_S = 420                                   # per session; the launch and in-TD budgets cover 5 of these
 TASKS = {

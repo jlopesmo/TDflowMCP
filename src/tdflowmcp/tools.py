@@ -123,6 +123,14 @@ def core_registry() -> Registry:
     T = r.register
     T(Tool("tdflow_whoami", "Who am I", "Your agent identity, role, effective scopes, server and tool-surface "
            "versions and limits.", EMPTY, (), "none", "whoami", read_only=True, idempotent=True))
+    # Owner D25: the caller's own effective capabilities, kept apart from what TDflowMCP supports, and the address
+    # of the dashboard's Capabilities page (no credential: the browser must be paired in TouchDesigner).
+    T(Tool("tdflow_capabilities", "My capabilities", "What YOU may do in this project right now, as the server "
+           "enforces it: available, approval required (you may ask; the user approves each call), and what is not "
+           "available to you (denied by your role, scopes or a setting; not implemented; protected for everyone). "
+           "Also says how the user opens the dashboard's Capabilities page (Open Dashboard in TouchDesigner), where they "
+           "see every capability and can change your permissions. Use it when asked what you can do.", EMPTY, (), "none", "capabilities",
+           read_only=True, idempotent=True))
     T(Tool("tdflow_project_info", "Project info", "TouchDesigner build, project name, FPS and the top-level "
            "components under the project root that you may read.", EMPTY, ("read",), "project", "project_info",
            read_only=True, idempotent=True))

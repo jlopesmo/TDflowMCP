@@ -1,6 +1,24 @@
 # TDflowMCP 1.0 release candidate: changelog, compatibility and acceptance checklist
 
-**Current candidate: `1.0.0rc5`** (owner D24: **Copy Agent Prompt**, a state-aware first message for a new coding-agent chat; [record](../research/2026-11-24-copy-agent-prompt.md)). It follows `1.0.0rc4`, with nothing else changed. rc4 was owner D23: the rc3 restart finding explained and fixed, automated acceptance, UX-08/UX-09, review 20; [record](../research/2026-11-24-rc4-restart-and-acceptance.md)). It follows `1.0.0rc3` (one-click agent connection, owner D22, [ADR-0015](../decisions/0015-consent-based-client-connection.md)), whose hands-on owner acceptance passed connection, real agent work and suspension, and found the restart display issue. It replaces `1.0.0rc2` (`132e8c3`, package `TDflowMCP-1.0.0rc2-132e8c3317`, tox `dfabfaca…`); the owner's acceptance of rc2 found that first-time users still handled tokens, environment variables and MCP configuration. Commit and package hashes for rc3 are in the [validation index](../icm/validation-index.md) and [current state](../icm/current-state.md#commit-record).
+**Current candidate: `1.0.0rc6`** (owner D25: the **Capabilities** page and permission editing, the main-page order, the Browser sign-in codes; [record](../research/2026-11-25-capabilities-and-final-polish.md), [ADR-0016](../decisions/0016-capabilities-page-and-permission-editing.md)). **The 1.0 feature set is frozen** with this candidate ([roadmap](../icm/roadmap.md#10-feature-freeze-owner-d25-2026-11-25)). It follows `1.0.0rc5` (owner D24: **Copy Agent Prompt**, a state-aware first message for a new coding-agent chat; [record](../research/2026-11-24-copy-agent-prompt.md)), which followed `1.0.0rc4`. rc4 was owner D23: the rc3 restart finding explained and fixed, automated acceptance, UX-08/UX-09, review 20; [record](../research/2026-11-24-rc4-restart-and-acceptance.md)). It follows `1.0.0rc3` (one-click agent connection, owner D22, [ADR-0015](../decisions/0015-consent-based-client-connection.md)), whose hands-on owner acceptance passed connection, real agent work and suspension, and found the restart display issue. It replaces `1.0.0rc2` (`132e8c3`, package `TDflowMCP-1.0.0rc2-132e8c3317`, tox `dfabfaca…`); the owner's acceptance of rc2 found that first-time users still handled tokens, environment variables and MCP configuration. Commit and package hashes for rc3 are in the [validation index](../icm/validation-index.md) and [current state](../icm/current-state.md#commit-record).
+
+## Changes in rc6
+- **Capabilities** tab on the dashboard. It shows:
+  - every capability, grouped;
+  - what TDflowMCP supports;
+  - the most each role can be given;
+  - what the selected agent can do now (Available · Approval Required · Denied · Not Implemented · Protected), with the reason when it cannot.
+
+  Edit roles, scopes and the repository-memory permission there:
+  1. **Preview** shows the effect, including the scopes after the change.
+  2. More access needs **I confirm**.
+  3. Every change is audited and cancels the agent's open approvals.
+
+  The Agents tab and TouchDesigner's Agents page use the same backend.
+- **`tdflow_capabilities`**: asked what it can do, an agent reports its own capabilities and points you to Open Dashboard → Capabilities. Skill 1.6.
+- **Main page:** Run Diagnostics, Enable MCP and Suspend Agents come first. Enable MCP with no agent says `No agent: Connect Agent`.
+- **Browser sign-in:** the codes are listed in the dialog (`Button 1:  ABC-DEF`, …) and the buttons are `1`, `2`, `3` and `Deny`. Before this, TouchDesigner's 260 px dialog clipped the codes and pushed Deny out of view.
+- **Fixed:** the dashboard always showed the "not running frames" warning and both Suspend and Resume (the `hidden` attribute was overridden).
 
 ## Changes in rc5
 - **Copy Agent Prompt** (formerly Copy Instructions, TDflowMCP page): copies a short first message for a new chat.
@@ -98,6 +116,9 @@ No other compatibility is claimed.
 - [x] rc3: the one-click connection on the candidate build. The real Claude Code CLI and the VS Code extension's engine connect using only the configuration TDflowMCP wrote, a live session works with no token step, and restart, revocation, repair, a failed setup and Disconnect all pass (validation index).
 - [x] rc3: independent security review 19 and the usability review, findings addressed (record).
 - [x] rc5: the package is built from a clean worktree of `6c36460` (`dist/TDflowMCP-1.0.0rc5-6c36460f74`, tox SHA-256 `84a83b7d71530dec…`, zip `dbfbebe2…`). Every suite and the visual review pass on the **packaged** `.tox`. A live Claude Code session started from the copied prompt alone called `tdflow_whoami`, gave an overview and changed nothing (validation index).
+- [x] rc6 (tree): every suite, the visual review and the browser checks pass on the candidate build `eef750ad…`, including the native/web permission parity and a live Claude Code session answering "What can you do?" from `tdflow_capabilities` (validation index).
+- [x] rc6: independent review 22 (security 0 High, 2 Medium fixed; usability 0 High, 7 Medium fixed) ([record](../research/2026-11-25-capabilities-and-final-polish.md)).
+- [x] rc6: the 1.0 feature set is frozen (roadmap).
 - [x] rc5: independent review 21 (0 High; 2 Medium fixed) ([record](../research/2026-11-24-copy-agent-prompt.md#independent-review-21-security-and-usability)).
 - [x] rc4: the package is built from a clean worktree of `9372e70` (`dist/TDflowMCP-1.0.0rc4-9372e70c28`, tox SHA-256 `eb2dcd7357bbe952…`, zip `807de04e…`). Every suite (1A, 1B, gate, memory, onboarding, native with first run / restart / second restart / abrupt kill / recovery and live clients) and the visual review pass on the **packaged** `.tox` (validation index).
 - [x] rc4: the full acceptance sequence A–G is automated with real TouchDesigner processes and real Claude Code clients, including restart, a second restart, an abrupt kill and recovery ([matrix](../research/2026-11-24-rc4-restart-and-acceptance.md#acceptance-matrix-automated)).
@@ -109,6 +130,13 @@ No other compatibility is claimed.
   4. Optionally Disconnect Agent and check that `~/.claude.json` no longer has `tdflow`.
 
 - [ ] **rc5: Copy Agent Prompt in the VS Code chat** (optional owner check, **not executed by an agent**). After Connect Agent, pulse Copy Agent Prompt, paste into a new Claude Code chat in VS Code, and check that the agent calls `tdflow_whoami`, gives an overview and waits. The same text was validated with the Claude Code CLI (`prompt.*`, validation index).
+- [ ] **rc6: the Capabilities page on the real profile** (optional owner check, **not executed by an agent**). Open Dashboard → Capabilities, then:
+  1. Pick an agent and check its rows match what it is allowed.
+  2. Change Builder → Operator: Preview shows the effect, and Apply needs **I confirm**.
+  3. Change it back.
+  4. Ask the agent "What can you do?": it should answer from `tdflow_capabilities` and point to Open Dashboard → Capabilities.
+
+  The same flows are automated (1B `caps.*`, browser checks, live Claude Code; validation index).
 - [ ] **macOS:** automatic setup not validated (no Mac).
 - [ ] **CI evidence:** no GitHub Actions run has been observed (B3). Release procedure step 1 requires observed CI.
 - [ ] **Latest TD build:** not tested (release procedure step 1 asks for the minimum and the latest build).

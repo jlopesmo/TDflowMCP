@@ -16,6 +16,7 @@ This file lists every check that exists, how to run it, and its last **executed 
 | `.tox` build (S2) | `python -I tools/build_tox/build.py [--check-reproducible]` | Source-first build, embedded hash self-check, reproducibility | See runs below |
 | In-TD integration suite (S3) | `python -I tests/td/run_td_tests.py [--mode real_browser]` | The packaged component in a disposable project: parameters, lifecycle, binding, LAN, gate, MCP disabled, Setup page, clipboard/browser failures, timeouts, conflicts, re-init, deletion, paused timeline, secrets | See runs below |
 | Phase 1B in-TD acceptance | `python -I tests/td/run_td_mcp_tests.py` | Packaged `.tox`: pairing and admin API, tokens, Enable MCP, both MCP eras, 16 tools, scoped allow/deny + hard denies + review-6 classification, verified undo + conflicts, kill switch incl. queued request, audit fail-closed/integrity/tamper, revocation, secrets, restart persistence | See runs below |
+| Web UI rendered checks (D25) | `python -I tests/web/run_web_screens.py` | The real dashboard and Setup pages in an installed Edge/Chrome (headless, disposable profile), against a stub API built by `capabilities.py`: the pairing code at 360–1920 px, the Capabilities matrix at 1280–1920 px, the edit flow, keyboard access; screenshots in `.tmp/web-screens/` | See runs below |
 | Secret scan | `python tools/scan_secrets.py` | Every git-tracked file (CI step) | See runs below |
 | Spikes S4 / S7 | `python -I spikes/s4/run_s4.py .tmp/s4`, `python -I spikes/s7/run_s7.py .tmp/s7` | Undo semantics; frame callbacks with the timeline paused | Executed; see [S4](../research/2026-11-22-s4-undo-semantics.md), [S7](../../spikes/s7/README.md) |
 | Spike S9 | `python -I spikes/s9/run_s9.py` | Frames while the TouchDesigner window is minimized (minimizes and restores its own disposable window) | Executed; see [S9](../research/2026-11-23-s9-minimized-window.md) |
@@ -198,6 +199,19 @@ Not published. CI: not observed |
 - Visual review 6/6 `screens.*`.
 
 Package zip `dbfbebe2…`. Not published. CI: not observed |
+| 2026-11-25 | TouchDesigner 2025.32440 + Claude Code CLI 2.1.289 + VS Code extension engine 2.1.332 + Microsoft Edge 158 headless (candidate tox `eef750ad846e3fa9…`, source digest `47638ab8…`, the rc6 tree before commit; reproducible: source digest equal, expanded diff `.build`, `local/time/cframe.ts`) | **rc6 tree suites (Capabilities page, parameter order, sign-in codes, D25)** | Unit 496 pass (3 skipped); `tests/unit/test_capabilities.py` checks every matrix status against `Policy.evaluate` for 7 agent fixtures, protected rows as hard denies, split grants and hidden escalations (review 22). **1B 89/89 + 246/246**:
+- `caps.*`: the matrix against live behavior, the agent's own view and page address without secrets, refusals (unsupported change, scope outside the root, stale preview, unconfirmed escalation, the web `/api/grants/add`), confirmed escalation at once, narrowing without confirmation, approved-but-unused requests cancelled and not runnable, every change audited;
+- **native/web parity**: a dashboard role change shows on the Agents page (`Read Only`), a scope added there shows on the dashboard, and the restore shows again;
+- `order.*` (Run Diagnostics, Enable MCP, Suspend Agents first; `No agent: Connect Agent` fits);
+- `web.SIGN_IN_*` (numbered codes, buttons `1`–`3`, Deny).
+
+1A 59/59 + 71/71; gate (`--only …`) 48/48 + 80/80; memory 52/52 + 182/182; onboarding 7/7 + 47/47 (Skill 1.6 = expected 1.6).
+- **Native 90/90 + 79/79.** The copied-prompt session: `tdflow_whoami` → `tdflow_project_info` → `tdflow_describe_network` (21.5 s). **Asked "What can you do…?", a real `claude -p` session called `tdflow_capabilities` (then `tdflow_whoami`), listed its Builder capabilities inside `/project1/fx/**`, what it cannot do (by role, not implemented, protected) and how to open the Capabilities page, and changed nothing** (18 s, 4 turns).
+- Visual review 12/12 (`screens.*`, `signin.*`): the real Browser sign-in dialog shows `Button 1:  WWW-MMM` lines and buttons `1 2 3 Deny` within 260 px; the main page order.
+- **Browser 179/179** (Edge 158): no clipped code or status, no horizontal scroll, compact rows, the editor beside the matrix from 1500 px and reachable below, preview stores nothing, Apply only after I confirm, the Agents tab through the same preview, keyboard (one tab stop, arrow keys, Enter, visible focus).
+- Before the review-22 fixes the 1B run had 4 harness failures, all in the new tests (a stale parameter-order list and reading the wrong refusal field); fixed in the tests.
+
+`check_docs` 0 problems; `scan_secrets` 0 findings. Not published. CI: not observed |
 
 ## Local environment facts (file inspection only, 2026-11-22)
 

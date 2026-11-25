@@ -32,7 +32,7 @@ from tdflowmcp.net import oslisteners  # noqa: E402
 
 O = "http://127.0.0.1:9480"
 TOKENS, STATE = {}, {"cookies": {}}
-EXPECTED_TOOLS = sorted(["tdflow_approval_status", "tdflow_capture_top", "tdflow_describe_network", "tdflow_lease_scope", "tdflow_experiment_create",
+EXPECTED_TOOLS = sorted(["tdflow_approval_status", "tdflow_capabilities", "tdflow_capture_top", "tdflow_describe_network", "tdflow_lease_scope", "tdflow_experiment_create",
                          "tdflow_experiment_promote", "tdflow_experiment_discard", "tdflow_save_project"] + ["tdflow_connect", "tdflow_create_operator", "tdflow_delete_operator", "tdflow_disconnect",
                          "tdflow_get_dat_text", "tdflow_get_errors", "tdflow_get_operator", "tdflow_get_parameters",
                          "tdflow_list_operators", "tdflow_project_info", "tdflow_session_list", "tdflow_session_note",
@@ -354,7 +354,7 @@ def cp_suspended(data, pid):
 
 def cp_resumed(data, pid):
     T("kill.resumed", ok(MCP(TOKENS["B"]).call("tdflow_whoami")))
-    approval_flow()
+    return approval_flow()
 
 
 def approved(E, tool, args):
@@ -515,7 +515,10 @@ def experiment_flow(E):
     # Save: approval only, and only with a grant on the project root (added and removed by the user here).
     T("save.scoped_agent_denied", E.call("tdflow_save_project").get("code") == "DENIED")
     aid = E.call("tdflow_whoami").get("agent_id")
-    g = base.jbody(admin("POST", "/api/grants/add", {"agent_id": aid, "scope": "/project1/**", "actions": ["execute"]})) or {}
+    unconf = admin("POST", "/api/grants/add", {"agent_id": aid, "scope": "/project1/**", "actions": ["execute"]})
+    T("caps.WEB_GRANT_ADD_NEEDS_CONFIRMATION", unconf["status"] == 409 and rcode(unconf) == "CONFIRMATION_REQUIRED")
+    g = base.jbody(admin("POST", "/api/grants/add", {"agent_id": aid, "scope": "/project1/**", "actions": ["execute"],
+                                                     "confirm_escalation": True})) or {}
     req, s = approved(E, "tdflow_save_project", {})
     T("save.NEEDS_APPROVAL", req.get("code") == "APPROVAL_REQUIRED" and "cannot be undone" in json.dumps(req.get("reasons")), r=req)
     T("save.SAVED_OR_NEVER_SAVED", ok(s) or (s.get("code") == "INVALID_ARGS" and "never been saved" in s.get("message", "")), r=s)
@@ -560,6 +563,127 @@ def network_flow(B):
     T("network.out_of_scope_denied", B.call("tdflow_describe_network", {"path": "/project1"}).get("code") == "DENIED")
 
 
+def rcode(r):
+    """The refusal code of a dashboard API answer ({"code", "message"})."""
+    return (base.jbody(r) or {}).get("code")
+
+
+def perm(aid, change, confirm=False, digest=None):
+    """Owner D25: preview a permission change, then apply exactly the previewed change. (preview json, apply response)"""
+    pv = base.jbody(admin("POST", "/api/permissions/preview", {"agent_id": aid, "change": change})) or {}
+    r = admin("POST", "/api/permissions/apply", {"agent_id": aid, "change": change, "confirm_escalation": confirm,
+                                                 "digest": pv.get("digest") if digest is None else digest})
+    return pv, r
+
+
+def capabilities_flow(E):
+    """Owner D25 (ADR-0016): the Capabilities page's API against live behavior, the agent's own view and the dashboard
+    address, permission changes (preview, digest, explicit confirmation of more access, audit), and the cancellation of
+    the agent's open approvals. Returns the agent the TouchDesigner side checks next (native/web parity)."""
+    B, C = MCP(TOKENS["B"]), MCP(TOKENS["C"])
+    bid, eid = B.call("tdflow_whoami").get("agent_id"), E.call("tdflow_whoami").get("agent_id")
+    T("caps.READ_NEEDS_THE_PAIRED_SESSION", admin("GET", "/api/capabilities", csrf=False)["status"] == 401)
+    r = admin("GET", "/api/capabilities")
+    cv = base.jbody(r) or {}
+    tools = {t for c in cv.get("catalog", []) for t in c.get("tools", [])}
+    T("caps.MATRIX_COVERS_EVERY_TOOL", r["status"] == 200 and set(EXPECTED_TOOLS) | {"tdflow_execute_script"} <= tools,
+      missing=sorted(set(EXPECTED_TOOLS) - tools))
+    T("caps.FIVE_STATUSES", sorted(cv.get("legend", {}).values()) == sorted(
+        ["Available", "Approval Required", "Denied", "Not Implemented", "Protected"]), legend=cv.get("legend"))
+    by = {a["id"]: a for a in cv.get("agents", [])}
+    bm, em = (by.get(bid) or {}).get("matrix", {}), (by.get(eid) or {}).get("matrix", {})
+    T("caps.BUILDER_ROW_STATES", bm.get("set_values", {}).get("status") == "available"
+      and bm.get("set_values", {}).get("where") == ["/project1/fx/**"]
+      and bm.get("expressions", {}).get("status") == "denied" and bm.get("expressions", {}).get("fix") == "role:operator"
+      and bm.get("p_component", {}).get("status") == "protected" and bm.get("n_python", {}).get("status") == "not_implemented",
+      b={k: bm.get(k) for k in ("set_values", "expressions")})
+    T("caps.OPERATOR_NEEDS_APPROVAL", em.get("expressions", {}).get("status") == "approval")
+    # The claims hold against the live server.
+    expr = {"path": "/project1/fx/level1", "expressions": {"opacity": "0.31"}}
+    T("caps.LIVE_BUILDER_DENIED_AS_SHOWN", B.call("tdflow_set_parameters", expr).get("rule_id") == "R1")
+    T("caps.LIVE_BUILDER_AVAILABLE_AS_SHOWN", ok(B.call("tdflow_set_parameters", {"path": "/project1/fx/level1",
+                                                                                   "values": {"opacity": 0.6}})))
+    T("caps.LIVE_OBSERVER_DENIED_AS_SHOWN", (by.get(C.call("tdflow_whoami").get("agent_id")) or {}).get("matrix", {})
+      .get("set_values", {}).get("status") == "denied" and denied(C.call("tdflow_set_parameters", {
+          "path": "/project1/fx/level1", "values": {"opacity": 0.6}})))
+    # The agent's own view, kept apart from what TDflowMCP supports, with the page address and no secret.
+    mine = B.call("tdflow_capabilities")
+    avail = {i["capability"] for i in (mine.get("your_capabilities") or {}).get("available", [])}
+    no = {i["capability"] for i in (mine.get("not_available_to_you") or {}).get("denied", [])}
+    T("caps.AGENT_REPORTS_ITS_OWN_CAPABILITIES", ok(mine) and (mine.get("agent") or {}).get("role") == "builder"
+      and "Set constant parameter values" in avail and "Set expressions and parameters that name operators or files" in no
+      and "YOUR effective permissions" in mine.get("about", ""), role=(mine.get("agent") or {}).get("role"))
+    T("caps.AGENT_GETS_THE_PAGE_ADDRESS", (mine.get("dashboard") or {}).get("capabilities_page") == O + "/ui/#capabilities"
+      and (B.call("tdflow_whoami").get("capabilities") or {}).get("page") == O + "/ui/#capabilities")
+    T("caps.NO_SECRET_IN_THE_AGENT_VIEW", not any(TOKENS[k] and TOKENS[k].split(".")[1] in json.dumps(mine) for k in TOKENS)
+      and "csrf" not in json.dumps(mine).lower() and "tdflow_admin" not in json.dumps(mine))
+    # Refusals: unsupported fields, scopes outside the root, a stale preview, more access without confirmation.
+    bad = admin("POST", "/api/permissions/preview", {"agent_id": bid, "change": {"protected": {"p_root": True}}})
+    T("caps.UNSUPPORTED_CHANGE_REFUSED", bad["status"] == 400 and rcode(bad) == "UNSUPPORTED_CHANGE")
+    out = admin("POST", "/api/permissions/preview", {"agent_id": bid, "change": {"add_grants": [
+        {"scope": "/sys/**", "actions": ["read"], "effect": "allow"}]}})
+    T("caps.SCOPE_OUTSIDE_ROOT_REFUSED", out["status"] == 400 and rcode(out) == "SCOPE_OUTSIDE_PROJECT_ROOT")
+    T("caps.apply_needs_csrf", admin("POST", "/api/permissions/apply", {"agent_id": bid, "change": {}}, csrf=False)["status"] == 403)
+    pv = base.jbody(admin("POST", "/api/permissions/preview", {"agent_id": bid, "change": {"role": "operator"}})) or {}
+    up = {d["id"]: d for d in pv.get("diff", [])}
+    T("caps.PREVIEW_SHOWS_THE_EFFECT", pv.get("escalation") is True and up.get("expressions", {}).get("to") == "approval"
+      and B.call("tdflow_whoami").get("role") == "builder", reasons=pv.get("escalation_reasons"))
+    _, stale = perm(bid, {"role": "operator"}, confirm=True, digest="0" * 64)
+    T("caps.STALE_PREVIEW_REFUSED", stale["status"] == 409 and rcode(stale) == "PREVIEW_CHANGED")
+    _, unconfirmed = perm(bid, {"role": "operator"})
+    T("caps.ESCALATION_NEEDS_CONFIRMATION", unconfirmed["status"] == 409 and rcode(unconfirmed) == "CONFIRMATION_REQUIRED"
+      and B.call("tdflow_whoami").get("role") == "builder")
+    _, applied = perm(bid, {"role": "operator"}, confirm=True)
+    req = B.call("tdflow_set_parameters", expr)
+    T("caps.CONFIRMED_ESCALATION_APPLIED_AT_ONCE", applied["status"] == 200 and B.call("tdflow_whoami").get("role") == "operator"
+      and req.get("code") == "APPROVAL_REQUIRED", status=applied["status"], req=req.get("code"))
+    T("caps.AGENT_VIEW_FOLLOWS", "Set expressions and parameters that name operators or files" in {
+        i["capability"] for i in (B.call("tdflow_capabilities").get("your_capabilities") or {}).get("approval", [])})
+    # Approval invalidation: the agent's pending and approved-but-unused requests are cancelled by any change.
+    a2 = E.call("tdflow_set_parameters", {"path": "/project1/fx/level1", "expressions": {"opacity": "0.42"}})
+    admin("POST", "/api/approvals/decide", {"id": a2.get("approval_id"), "decision": "approved"})
+    pv2, r2 = perm(bid, {"role": "builder"})                       # less access: no confirmation needed
+    T("caps.LESS_ACCESS_NEEDS_NO_CONFIRMATION", pv2.get("escalation") is False and r2["status"] == 200, status=r2["status"])
+    T("caps.CHANGE_CANCELS_THE_AGENTS_APPROVALS", (base.jbody(r2) or {}).get("approvals_cancelled", 0) >= 1
+      and B.call("tdflow_set_parameters", expr).get("rule_id") == "R1")
+    pv3, r3 = perm(eid, {"add_grants": [{"scope": "/project1/fx/zz_none/**", "actions": ["delete"], "effect": "deny"}]})
+    lst = {a["id"]: a for a in (base.jbody(admin("GET", "/api/approvals")) or {}).get("approvals", [])}
+    rerun = E.call("tdflow_set_parameters", {"path": "/project1/fx/level1", "expressions": {"opacity": "0.42"}})
+    par = (E.call("tdflow_get_parameters", {"path": "/project1/fx/level1", "names": ["opacity"]}).get("parameters") or [{}])[0]
+    T("caps.APPROVED_REQUEST_INVALIDATED", r3["status"] == 200 and (base.jbody(r3) or {}).get("approvals_cancelled") == 1
+      and lst.get(a2.get("approval_id"), {}).get("state") == "cancelled" and rerun.get("code") == "APPROVAL_REQUIRED"
+      and par.get("mode") == "CONSTANT", state=lst.get(a2.get("approval_id"), {}).get("state"), rerun=rerun.get("code"))
+    for x in (rerun, req):
+        if x.get("approval_id"):
+            admin("POST", "/api/approvals/decide", {"id": x["approval_id"], "decision": "denied"})
+    gid = next((g["id"] for g in (base.jbody(r3) or {}).get("grants", []) if g["scope"] == "/project1/fx/zz_none/**"), None)
+    pv4, r4 = perm(eid, {"remove_grants": [gid]})
+    T("caps.REMOVING_A_DENY_IS_MORE_ACCESS", pv4.get("escalation") is True and r4["status"] == 409)
+    T("caps.removed_with_confirmation", perm(eid, {"remove_grants": [gid]}, confirm=True)[1]["status"] == 200)
+    ev = (base.jbody(admin("POST", "/api/audit/search", {"tool": "permission_change", "limit": 50})) or {}).get("events", [])
+    T("caps.EVERY_CHANGE_AUDITED", sum(1 for e in ev if e.get("outcome") == "ok") >= 4
+      and any((e.get("detail") or {}).get("escalation") is True for e in ev)
+      and all((e.get("detail") or {}).get("via") in (None, "dashboard") for e in ev), n=len(ev))
+    # Native/web parity: this web change must show on TouchDesigner's Agents page (checked on the TD side).
+    did = MCP(TOKENS["D"]).call("tdflow_whoami").get("agent_id")
+    _, rd = perm(did, {"role": "observer"})
+    T("caps.web_role_change_for_the_native_check", rd["status"] == 200, status=rd["status"])
+    return {"cap_agent": did}
+
+
+def cp_caps_native(data, pid):
+    """The scope TouchDesigner's Agents page added shows on the Capabilities page; then the agent is restored."""
+    aid = data.get("agent")
+    cv = base.jbody(admin("GET", "/api/capabilities")) or {}
+    ag = next((a for a in cv.get("agents", []) if a["id"] == aid), {})
+    gid = next((g["id"] for g in ag.get("grants", []) if g["scope"] == "/project1/zz_native/**"), None)
+    T("caps.WEB_SHOWS_THE_NATIVE_CHANGE", gid is not None and ag.get("role") == "observer"
+      and "/project1/zz_native/**" in (ag.get("matrix", {}).get("inspect") or {}).get("where", []), grants=ag.get("grants"))
+    _, r = perm(aid, {"role": "builder", "remove_grants": [gid] if gid is not None else []}, confirm=True)
+    T("caps.agent_restored", r["status"] == 200 and MCP(TOKENS["D"]).call("tdflow_whoami").get("role") == "builder",
+      status=r["status"])
+
+
 def approval_flow():
     """Phase 2B (ADR-0005 gate): an approval executes only on the identical re-call, with targets and policy
     re-checked. Driven through the real MCP endpoint and the paired dashboard API."""
@@ -599,6 +723,7 @@ def approval_flow():
     network_flow(MCP(TOKENS["B"]))
     experiment_flow(E)
     lease_flow(E)
+    caps = capabilities_flow(E)
     # Dashboard: overview, live tail and a verified report.
     ov = base.jbody(admin("GET", "/api/overview")) or {}
     T("dashboard.overview", ov.get("mcp") is True and ov.get("cooking") is True and (ov.get("audit") or {}).get("ok") is True, ov=ov)
@@ -609,6 +734,7 @@ def approval_flow():
     T("dashboard.report_built", (rep.get("report") or {}).get("range", {}).get("events", 0) > 10
       and "verification" in rep.get("report", {}) and "# TDflowMCP audit report" in rep.get("markdown", ""))
     T("dashboard.mandatory_audit_cannot_be_disabled", admin("POST", "/api/settings", {"security_audit": False})["status"] == 400)
+    return caps
 
 
 def cp_queue_block(data, pid):
@@ -824,7 +950,7 @@ def cp_web_pair_untriggered(data, pid):
     return {}
 
 
-HANDLERS = {"setup_ready": cp_setup_ready, "pair_approved": cp_pair_approved, "enabled": cp_enabled,
+HANDLERS = {"caps_native": cp_caps_native, "setup_ready": cp_setup_ready, "pair_approved": cp_pair_approved, "enabled": cp_enabled,
             "native_token": cp_native_token, "native_rotated": cp_native_rotated, "native_disabled": cp_native_disabled,
             "native_approval_requested": cp_native_approval_requested, "native_approved": cp_native_approved,
             "web_pair_request": cp_web_pair_request, "web_paired": cp_web_paired,

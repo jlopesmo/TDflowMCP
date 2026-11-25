@@ -28,6 +28,7 @@ from typing import Callable, Dict, List, Optional, Sequence
 
 from tdflowmcp import SKILL_VERSION, TOOL_SURFACE_VERSION, __version__, schema
 from tdflowmcp import approvals as APR
+from tdflowmcp import capabilities as CAPS
 from tdflowmcp import codemode as CM
 from tdflowmcp import memory as MEM
 from tdflowmcp import memrepo as REPO
@@ -137,6 +138,7 @@ class Engine:
         self.main = main or (lambda fn: fn())
         self.audit_failed = False                  # sticky: an outcome could not be recorded
         self.code_mode = False                     # ADR-0004: off until the user turns it on (dashboard)
+        self.dashboard_page: Callable[[], str] = lambda: ""   # D25: the Capabilities page address (no credential)
         self.seen: Dict[str, dict] = {}            # agent_id -> {last, client}: authenticated requests (UX: Connected)
         self.leases: Dict[str, dict] = {}          # Phase 4: scope -> {agent_id, expires} (memory; audited)
         self._lease_lock = threading.RLock()       # re-entrant: _lease checks holders while holding it
@@ -673,7 +675,12 @@ class Engine:
                    "approvals": ("available: calls that run code or delete many operators wait for the user's "
                                  "approval on the dashboard, then run when you repeat the identical call"
                                  if self.policy.approvals else
-                                 "unavailable in Phase 1 (execute and large deletes are denied)")}
+                                 "unavailable in Phase 1 (execute and large deletes are denied)"),
+                   "capabilities": {"tool": "tdflow_capabilities", "page": self._page(),
+                                    "note": "Your own effective permissions, by capability; TDflowMCP supports more "
+                                            "than one agent may be allowed. Only the user changes them."}}
+        elif tool.name == "tdflow_capabilities":
+            out = CAPS.for_agent(agent, self.capability_facts(), self._page())
         elif tool.name == "tdflow_approval_status":
             out = None
         elif tool.name == "tdflow_session_note":
@@ -700,6 +707,17 @@ class Engine:
             return tool_error("AUDIT_UNAVAILABLE", "The audit store is unavailable.")
         out["audit_seq"] = seq
         return tool_result(out)
+
+    def _page(self) -> str:
+        try:
+            return str(self.dashboard_page() or "")
+        except Exception:
+            return ""
+
+    def capability_facts(self) -> dict:
+        """D25: the runtime facts the capability matrix needs (no TouchDesigner access)."""
+        return {"active": self.active, "code_mode": bool(self.code_mode), "approvals": bool(self.policy.approvals),
+                "root": self.policy.root}
 
     def last_undoable(self, agent_id: str) -> Optional[dict]:
         undone = set()

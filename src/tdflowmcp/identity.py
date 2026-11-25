@@ -42,6 +42,14 @@ class TokenRecord:
     revoked_at: Optional[str]
 
 
+class StoredNotLoaded(RuntimeError):
+    """A permission change was committed, but the in-memory snapshot could not be reloaded."""
+
+    def __init__(self, cancelled: int):
+        super().__init__("stored, not loaded")
+        self.cancelled = cancelled
+
+
 class Identity:
     def __init__(self, store, preload=None):
         """``preload``: rows from ``store.load_identity()`` already fetched by the audit worker, so the TD
@@ -139,6 +147,29 @@ class Identity:
             self.store.approvals_cancel_agent(agent_id)
         self.reload()
         return ok
+
+    def apply_permissions(self, agent_id: str, plan: dict) -> int:
+        """Owner D25: apply a plan from ``capabilities.plan_change`` (already validated against the stored state).
+        Returns the number of the agent's open approvals that were cancelled."""
+        if agent_id not in self.agents:
+            raise ValueError("no such agent")
+        if plan["role"] not in ROLES or not set(plan["capabilities"]) <= CAPABILITIES:
+            raise ValueError("invalid plan")
+        name = plan.get("display_name")
+        if name is not None and (not (1 <= len(name) <= 64) or any(ord(ch) < 32 for ch in name)):
+            raise ValueError("invalid name")
+        n = self.store.permissions_apply(agent_id, plan["role"], [(i, ",".join(a)) for i, a in plan["rewrite"]],
+                                         plan["remove"], [(g["scope"], ",".join(g["actions"]), g["effect"])
+                                                          for g in plan["add"]], plan["capabilities"],
+                                         plan.get("display_name"))
+        try:
+            self.reload()
+        except Exception:
+            # Review 22 (security 3): stored, but not loaded. Fail closed like ``revoke``: the agent's tokens stop
+            # working here until a reload succeeds (re-enabling MCP or reopening the project reloads).
+            self._snap = {k: v for k, v in self._snap.items() if v[2] != agent_id}
+            raise StoredNotLoaded(n) from None
+        return n
 
     def set_enabled(self, agent_id: str, enabled: bool) -> bool:
         ok = self.store.set_agent_enabled(agent_id, enabled)

@@ -21,8 +21,8 @@ TOX = os.environ.get("TDFLOW_TOX", "")
 ROOT = os.environ.get("TDFLOW_SRC_ROOT", "")
 MODE = os.environ.get("TDFLOW_TEST_MODE", "full")
 MAIN = threading.main_thread()
-EXPECTED_PARS = ["Version", "Compatsummary", "Rundiagnostics", "Lastcheck", "Status", "Statusdetail", "Codingagent",
-                 "Agentaccess", "Allowedscope", "Connectagent", "Enablemcp", "Suspendagents", "Tellagent",
+EXPECTED_PARS = ["Version", "Compatsummary", "Rundiagnostics", "Lastcheck", "Enablemcp", "Suspendagents", "Status",
+                 "Statusdetail", "Codingagent", "Agentaccess", "Allowedscope", "Connectagent", "Tellagent",
                  "Copytellagent", "Viewinstructions", "Connectedagents", "Manageagents", "Opendashboard",
                  "Detectedclients", "Agentsummary", "Agentselect", "Agentinfo", "Viewagents", "Agentscope",
                  "Addscope", "Removescope", "Enableagent", "Disableagent", "Repairconnection", "Disconnectagent",

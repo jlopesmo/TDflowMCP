@@ -1,22 +1,35 @@
 ---
 name: tdflow-core
-description: Use when working in a TouchDesigner project through the TDflowMCP MCP server (tools named tdflow_*). Covers checking identity and scope first, reading before changing, small audited changes, verified undo, resuming and handing over tasks through project memory, the kill switch, denials and what never to do without the user.
+description: Use when working in a TouchDesigner project through the TDflowMCP MCP server (tools named tdflow_*). Covers checking identity and scope first, reporting what you may do (tdflow_capabilities), reading before changing, small audited changes, verified undo, resuming and handing over tasks through project memory, the kill switch, denials and what never to do without the user.
 metadata:
-  tdflow-skill-version: "1.5"
+  tdflow-skill-version: "1.6"
 ---
 
 # Working in TouchDesigner with TDflowMCP
 
-TDflowMCP skill version: 1.5 (tool surface 1). This file is guidance. The TDflowMCP server enforces
+TDflowMCP skill version: 1.6 (tool surface 1). This file is guidance. The TDflowMCP server enforces
 every permission itself; nothing here grants access.
 
 ## 1. Start every session with `tdflow_whoami`
 - It returns your role, your scopes (which operator paths you may read or change, and which actions),
   the project root, `server_version`, `tool_surface_version` and `expected_skill_version`.
-- If `expected_skill_version` differs from this skill's version (1.5), tell the user: "The TDflowMCP
-  Skills on this computer are version 1.5 but the component expects <version>. Update them from the
+- If `expected_skill_version` differs from this skill's version (1.6), tell the user: "The TDflowMCP
+  Skills on this computer are version 1.6 but the component expects <version>. Update them from the
   component's Setup page." Then continue carefully, trusting the server's answers over this file.
 - Work only inside your scopes. Do not probe paths outside them: denials are recorded in the audit log.
+
+## 1a. "What can you do?": `tdflow_capabilities`
+- When the user asks what you can do (or what you may not), call `tdflow_capabilities` and answer from it.
+  It is **your own** effective access right now, as the server enforces it: `available`, `approval` (you may
+  ask; nothing runs until the user approves that exact call), and what is not available to you, with the
+  reason (`denied` by your role, scopes or a setting; `not_implemented`; `protected` for every agent).
+- TDflowMCP supports more than any one agent may be allowed. Never present its full feature list, this file
+  or the tool descriptions as your permissions, and never claim a permission the answer does not list.
+- Tell the user how to open the dashboard's Capabilities page, as `dashboard.how` says: pulse Open Dashboard
+  in TouchDesigner, approve the Browser sign-in there, then open the Capabilities tab (the
+  `dashboard.capabilities_page` address is for reference). There they see every capability, which roles can
+  have it, and can change your role, scopes and permissions. Never open the dashboard, request a pairing, ask
+  the user to approve a sign-in TouchDesigner did not open for them, or try to change your own permissions.
 
 ## 2. Read first, then change in small steps
 - Orient with `tdflow_project_info`, `tdflow_list_operators`, `tdflow_get_operator`,

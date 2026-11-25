@@ -97,10 +97,15 @@ request, then **Approve Request** or **Deny Request**.
 
 ## 5. The web pages (optional)
 On the **Web** page (or with **Open Dashboard** on the main page):
-- **Open Setup** and **Open Dashboard** open the page in your browser. TouchDesigner then asks you to approve the
-  sign-in and shows a code; approve only if the page shows the same code. Nothing secret travels in the address.
+- **Open Setup** and **Open Dashboard** open the page in your browser. TouchDesigner then shows a **Browser sign-in**
+  dialog listing three codes (`Button 1:  ABC-DEF`, …): press the button next to the code your page shows. A wrong
+  button denies; if no page opened or no code matches, press **Deny**. Nothing secret travels in the address.
 - The dashboard shows the same agents, permissions, approvals and activity, with searchable logs and reports.
   Changes made there and in TouchDesigner are the same changes.
+- The dashboard's **Capabilities** tab shows what TDflowMCP supports, what each role can be given and what each agent
+  can do now (Available, Approval Required, Denied, Not Implemented, Protected). Change an agent's role, scopes or
+  repository-memory permission there: **Preview** shows the effect, and giving more access needs **I confirm**.
+  Ask your agent "What can you do?" and it answers from its own permissions and points you here.
 - If you type the Setup address into a browser yourself, that browser must pair: compare the code under
   **Pairing Request** and pulse **Approve Pairing**.
 - **End Browser Session** signs every browser out.

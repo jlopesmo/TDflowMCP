@@ -158,6 +158,14 @@
   - The full text is unchanged under View Full Instructions, the `tellagent` DAT and the Setup page.
   - **Review 21:** 0 High, 2 Medium (a manual "ready" without an enabled agent; another agent's request counted as connected), both fixed; Low findings addressed or accepted.
   - **A real Claude Code session started from the copied prompt alone** called `tdflow_whoami`, then inspected the project, reported its role and scope, and changed nothing (native suite `prompt.*`, [validation index](validation-index.md)).
+- **1.0.0rc6 (owner D25, [ADR-0016](../decisions/0016-capabilities-page-and-permission-editing.md), [record](../research/2026-11-25-capabilities-and-final-polish.md)), verified on TouchDesigner 2025.32440:**
+  - **Capabilities page:** a capability matrix (TDflowMCP support, each role, the selected agent; Available · Approval Required · Denied · Not Implemented · Protected) whose statuses match `Policy.evaluate`. Permission editing (role, scopes, repository-memory permission) through preview, digest and explicit confirmation of more access, audited, with the agent's open approvals cancelled in the same transaction; native/web parity verified in both directions.
+  - **`tdflow_capabilities`:** a real Claude Code session asked "What can you do?" reported its own capabilities and how to open the page; Skill 1.6.
+  - **Main page:** Run Diagnostics, Enable MCP, Suspend Agents first; `No agent: Connect Agent`.
+  - **Browser sign-in:** numbered code lines and buttons `1`–`3` + Deny (rc5's dialog clipped the codes and hid Deny).
+  - **Dashboard fix:** the `hidden` attribute is respected (the "not running frames" warning and Suspend/Resume were always shown).
+  - Independent review 22: security 0 High, 2 Medium, 4 Low; usability 0 High, 7 Medium, 7 Low; all Medium fixed, Low fixed or accepted with reasons.
+- **The 1.0 feature set is frozen** (owner D25, [roadmap](roadmap.md#10-feature-freeze-owner-d25-2026-11-25)): only release-blocking defects, documentation and required compatibility fixes until 1.0.
 
 ## Not implemented (nothing below exists)
 - **Withheld by design:**
@@ -175,6 +183,7 @@
 ## Not observed / unverified
 - **CI:** no GitHub Actions run has been observed for any commit ([B3](roadmap.md#open-blockers-and-owner-actions)).
 - **Other clients:** Codex CLI, Cursor and VS Code Copilot connections are documented manual fallbacks only, with no live test. Client facts were re-checked against vendor documentation on 2026-11-24 ([client audit](../research/2026-11-24-one-click-connection.md#client-audit)).
+- **The Capabilities page on the owner's real profile** (rc6): automated with a stub API in headless Edge and against the real component API in the 1B suite; not opened by the owner yet.
 - **The owner's real profile with the Claude Code VS Code chat UI** (including pasting the rc5 Copy Agent Prompt there; the same text was validated with the Claude Code CLI): not executed by an agent. It requires the owner's own approval in TouchDesigner ([checklist](../operations/release-candidate-1.0.md)). The extension's engine is validated against the written configuration.
 - **macOS automatic setup** (Keychain, sh helper): implemented from documentation, **not validated**. Pre-existing: on macOS the private root is `~/TDflowMCP` with default permissions.
 - **Constrained Language Mode** (Windows PowerShell): the helper fails closed (no HMAC without .NET). Not tested on a CLM machine.
@@ -208,7 +217,7 @@
 - `0dd5bfd`: **Phase 2B increment 1** (approvals with identical re-call, the operator role, the `/ui/` governance dashboard), review 13. Pushed to `origin/dev` and observed with `git ls-remote` (`refs/heads/dev` = `0dd5bfd…`, `refs/heads/main` = `066dbd0…`, so `main` is unchanged). Verified on candidate `84f76d69…` built from the pre-commit tree; a clean build of the commit (tox `788925fa…`, `source_dirty` false) has the same source digest `14dac47f…`. No package was built. This record was added by the follow-up commit. CI: **not observed**.
 
 ## Next (owner direction D22: one-click connection; D20: finish TDflowMCP)
-0. **1.0.0rc5** ([checklist](../operations/release-candidate-1.0.md)): rc4 plus Copy Agent Prompt (D24). The owner's remaining acceptance steps on the real profile, now including pasting the copied prompt into a VS Code Claude Code chat. The restart finding is explained and fixed; everything else is automated. **macOS** validation. Owner decision: OAuth 2.1, the route to automatic setup for Codex, Cursor and Copilot ([ADR-0015](../decisions/0015-consent-based-client-connection.md#alternatives)).
+0. **1.0.0rc6** ([checklist](../operations/release-candidate-1.0.md)), **feature-frozen**: rc5 plus the Capabilities page, the main-page order and the sign-in codes (D25). The optional owner check of the Capabilities page on the real profile. rc5: Copy Agent Prompt (D24). The owner's remaining acceptance steps on the real profile, now including pasting the copied prompt into a VS Code Claude Code chat. The restart finding is explained and fixed; everything else is automated. **macOS** validation. Owner decision: OAuth 2.1, the route to automatic setup for Codex, Cursor and Copilot ([ADR-0015](../decisions/0015-consent-based-client-connection.md#alternatives)).
 1. **Phase 3 and 4:** done on `dev` (see above), except host-project source-first and file snapshots outside the project.
 2. **1.0 release candidate** `1.0.0rc1` (commit `348360a`, package `TDflowMCP-1.0.0rc1-348360a56b`, all suites pass on the packaged `.tox`): [checklist](../operations/release-candidate-1.0.md), awaiting the owner's acceptance. Dogfood round 3 (Phase 3/4 tools) passed.
 3. **ADR-0014 stage 1** (approved, D17), if it does not delay completion: isolated candidate build/test bound to the `.tox` hash, plus a manual promotion. Not started.

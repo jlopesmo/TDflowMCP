@@ -32,6 +32,23 @@
 ### 2.2 Roles
 Named grant bundles. Proposed built-ins: `observer` (read), `builder` (read + create/update/delete in assigned scopes, **no execute**) and `operator` (builder + approval-gated execute). Custom roles are allowed.
 
+**Changing permissions (owner D25, [ADR-0016](../decisions/0016-capabilities-page-and-permission-editing.md)).** An agent's role, grants and dedicated permissions can be changed after creation, only through the admin backend (paired dashboard session with CSRF, or TouchDesigner's own controls):
+- `POST /api/permissions/preview` computes the effective result and stores nothing.
+- `POST /api/permissions/apply` must carry the preview's digest, which binds the stored state and the change (`PREVIEW_CHANGED` otherwise).
+- **More access needs `confirm_escalation: true`** (`CONFIRMATION_REQUIRED` otherwise). More access means any of:
+  - a higher role;
+  - an added allow grant;
+  - actions added to a grant;
+  - a removed deny;
+  - an added dedicated permission;
+  - more capabilities or wider scopes in the effective matrix, now or once the agent is enabled and Code Mode is on.
+- The record is durable before the change. Refusals are audited too.
+- Role, grants, dedicated permissions and the cancellation of the agent's open approvals happen in **one SQLite transaction**. If the in-memory reload then fails, the agent's tokens are blocked until a reload (fail closed).
+- Allow grants never exceed the new role; scopes must lie inside the project root.
+- Hard denies, the parameter deny list, the creation allowlist, approval rules and Code Mode's setting are not editable.
+- The older `/api/grants/add|remove` need the same confirmation from the web for an allow grant or the removal of a deny.
+- The capability matrix is a **view**: the engine still decides every call per path.
+
 ### 2.3 Sessions
 MCP 2026-07-28 is stateless, so a **session** in TDflowMCP is a dashboard/audit grouping: consecutive requests from one `token_id` with the same client info, ending after a configurable idle gap (proposed 15 min). Legacy `initialize` clients also report their declared client info. Sessions are an observability construct and never an authorization input.
 
@@ -59,10 +76,11 @@ The match code only prevents approving the wrong request. Holding it grants noth
 - **Now:**
   1. When the user pulses **Open Setup** or **Open Dashboard**, the browser opens `/setup/#pair` or `/ui/#pair`. The address carries no secret.
   2. The page asks to pair at once (the reverse flow above).
-  3. For 90 s after that pulse, the pairing request opens a **TouchDesigner dialog**. **Number matching (review 19):** the dialog offers the real match code among two random decoys, and the user picks the code the page shows. Only that request is approved (`expect`); a wrong pick denies it. No dialog opens over another open dialog.
+  3. For 90 s after that pulse, the pairing request opens a **TouchDesigner dialog**. **Number matching (review 19):** the dialog offers the real match code among two random decoys, and the user picks the code the page shows. Only that request is approved (`expect`); a wrong pick denies it. No dialog opens over another open dialog. **Layout (D25):** TouchDesigner's dialog is a fixed 260 px, so the codes are numbered lines of the text (`Button 1:  ABC-DEF`) and the buttons are `1`, `2`, `3` and `Deny`; the choices, the mapping and the denial of a wrong pick are unchanged.
   4. A pairing request that nobody launched from TouchDesigner never opens a dialog; it waits on the Web page as before.
 - **Residual:** a local process could create the request before the real page does. A request is never replaced, so the real page then reports a pending request. The user sees a code in TouchDesigner that the page does not show, and is told to approve only matching codes. Nothing is granted without that approval.
 - Typed URLs pair exactly as before.
+- **Agents and the dashboard address (D25):** `tdflow_capabilities` and `tdflow_whoami` give agents the dashboard's address. It is the MCP endpoint's own host and port and carries no credential. They tell agents to send the user to **Open Dashboard** in TouchDesigner (so the dialog appears), never to approve a sign-in TouchDesigner did not open for them. A link an agent hands over would lead to the Web page fallback, where the residual above applies.
 
 **Reloads.** The page keeps its CSRF token in the tab's `sessionStorage`, never in a cookie or the URL, so reloading the same tab keeps the session while it is valid. There is no endpoint that hands out the CSRF token: a stolen cookie alone stays useless. **End Browser Session** signs every browser out.
 
