@@ -2,23 +2,23 @@
 
 A source-first, AI-powered TouchDesigner development environment: an MCP server packaged as a reusable `.tox`, with server-side permissions, agent identity, audit logging, approvals, a local browser dashboard, safe experimentation and optional Code Mode orchestration.
 
-> **TDflowMCP 1.1.0 was released for evaluation on 2026-11-26. [Download TDflowMCP-v1.1.0.tox](https://github.com/jlopesmo/TDflowMCP/releases/download/v1.1.0/TDflowMCP-v1.1.0.tox).**
-> - v1.1 adds Python expression validation, DAT source previews and reversible edits, and separate approval for activating supported Execute DATs. Approved Python runs in TouchDesigner with access to the host.
+> **TDflowMCP 1.2.0 was released for evaluation on 2026-11-26. [Download TDflowMCP-v1.2.0.tox](https://github.com/jlopesmo/TDflowMCP/releases/download/v1.2.0/TDflowMCP-v1.2.0.tox).**
+> - v1.2 adds local operator discovery, approval-gated custom controls and native TOP outputs on reusable Base COMPs. The owner connects external consumers in TouchDesigner. Approved Python runs in TouchDesigner with access to the host.
 > - The supported release configuration is **Windows with TouchDesigner 2025.32440**. Image capture requires the owner to lock the output TOP and keep bypass off on the TOP and its enclosing components.
 > - Claude Code and Codex on Windows support consent-based Connect Agent without copying credentials. Codex was tested with the Codex CLI 0.160.0 and the Codex VS Code extension 26.1120; the Codex desktop app is not verified. Other documented clients use a manual setup fallback.
 > - MCP binds to `127.0.0.1` only, enforces agent scopes and approvals, and requires an intact durable security audit.
-> - The `.tox` is built from the `v1.1.0` tag. [v1.1 development and release record](docs/milestones/v1.1-developer-capabilities.md)
-> - Earlier releases remain available. [v1.0.1](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.0.1) · [v1.0.0](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.0.0)
+> - The `.tox` is built from the `v1.2.0` tag. [v1.2 development and release record](docs/milestones/v1.2-component-authoring.md)
+> - Earlier releases remain available. [v1.1.0](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.1.0) · [v1.0.1](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.0.1) · [v1.0.0](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.0.0)
 
 ## Download and first run
 
-1. Download the versioned component. [TDflowMCP-v1.1.0.tox](https://github.com/jlopesmo/TDflowMCP/releases/download/v1.1.0/TDflowMCP-v1.1.0.tox) · [Byte-identical compatibility download](https://github.com/jlopesmo/TDflowMCP/releases/download/v1.1.0/TDflowMCP.tox)
-2. Run `Get-FileHash .\TDflowMCP-v1.1.0.tox -Algorithm SHA256` in PowerShell and compare the result with the value below. [Published checksums](https://github.com/jlopesmo/TDflowMCP/releases/download/v1.1.0/SHA256SUMS)
+1. Download the versioned component. [TDflowMCP-v1.2.0.tox](https://github.com/jlopesmo/TDflowMCP/releases/download/v1.2.0/TDflowMCP-v1.2.0.tox) · [Byte-identical compatibility download](https://github.com/jlopesmo/TDflowMCP/releases/download/v1.2.0/TDflowMCP.tox)
+2. Run `Get-FileHash .\TDflowMCP-v1.2.0.tox -Algorithm SHA256` in PowerShell and compare the result with the value below. [Published checksums](https://github.com/jlopesmo/TDflowMCP/releases/download/v1.2.0/SHA256SUMS)
 
-   `1df0fb4626d16c23c8a0d131a4a9573da7233623bb0533484499d10ff9ae2d06`
+   `330c1822cb6ef85c1f0751749ce00ef96ca5a047161e09800b0e6465833f3f9e`
 3. Save your TouchDesigner project, then drag the verified `.tox` into it. Use Windows with TouchDesigner 2025.32440, and try it first in a copy of a project.
 
-GitHub-hosted Windows and Ubuntu runners verified both binary downloads, the manifest, the checksums and the installation guide. [Download verification](https://github.com/jlopesmo/TDflowMCP/actions/runs/45775031074) · [Release notes and installation guide](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.1.0)
+GitHub-hosted Windows and Ubuntu runners verified both binary downloads, the manifest, the checksums and the installation guide. [Download verification](https://github.com/jlopesmo/TDflowMCP/actions/runs/45859185563) · [Release notes and installation guide](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.2.0)
 
 Then, in TouchDesigner:
 
