@@ -88,7 +88,7 @@ v1.1.0 shipped for Windows with TouchDesigner 2025.32440 after local, tagged-pac
 
 ## v1.2 component authoring
 
-The owner authorized development and publication subject to all applicable gates and reconfirmed the Windows/TouchDesigner 2025.32440 exception for v1.2.0. PR #9 requires independent security re-review of the custom control corrections, updated Windows and Ubuntu CI and resolution of the review threads. The release then requires clean-tag testing and hosted download checks. Script operator activation remains gated separately. [Scope and acceptance](../milestones/v1.2-component-authoring.md) · [Release procedure](../operations/verification-and-release.md#4-release-proposed)
+v1.2.0 was published after both PR findings were resolved, independent security re-review completed, and Windows and Ubuntu CI passed. The clean tagged package passed TouchDesigner acceptance on Windows with 2025.32440 under the owner's release-specific exception. Both hosted download checks passed. Script operator activation remains gated separately. [Scope and acceptance](../milestones/v1.2-component-authoring.md) · [Release receipts](validation-index.md#v120-tagged-release)
 
 ## D28 — Codex acceptance and release of 1.0.1 (owner, GitHub Issue #3, 2026-11-25)
 
