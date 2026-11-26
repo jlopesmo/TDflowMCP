@@ -354,7 +354,7 @@ class Engine:
             return {"deny": {"code": verdict.code, "rule": verdict.rule_id, "reason": verdict.reason,
                              "target": verdict.target, "policy_version": verdict.policy_version, "targets": targets}}
         return {"deny": None, "targets": targets, "rule": verdict.rule_id, "policy_version": verdict.policy_version,
-                "snapshot": res.context.get("snapshot")}
+                "snapshot": res.context.get("snapshot"), "read_identity": res.context.get("read_identity")}
 
     def _approval_gate(self, tool: Tool, args: dict, agent: Agent, base: dict, plan: dict,
                        given_id: Optional[str]) -> Optional[dict]:
@@ -428,6 +428,8 @@ class Engine:
         if [[t.action, t.path] for t in res.targets] != plan["targets"]:
             raise ToolFailure("PRECONDITION_CHANGED", "The project changed since the request was checked; "
                                                       "nothing was executed. Retry.")
+        if plan.get("read_identity") != res.context.get("read_identity"):
+            raise ToolFailure("PRECONDITION_CHANGED", "An inspection target was replaced. Retry the request.")
         if plan.get("approved"):
             review = res.context.get("approval_review")
             try:
@@ -1338,6 +1340,8 @@ def _requested_targets(tool: Tool, args: dict, facts=None) -> List[Target]:
         pairs.append((primary, args["dst"]))
     if isinstance(args.get("src"), str):
         pairs.append(("read", args["src"]))
+    if tool.resolver == "compare_tops":
+        pairs.extend(("read", args[side]) for side in ("left", "right"))
     out = []
     for action, path in pairs:
         prot, anc = facts(path) if facts else ("", "")

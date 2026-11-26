@@ -10,6 +10,7 @@ Resolver kinds (the adapter turns them into policy Targets):
   read_path      read on args.path
   read_children  read on args.path/* (results filtered)
   read_tree      read on args.path/** (results filtered)
+  compare_tops   read on both args.left and args.right
   set_params     update on args.path per parameter; execute for code effects; read on literal op() references
   create         create on args.parent/args.name (+ execute for executable types)
   delete         delete on args.path/** (count = subtree size)
@@ -35,7 +36,7 @@ from tdflowmcp.policy import ACTIONS
 
 RESOLVERS = {"none", "project", "read_path", "read_children", "read_tree", "set_params", "create", "delete",
              "wire", "dat_text", "undo", "memory", "script", "copy", "promote", "discard", "save", "lease",
-             "custom_params"}
+             "custom_params", "compare_tops"}
 PATH = {"type": "string", "minLength": 1, "maxLength": 512, "pattern": r"^/[A-Za-z0-9_/]*$",
         "description": "Absolute operator path, e.g. /project1/geo1"}
 NAME = {"type": "string", "minLength": 1, "maxLength": 64, "pattern": r"^[A-Za-z_][A-Za-z0-9_]*$"}
@@ -234,12 +235,18 @@ def core_registry() -> Registry:
            "Available on Windows with TouchDesigner 2025.32440.",
            obj({"path": PATH, "format": {"type": "string", "enum": ["png", "jpg"]}}, ["path"]), ("read",),
            "read_path", "capture_top", read_only=True, idempotent=True))
+    T(Tool("tdflow_compare_tops", "Compare locked TOPs", "Compare two readable owner-locked cached TOPs. "
+           "Reports dimensions and aggregate RGB differences for aligned samples up to 262144 pixels per input. "
+           "Shares capture's one-call-per-second limit. Available on Windows with TouchDesigner 2025.32440.",
+           obj({"left": PATH, "right": PATH}, ["left", "right"]), ("read",), "compare_tops", "compare_tops",
+           read_only=True, idempotent=True))
     # Phase 4 (dogfood finding 5): bounded network summary with heuristic hints; reads facts, never cooks.
     T(Tool("tdflow_describe_network", "Describe network", "One network level (the children of a COMP) in one call: "
            "each readable operator's type, family, inputs, flags, errors and TouchDesigner's own cook count and "
            "last cook time, the wiring as edges, counts by family, and heuristic hints (slow cooks, frame budget, "
-           "large locked textures, errors, outputs nothing reads). Hints point at where to look; they are not findings.",
-           obj({"path": PATH}, ["path"]), ("read",), "read_children", "describe_network", read_only=True,
+           "large locked textures, errors, outputs nothing reads). Set diagnostics to get observed faults, scoped "
+           "upstream leads and ranked last CPU cook samples without cooking or evaluating parameters.",
+           obj({"path": PATH, "diagnostics": {"type": "boolean"}}, ["path"]), ("read",), "read_children", "describe_network", read_only=True,
            idempotent=True))
     T(Tool("tdflow_get_errors", "Get errors", "Errors and warnings of an operator and its children (filtered).",
            obj({"path": PATH, "limit": {"type": "integer", "minimum": 1, "maximum": 500}}, ["path"]),

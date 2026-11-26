@@ -15,6 +15,7 @@ import ast
 import difflib
 import hashlib
 import json
+import math
 import os
 import posixpath
 import re
@@ -42,6 +43,7 @@ INERT_KEY = "tdflow_snapshot"
 RESERVED_TAGS = {"TDflowMCP", "tdflowProject"}
 MAX_CAPTURE_PIXELS = 1920 * 1080
 MAX_CAPTURE_BYTES = 8 * 1024 * 1024
+MAX_COMPARE_PIXELS = 512 * 512
 VERIFIED_TOP_READ_BUILD = "2025.32440"
 MAX_COPY = 500                         # operators inspected for a copy (the policy limit per call is lower)
 # Parameter styles whose value names another operator or a file: setting them can read or wire things
@@ -219,6 +221,10 @@ class TDAdapter(Adapter):
             return Resolution([])
         if k == "project":
             return Resolution([Target("read", self.root_fn())])
+        if k == "compare_tops":
+            tops = tuple(self._op(args[key], "operator") for key in ("left", "right"))
+            return Resolution([self._facts(top, "read") for top in tops],
+                              {"tops": tops, "read_identity": tuple(int(top.id) for top in tops)})
         if k in ("read_path", "read_children", "read_tree"):
             o = self._op(args["path"])
             if k == "read_children" and not o.isCOMP:
@@ -660,9 +666,8 @@ class TDAdapter(Adapter):
                          "anything to find out.")
         return r
 
-    def _t_capture_top(self, args, res, label, readable):
-        """Read the owner's locked texture without asking TouchDesigner to cook the network."""
-        o = res.context["op"]
+    @staticmethod
+    def _require_locked_top(o):
         if o.family != "TOP":
             raise ToolFailure("INVALID_ARGS", f"{o.path} is not a TOP.")
         if not _top_reads_verified():
@@ -671,14 +676,22 @@ class TDAdapter(Adapter):
         if not _has_locked_top_output(o):
             raise ToolFailure("TOP_LOCK_REQUIRED", "Ask the owner to lock the output TOP in TouchDesigner. "
                               "The TOP and its enclosing components must have bypass off.")
+
+    def _limit_top_read(self):
+        now = time.monotonic()
+        if now - self._last_capture < 1.0:
+            raise ToolFailure("RATE_LIMITED", "Capture and comparison share one call per second.")
+        self._last_capture = now
+
+    def _t_capture_top(self, args, res, label, readable):
+        """Read the owner's locked texture without asking TouchDesigner to cook the network."""
+        o = res.context["op"]
+        self._require_locked_top(o)
         w, h = int(o.width), int(o.height)
         if w * h > MAX_CAPTURE_PIXELS:
             raise ToolFailure("INVALID_ARGS", f"{o.path} is {w}x{h}; capture works up to {MAX_CAPTURE_PIXELS} pixels. "
                                               "Capture a smaller locked output TOP.")
-        now = time.monotonic()
-        if now - self._last_capture < 1.0:
-            raise ToolFailure("RATE_LIMITED", "one capture per second; try again in a moment")
-        self._last_capture = now
+        self._limit_top_read()
         fmt = args.get("format", "png")
         data = bytes(o.saveByteArray("." + fmt))
         if not data or len(data) > MAX_CAPTURE_BYTES:
@@ -688,6 +701,39 @@ class TDAdapter(Adapter):
                 "outside your scope (for example a Select or Render TOP).",
                 "_image": {"bytes": data, "mimeType": "image/png" if fmt == "png" else "image/jpeg"}}
 
+    def _t_compare_tops(self, args, res, label, readable):
+        tops = res.context["tops"]
+        for top in tops:
+            self._require_locked_top(top)
+        dimensions = [(int(top.width), int(top.height)) for top in tops]
+        if any(w <= 0 or h <= 0 or w * h > MAX_COMPARE_PIXELS for w, h in dimensions):
+            raise ToolFailure("TOP_COMPARE_SIZE", f"Comparison requires two locked textures of at most {MAX_COMPARE_PIXELS} pixels each.")
+        result = {side: {"path": top.path, "dimensions": list(size), "cook_count": _cooks(top)}
+                  for side, top, size in zip(("left", "right"), tops, dimensions)}
+        if dimensions[0] != dimensions[1]:
+            return dict(result, status="different_dimensions")
+        self._limit_top_read()
+        start = time.perf_counter()
+        samples = []
+        for top, (width, height) in zip(tops, dimensions):
+            pixels = top.numpyArray(delayed=False)
+            if pixels is None or len(pixels.shape) != 3 or pixels.shape[:2] != (height, width) or pixels.shape[2] < 3:
+                raise ToolFailure("TOP_PIXELS_UNAVAILABLE", "The locked texture did not return a matching RGB sample.")
+            rgb = pixels[:, :, :3].astype("float64")
+            if not math.isfinite(float(rgb.min())) or not math.isfinite(float(rgb.max())):
+                raise ToolFailure("TOP_PIXELS_UNAVAILABLE", "The locked texture contains non-finite RGB samples.")
+            samples.append(rgb)
+        threshold = 1 / 255
+        for side, rgb in zip(("left", "right"), samples):
+            result[side].update(mean_rgb=[round(float(v), 6) for v in rgb.mean(axis=(0, 1))],
+                                near_black_fraction=round(float((abs(rgb).max(axis=2) <= threshold).mean()), 6))
+        delta = abs(samples[0] - samples[1])
+        return dict(result, status="compared", rgb_threshold=threshold,
+                    mean_absolute_rgb_delta=round(float(delta.mean()), 6),
+                    changed_pixel_fraction=round(float((delta.max(axis=2) > threshold).mean()), 6),
+                    sample_ms=round(1000 * (time.perf_counter() - start), 3),
+                    note="Aligned cached RGB samples. Alpha, color-space conversion and upstream causes are outside this measurement.")
+
     def _t_describe_network(self, args, res, label, readable):
         """Report one network level and derive hints from facts available to the caller."""
         o = res.context["op"]
@@ -695,22 +741,39 @@ class TDAdapter(Adapter):
             raise ToolFailure("INVALID_ARGS", f"{o.path} is not a component.")
         kids = sorted(o.children, key=lambda c: c.name)
         vis = {t.path for t in readable([self._facts(c, "read") for c in kids])}
-        rows = []
+        rows, input_notes = [], {}
+        include_diagnostics = args.get("diagnostics", False)
         for c in kids:
             if c.path not in vis:
                 continue
             if len(rows) >= INS.MAX_ROWS:
                 break
+            inputs = list(c.inputs)
             r = {"path": c.path, "type": c.OPType, "family": c.family,
-                 "inputs": self._conn_paths(list(c.inputs), readable), "cook_count": _cooks(c)}
+                 "inputs": self._conn_paths(inputs, readable), "cook_count": _cooks(c)}
             for k in ("bypass", "display", "render"):
                 v = getattr(c, k, None)
                 if isinstance(v, bool):
                     r[k] = v
             try:
-                r["cook_ms"] = round(float(c.cpuCookTime), 4)
+                cook_ms = float(c.cpuCookTime)
+                if math.isfinite(cook_ms):
+                    r["cook_ms"] = round(cook_ms, 4)
             except Exception:
                 pass
+            if include_diagnostics:
+                minimum = getattr(c, "minInputs", None)
+                if isinstance(minimum, int) and len(r["inputs"]) == len(inputs) < minimum:
+                    input_notes[c.path] = {"minimum_inputs": minimum, "connected_inputs": len(inputs)}
+                if c.isCOMP:
+                    r["allow_cooking"] = c.allowCooking
+                if r["cook_count"]:
+                    try:
+                        cook_frame = float(c.cookAbsFrame)
+                        if math.isfinite(cook_frame):
+                            r["cook_abs_frame"] = cook_frame
+                    except Exception:
+                        pass
             try:
                 r["errors"], r["warnings"] = (c.errors() or "")[:500], (c.warnings() or "")[:500]
             except Exception:
@@ -724,6 +787,8 @@ class TDAdapter(Adapter):
         out = INS.summarize(rows, total=len(vis), filtered=len(kids) - len(vis))
         out["path"] = o.path
         out["hints"] = INS.hints(rows)
+        if include_diagnostics:
+            out["diagnostics"] = INS.diagnostics(rows, bool(out["truncated"] or out["filtered"]), input_notes)
         out["note"] = ("Cook times are TouchDesigner's own measurements of each operator's last cook; operators that "
                        "did not cook recently show stale or zero times. Hints are heuristics that point at where to "
                        "look, not findings.")

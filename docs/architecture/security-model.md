@@ -124,6 +124,7 @@ A grant is `{subject: agent|role, scope, actions, effect: allow|deny, constraint
 |---|---|
 | Read operator, parameter values or DAT text | `read` |
 | Set a parameter **constant** value | `update` (+ `param_denylist`) |
+| Compare two cached TOP outputs | `read` on both resolved TOPs. Recheck target identities, current grants, both locks, enclosing bypass flags and the verified runtime before sampling pixels. |
 | Replace an expression, bind or export with a constant | `update` and `execute`, because audited undo can restore the dynamic mode |
 | Set a parameter **expression**, **bind** or **export**, or change its mode to one of those | `update` **and** `execute` on the target (expressions evaluate Python) |
 | Add or edit bounded scalar custom definitions | `read`, `update` and `execute` on the Base or Container COMP, per-control update checks and exact approval. Existing project callbacks can observe definitions and values. |

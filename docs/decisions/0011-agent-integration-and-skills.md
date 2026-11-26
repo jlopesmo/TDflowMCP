@@ -42,3 +42,5 @@ Skill 1.7 and Copy Agent Prompt guide agents through Python DAT previews and sta
 ## v1.2 implementation note
 
 Skill 1.8 and Copy Agent Prompt guide operators through local discovery, approval of control definitions, and separate approval of the expressions that connect those controls to the network. See the [v1.2 milestone](../milestones/v1.2-component-authoring.md).
+
+Skill 1.9 adds the inspect, diagnose, authorized repair and verification workflow, including interpretation of CPU cook samples and cached RGB comparisons. [v1.3 milestone](../milestones/v1.3-visual-diagnostics.md)

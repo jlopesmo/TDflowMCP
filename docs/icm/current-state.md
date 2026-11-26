@@ -335,3 +335,11 @@ The corrected PR candidate applies per-control grant checks to custom definition
 ### v1.2.0 release
 
 The owner-approved PR merged as `a2ff1958abbd76c79220c3f58ac2db0a0d9e0a94` after both findings were resolved. The annotated `v1.2.0` tag points to that commit. The clean tagged package passed acceptance on Windows with TouchDesigner 2025.32440. GitHub-hosted Windows and Ubuntu runners verified all five public assets, including the byte-identical `.tox` files. [Release PR](https://github.com/jlopesmo/TDflowMCP/pull/9) · [Public release](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.2.0) · [Release receipts](validation-index.md#v120-tagged-release)
+
+## v1.3 visual diagnostics
+
+The four-scenario v1.2 diagnostic baseline verified passive inspection, separately authorized repairs, and restored output in a disposable project. Correlating reported errors, ranking last CPU cook samples, and comparing separate captures were caller tasks in that build. [Baseline evidence](validation-index.md#v130-diagnostic-baseline)
+
+The v1.3 development candidate adds opt-in network evidence and ranked CPU samples. It compares the cached RGB values of two readable owner-locked TOPs on Windows with TouchDesigner 2025.32440. The first four-scenario replay verified these paths and embedded Skill 1.9. [Candidate evidence](validation-index.md#v130-diagnostic-candidate)
+
+The candidate passed the full packaged regression and independent review. In a disposable project, a live agent diagnosed a disconnected output, used a scoped Builder credential to restore the one wire and verified the edge. An unchanged cook count explained why the previously reported error still needed a cook to verify. An owner-side check confirmed the restored output and preserved the unrelated operator. [Validation](validation-index.md#v130-diagnostic-candidate)
