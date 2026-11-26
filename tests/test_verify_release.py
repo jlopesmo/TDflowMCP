@@ -158,6 +158,39 @@ class CheckTests(unittest.TestCase):
 
 
 class MainTests(unittest.TestCase):
+    def test_versioned_binary_listed_in_primary_manifest_is_downloaded(self):
+        files = release("2.3.4", "v2.3.4")
+        alias = "TDflowMCP-v2.3.4.tox"
+        files[alias] = files["TDflowMCP.tox"]
+        files["SHA256SUMS"] += f"{V.sha256(files[alias])}  {alias}\n".encode()
+        argv = ["v2.3.4", "--expect-sums-sha256", anchors(files)["expect_sums"]]
+        rc, out = run_main(argv, files)
+        self.assertEqual(rc, 0)
+        self.assertIn(f"{alias}: {len(files[alias])} bytes, sha256 {V.sha256(files[alias])}", out)
+        del files[alias]
+        rc, out = run_main(argv, files)
+        self.assertEqual(rc, 1)
+        self.assertIn(f"missing asset(s): {alias}", out)
+
+    def test_legacy_alias_and_supplement_use_the_original_anchor(self):
+        files = release()
+        alias = "TDflowMCP-v1.0.1.tox"
+        expected = anchors(files)
+        argv = ["v1.0.1", "--expect-sums-sha256", expected["expect_sums"], "--require-versioned"]
+        files[alias] = files["TDflowMCP.tox"]
+        rc, out = run_main(argv, files)
+        self.assertEqual(rc, 1)
+        self.assertIn(f"missing asset(s): {V.ALIAS_SUMS}", out)
+        files[V.ALIAS_SUMS] = f"{expected['expect_tox']}  {alias}\n".encode()
+        self.assertEqual(run_main(argv, files)[0], 0)
+
+        files[alias] = b"changed tox"
+        files[V.ALIAS_SUMS] = f"{V.sha256(files[alias])}  {alias}\n".encode()
+        rc, out = run_main(argv, files)
+        self.assertEqual(rc, 1)
+        self.assertIn(f"{alias} is not byte-identical to TDflowMCP.tox", out)
+        self.assertIn(f"{V.ALIAS_SUMS} must list only {alias}", out)
+
     def test_arguments_are_validated_before_anything_is_downloaded(self):
         for argv in (["v1.0.1; echo x"], ["v1.0.1", "--repo", "a/b/c"], ["v1.0.1", "--repo", "https://evil"],
                      ["v1.0.1", "--repo", "../.."], ["v1.0.1", "--expect-tox-sha256", "xyz"],

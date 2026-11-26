@@ -8,7 +8,8 @@
 3. Refuses the package unless TDflowMCP.json says: built from that commit, not dirty, TD 2025.32440,
    no embedded hash mismatches.
 4. Writes dist/TDflowMCP-<version>-<short commit>/ with TDflowMCP.tox, TDflowMCP.json, INSTALL.md,
-   SHA256SUMS, and a .zip of that folder. dist/ is git-ignored. Removes the worktree afterwards.
+   SHA256SUMS, and a .zip of that folder. Tagged releases also include TDflowMCP-vX.Y.Z.tox
+   as the primary download. dist/ is git-ignored. Removes the worktree afterwards.
 Development versions (".dev") are packaged as development builds, never as releases.
 ``--release-tag vX.Y.Z`` packages that tag and marks TDflowMCP.json as a release. It is refused unless the tag is
 annotated and the embedded version is exactly X.Y.Z (no candidate or development suffix).
@@ -19,6 +20,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -61,7 +63,8 @@ def main():
         meta_p = os.path.join(wt, "build", "TDflowMCP.json")
         if r.returncode != 0 or not os.path.exists(meta_p):
             raise SystemExit("build failed:\n" + (r.stdout + r.stderr)[-3000:])
-        meta = json.load(open(meta_p, encoding="utf-8"))
+        with open(meta_p, encoding="utf-8") as f:
+            meta = json.load(f)
         problems = []
         if meta.get("source_commit") != commit:
             problems.append(f"source_commit {meta.get('source_commit')} != {commit}")
@@ -77,7 +80,7 @@ def main():
         version = meta["version"]
         if tag and tag != f"v{version}":
             problems.append(f"tag {tag} does not match the embedded version {version}")
-        if tag and not version.replace(".", "").isdigit():
+        if tag and not re.fullmatch(r"[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}", version):
             problems.append(f"version {version} is not a final release version")
         if problems:
             raise SystemExit("refusing to package: " + "; ".join(problems))
@@ -87,8 +90,12 @@ def main():
             shutil.rmtree(out)
         os.makedirs(out)
         shutil.copyfile(tox, os.path.join(out, "TDflowMCP.tox"))
+        assets = ["TDflowMCP.tox", "TDflowMCP.json", "INSTALL.md"]
         meta["package"] = {"name": name, "development_build": ".dev" in version, "from_clean_worktree": True}
         if tag:
+            versioned_tox = f"TDflowMCP-{tag}.tox"
+            shutil.copyfile(os.path.join(out, "TDflowMCP.tox"), os.path.join(out, versioned_tox))
+            assets.insert(0, versioned_tox)
             meta["release"] = True
             meta["note"] = (f"Release build from the annotated tag {tag}. Verified only on Windows with "
                             f"TouchDesigner {MIN_TD}.")
@@ -96,7 +103,7 @@ def main():
         with open(os.path.join(out, "TDflowMCP.json"), "w", encoding="utf-8", newline="\n") as f:
             json.dump(meta, f, indent=2)
         shutil.copyfile(os.path.join(wt, "docs", "operations", "install.md"), os.path.join(out, "INSTALL.md"))
-        sums = [f"{sha_file(os.path.join(out, n))}  {n}" for n in ("TDflowMCP.tox", "TDflowMCP.json", "INSTALL.md")]
+        sums = [f"{sha_file(os.path.join(out, n))}  {n}" for n in assets]
         with open(os.path.join(out, "SHA256SUMS"), "w", encoding="utf-8", newline="\n") as f:
             f.write("\n".join(sums) + "\n")
         zp = out + ".zip"

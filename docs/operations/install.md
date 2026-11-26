@@ -24,13 +24,16 @@ that does not grant rights to redistribute, modify or commercially reuse it.
   - Any other MCP client works with the generic instructions.
 
 ## 1. Check the download
-Compare the SHA-256 of `TDflowMCP.tox` with `SHA256SUMS` (and with `TDflowMCP.json`):
-- PowerShell: `Get-FileHash .\TDflowMCP.tox -Algorithm SHA256`
-- macOS / Linux: `shasum -a 256 TDflowMCP.tox`
+Choose the `TDflowMCP-vX.Y.Z.tox` asset when available. Compare its SHA-256 with `SHA256SUMS`, or with
+`SHA256SUMS-versioned` for v1.0.0 and v1.0.1 aliases. `TDflowMCP.json` records the same hash for both filenames.
+The compatibility download `TDflowMCP.tox` is listed in `SHA256SUMS`.
+
+- PowerShell, using the v1.0.1 filename: `Get-FileHash .\TDflowMCP-v1.0.1.tox -Algorithm SHA256`
+- macOS / Linux, to check the file: `shasum -a 256 TDflowMCP-v1.0.1.tox`
 
 ## 2. Add the component
 1. Save your project first (TDflowMCP keeps its data next to the saved `.toe`).
-2. Drag `TDflowMCP.tox` into your project (for example into `/project1`). Use **one** TDflowMCP component per
+2. Drag the verified `.tox` into your project (for example into `/project1`). Use **one** TDflowMCP component per
    project.
 3. The component checks the environment by itself. The **TDflowMCP** page shows the result in **System Check**
    (for example `Ready · 8 ok · 3 pending`), when they ran in **Last Check**, and what to do in

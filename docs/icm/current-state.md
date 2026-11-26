@@ -299,3 +299,9 @@ Evidence is in the [validation index](validation-index.md#2026-11-25-v101-releas
 - **Public download verified from outside the build network:** [verify-release run #1](https://github.com/jlopesmo/TDflowMCP/actions/runs/45726797505): on `ubuntu-latest` and `windows-latest`, an anonymous download of the four assets passed against the recorded hashes and the tag's commit.
 - **Repository:** the default branch is `main`, protected against force pushes and deletion (observed before the merge; not changed).
 - **Issue #3:** closed after the verification above. Issue #2 (the same download check for v1.0.0) is still open: see [roadmap B7](roadmap.md#open-blockers-and-owner-actions).
+
+## Versioned downloads — 2026-11-25
+
+- **Handoff audit:** `main` (the default branch) and `dev` matched at `1db52415943666419b0c68658dcdfe5d805e28f2`. Both tags still pointed to their recorded release commits. GitHub's public API showed both releases published, v1.0.1 as Latest and the four original assets on each. The v1.0.1 download workflow's Windows and Ubuntu jobs were confirmed successful.
+- **Owner-approved packaging:** tagged packages include the primary `TDflowMCP-vX.Y.Z.tox` and an identical `TDflowMCP.tox`. Local tests checked both filenames, the manifest and checksums, ZIP contents and verification using fixture bytes. [Decision](../decisions/0007-source-first-build.md#decision) and [validation](validation-index.md#2026-11-25-versioned-download-maintenance).
+- **Existing releases:** local copies of each tagged binary passed byte-equality and receipt checks. Publication and independent verification of the aliases are pending. The public v1.0.0 download still fails from the build network with certificate checking enabled. Issue #2 remains open.

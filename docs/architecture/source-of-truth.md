@@ -5,7 +5,7 @@
 ## Rules
 
 1. **Text source in `src/` is the only source of truth for TDflowMCP's code.** Python extensions, callback DATs, dashboard HTML/JS/CSS, tool schemas and the component's network description are all text files.
-2. **`TDflowMCP.tox` (and later `tdflowProject.tox`) is a build artifact.** It is produced by `tools/build_tox` (Phase 1) from `src/`, written to `build/` (git-ignored), and published only as a release asset with a sha256 manifest. Never edit a built `.tox` by hand and commit it.
+2. **`TDflowMCP.tox` (and later `tdflowProject.tox`) is a build artifact.** `tools/build_tox` (Phase 1) produces it from `src/` in the git-ignored `build/` directory. Release packaging distributes those bytes as `TDflowMCP-vX.Y.Z.tox` and `TDflowMCP.tox` with SHA-256 checksums. Never edit a built `.tox` by hand and commit it.
 3. **The component loads its Python from DATs whose content is embedded at build time** (release) or **synced from files** (`file` parameter, dev mode). Dev mode lets a developer edit `src/` in an IDE and have TD reload. Release mode has no external file dependency.
 4. **The network layout of the component** (which DATs/COMPs exist, their parameters) is declared in a text manifest (`src/component/manifest.json`, proposed). The builder constructs the COMP from it, so layout changes are diffable.
 5. **Documentation authority** follows the [ICM index](../icm/README.md#sources-of-truth). Architecture text never implies implementation.

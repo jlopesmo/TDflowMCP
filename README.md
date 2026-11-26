@@ -12,7 +12,9 @@ A source-first, AI-powered TouchDesigner development environment: an MCP server 
 
 ## Download and first run
 
-1. Open the [v1.0.1 release](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.0.1) and download [`TDflowMCP.tox`](https://github.com/jlopesmo/TDflowMCP/releases/download/v1.0.1/TDflowMCP.tox) (and `SHA256SUMS` if you want the checksum file).
+**Choose the verified `TDflowMCP-vX.Y.Z.tox` download when available.** Its SHA-256 matches the unversioned compatibility download for the same release.
+
+1. Download the verified v1.0.1 compatibility asset, [`TDflowMCP.tox`](https://github.com/jlopesmo/TDflowMCP/releases/download/v1.0.1/TDflowMCP.tox). Find the checksum file and installation guide on the [v1.0.1 release page](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.0.1).
 2. Check the download. In PowerShell: `Get-FileHash .\TDflowMCP.tox -Algorithm SHA256` must print
 
    `873d9f7522bffcb9d86618ccea4dfeb90d9b820063738f975944a1775c832532`

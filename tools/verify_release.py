@@ -1,7 +1,7 @@
 """Download the public assets of a GitHub Release without credentials and check them.
 
     python tools/verify_release.py v1.0.1 --expect-sums-sha256 HEX [--expect-tox-sha256 HEX]
-                                          [--expect-commit SHA] [--repo owner/name]
+                                          [--expect-commit SHA] [--repo owner/name] [--require-versioned]
 
 It is run by ``.github/workflows/verify-release.yml`` on GitHub-hosted runners, that is, from outside the network
 the release was built on (whose gateway does not allow a trusted connection to GitHub's asset host). No token is
@@ -11,7 +11,10 @@ on GitHub over HTTPS is refused.
 What a PASS means:
 - ``TDflowMCP.tox``, ``TDflowMCP.json``, ``SHA256SUMS`` and ``INSTALL.md`` were downloaded from the release's public
   URLs;
-- ``SHA256SUMS`` lists exactly the other three files, and each has exactly that SHA-256;
+- ``SHA256SUMS`` lists the binary, build manifest and install guide, and each has exactly that SHA-256;
+- if listed in ``SHA256SUMS``, the versioned binary is downloaded and checked for byte equality with the
+  compatibility binary. ``--require-versioned`` also checks legacy aliases using ``SHA256SUMS-versioned``,
+  which must name the alias with the original binary's anchored hash;
 - ``TDflowMCP.json`` states the SHA-256 and size of the downloaded ``TDflowMCP.tox``, the version of the tag,
   ``"release": true`` and that tag, a clean source tree, a TouchDesigner build and a source commit;
 - **anchored to what was recorded when the package was built:** ``SHA256SUMS`` itself has the SHA-256 given with
@@ -36,7 +39,8 @@ import urllib.parse
 import urllib.request
 
 ASSETS = ("TDflowMCP.tox", "TDflowMCP.json", "SHA256SUMS", "INSTALL.md")
-LISTED = ("TDflowMCP.tox", "TDflowMCP.json", "INSTALL.md")            # what SHA256SUMS must name, and nothing else
+LISTED = ("TDflowMCP.tox", "TDflowMCP.json", "INSTALL.md")
+ALIAS_SUMS = "SHA256SUMS-versioned"
 TAG_RE = re.compile(r"^v([0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4})\Z")
 NAME_RE = re.compile(r"^[A-Za-z0-9_-][A-Za-z0-9_.-]{0,99}\Z")
 SHA_RE = re.compile(r"^[0-9a-f]{64}\Z")
@@ -70,7 +74,16 @@ def parse_sums(text: str) -> dict:
     return out
 
 
-def check(files: dict, tag: str, expect_tox: str = "", expect_sums: str = "", expect_commit: str = "") -> list:
+def versioned_downloads(sums: dict, alias: str, require_versioned: bool) -> tuple:
+    if alias in sums:
+        return (alias,)
+    if require_versioned:
+        return (alias, ALIAS_SUMS)
+    return ()
+
+
+def check(files: dict, tag: str, expect_tox: str = "", expect_sums: str = "", expect_commit: str = "",
+          require_versioned: bool = False) -> list:
     """Problems found in the downloaded ``files`` ({name: bytes}); an empty list means everything matches."""
     problems = []
     m = TAG_RE.match(tag or "")
@@ -85,18 +98,33 @@ def check(files: dict, tag: str, expect_tox: str = "", expect_sums: str = "", ex
         return ["SHA256SUMS has characters that are not plain ASCII with line feeds"]
     except ValueError as e:
         return [str(e)]
-    if sorted(sums) != sorted(LISTED):
-        problems.append("SHA256SUMS must list exactly TDflowMCP.tox, TDflowMCP.json and INSTALL.md")
-    for name in LISTED:
-        if name in sums and sums[name] != sha256(files[name]):
+    alias = f"TDflowMCP-{tag}.tox"
+    extra = versioned_downloads(sums, alias, require_versioned)
+    missing = [name for name in extra if name not in files]
+    if missing:
+        problems.append("missing asset(s): " + ", ".join(missing))
+    listed = (*LISTED, alias) if alias in sums else LISTED
+    if set(sums) != set(listed):
+        problems.append("SHA256SUMS must list exactly " + ", ".join(listed[:-1]) + " and " + listed[-1])
+    for name in listed:
+        if name in sums and name in files and sums[name] != sha256(files[name]):
             problems.append(f"{name} does not have the SHA-256 that SHA256SUMS states")
+    tox = files["TDflowMCP.tox"]
+    if alias in extra and alias in files and files[alias] != tox:
+        problems.append(f"{alias} is not byte-identical to TDflowMCP.tox")
+    if ALIAS_SUMS in extra and ALIAS_SUMS in files:
+        try:
+            alias_sums = parse_sums(files[ALIAS_SUMS].decode("ascii"))
+        except ValueError:
+            alias_sums = {}
+        if alias_sums != {alias: sha256(tox)}:
+            problems.append(f"{ALIAS_SUMS} must list only {alias} with the SHA-256 of TDflowMCP.tox")
     try:
         meta = json.loads(files["TDflowMCP.json"].decode("utf-8"))
     except (ValueError, UnicodeDecodeError, RecursionError):
         return problems + ["TDflowMCP.json is not valid JSON"]
     if not isinstance(meta, dict):
         return problems + ["TDflowMCP.json is not a JSON object"]
-    tox = files["TDflowMCP.tox"]
     if meta.get("sha256") != sha256(tox):
         problems.append("TDflowMCP.json: sha256 is not the SHA-256 of the downloaded TDflowMCP.tox")
     if type(meta.get("size")) is not int or meta["size"] != len(tox):
@@ -167,6 +195,7 @@ def main(argv=None) -> int:
     ap.add_argument("--expect-sums-sha256", default="")
     ap.add_argument("--expect-tox-sha256", default="")
     ap.add_argument("--expect-commit", default="")
+    ap.add_argument("--require-versioned", action="store_true")
     a = ap.parse_args(argv)
     e_sums, e_tox = a.expect_sums_sha256.strip().lower(), a.expect_tox_sha256.strip().lower()
     e_commit = a.expect_commit.strip().lower()
@@ -177,19 +206,29 @@ def main(argv=None) -> int:
         return 2
     on_actions = os.environ.get("GITHUB_ACTIONS") == "true"
     files, lines = {}, []
-    for name in ASSETS:
+
+    def download(name):
         url = f"https://github.com/{a.repo}/releases/download/{a.tag}/{name}"
         try:
             files[name] = fetch(url)
         except Exception as e:                                    # a failed download is a finding, not a crash
             print(f"download failed: {name}: {type(e).__name__}")
-            continue
+            return
         line = f"{name}: {len(files[name])} bytes, sha256 {sha256(files[name])}"
         lines.append(line)
         print(line)
         if on_actions:
             print(command("notice", f"{a.tag} {name}", f"{len(files[name])} bytes, sha256 {sha256(files[name])}"))
-    problems = check(files, a.tag, e_tox, e_sums, e_commit)
+    for name in ASSETS:
+        download(name)
+    if "SHA256SUMS" in files:
+        try:
+            sums = parse_sums(files["SHA256SUMS"].decode("ascii"))
+        except ValueError:
+            sums = {}
+        for name in versioned_downloads(sums, f"TDflowMCP-{a.tag}.tox", a.require_versioned):
+            download(name)
+    problems = check(files, a.tag, e_tox, e_sums, e_commit, require_versioned=a.require_versioned)
     facts = manifest_facts(files)
     print(facts)
     anchored = bool(e_sums)
