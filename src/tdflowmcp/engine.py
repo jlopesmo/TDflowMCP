@@ -25,6 +25,7 @@ from __future__ import annotations
 import secrets
 import threading
 import time
+from dataclasses import replace
 from typing import Callable, Dict, List, Optional, Sequence
 
 from tdflowmcp import SKILL_VERSION, TOOL_SURFACE_VERSION, __version__, schema
@@ -271,7 +272,7 @@ class Engine:
             out = m(lambda: self._execute(tool, args, agent, token_id, plan, label, snap_id))
             outcome, code, detail = "ok", None, out.pop("_audit", None)
         except ToolFailure as f:
-            out, outcome, code, detail = None, "error", f.code, f.extra.get("_audit")
+            out, outcome, code, detail = None, ("unknown" if f.code == "OUTCOME_UNKNOWN" else "error"), f.code, f.extra.get("_audit")
             failure = f
         except MainNotRun as e:
             out, outcome, code, detail = None, "aborted", _main_code(e), None
@@ -774,8 +775,17 @@ class Engine:
         detail = _json(rec.get("detail"))
         if detail.get("reversible", "no") == "no":
             return self._deny(base, "NOT_REVERSIBLE", "U1", "that change is not reversible", None)
-        targets = [Target(action=INVERSE[a], path=p) for a, p in _json(rec.get("targets"), [])]
-        targets = [t for t in targets if t.action != "read"]
+        if detail.get("kind") == "custom_parameters":
+            names = detail.get("affected_parameters")
+            path = detail.get("path")
+            if (not isinstance(path, str) or not isinstance(names, list) or len(names) > 80
+                    or any(not isinstance(name, str) or not name for name in names)):
+                return self._deny(base, "UNDO_FAILED", "U1", "The custom control authorization record is unavailable.", None)
+            target = Target("update", path, change="custom_parameters")
+            targets = [target, *(replace(target, param=name) for name in names)]
+        else:
+            targets = [Target(action=INVERSE[a], path=p) for a, p in _json(rec.get("targets"), [])]
+            targets = [t for t in targets if t.action != "read"]
         verdict = self.policy.evaluate(agent, targets or [Target("update", self.policy.root + "/__none__")])
         base.update(targets=[[t.action, t.path] for t in targets], policy_version=verdict.policy_version)
         if not verdict.allow:
@@ -785,7 +795,7 @@ class Engine:
         except AuditUnavailable:
             return tool_error("AUDIT_UNAVAILABLE", "The audit store is unavailable, so nothing was undone.")
         snap = None
-        if detail.get("kind") == "dat_text":
+        if detail.get("kind") in ("dat_text", "custom_parameters"):
             try:
                 snap = self.store.get_snapshot(int(detail["snapshot"]))
             except (AuditUnavailable, KeyError, TypeError, ValueError):
@@ -800,7 +810,7 @@ class Engine:
                 live_targets = []
                 for target in targets:
                     protected, ancestor = path_facts(target.path)
-                    live_targets.append(Target(target.action, target.path, protected=protected, ancestor_of=ancestor))
+                    live_targets.append(replace(target, protected=protected, ancestor_of=ancestor))
             held = self._leased(agent, targets)
             if held:                                # review 17: an undo is a change like any other
                 raise ToolFailure("LEASED", self._lease_msg(agent, held) + "; nothing was undone")
@@ -820,7 +830,8 @@ class Engine:
             else:                                   # never call an unverified restoration a success (owner rule)
                 outcome, code = "error", r.get("code") or ("UNDO_UNVERIFIED" if r.get("undone") else "UNDO_FAILED")
         except ToolFailure as f:
-            r, outcome, code = {"undone": False, "verified": False}, "error", f.code
+            r = {"undone": False, "verified": False}
+            outcome, code = ("unknown" if f.code == "OUTCOME_UNKNOWN" else "error"), f.code
         except MainNotRun as e:
             r, outcome, code = {"undone": False, "verified": False}, "aborted", _main_code(e)
         except MainUnknown as e:
@@ -1275,7 +1286,7 @@ class Engine:
 # Which tools may be approved, per approval rule (Phase 2B increment 1): A1 (runs code) only for parameter
 # expressions and reference parameters; A2 (large delete) for deletes.
 APPROVABLE = {"A1": ("tdflow_set_parameters", "tdflow_set_dat_text", "tdflow_create_operator",
-                     "tdflow_execute_script", "tdflow_experiment_create", "tdflow_save_project"),
+                     "tdflow_edit_custom_parameters", "tdflow_execute_script", "tdflow_experiment_create", "tdflow_save_project"),
               "A2": ("tdflow_delete_operator", "tdflow_experiment_promote", "tdflow_experiment_discard")}
 LEASE_MAX_TOTAL_S = 3600                    # one agent may keep renewing a lease for at most an hour
 MUTATION_LIMIT = 5000                       # audited mutations read per evidence window
@@ -1316,7 +1327,7 @@ def _main_code(e) -> str:
 def _requested_targets(tool: Tool, args: dict, facts=None) -> List[Target]:
     """Path-only targets straight from the arguments (used when resolution fails), with protection facts
     from the adapter so errors never describe protected operators (review 6)."""
-    primary = {"set_params": "update", "create": "create", "delete": "delete", "wire": "update",
+    primary = {"set_params": "update", "custom_params": "update", "create": "create", "delete": "delete", "wire": "update",
                "dat_text": "update", "promote": "delete", "discard": "delete"}.get(tool.resolver, "read")
     pairs = []
     if isinstance(args.get("path"), str):

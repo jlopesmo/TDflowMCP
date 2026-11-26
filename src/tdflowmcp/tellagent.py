@@ -359,7 +359,7 @@ def agent_prompt(key: str, client: str = "", automatic: bool = False, version: s
     steps += [
         "Respect every permission and approval requirement TDflowMCP reports. If a call needs my approval, tell me "
         "what it will do and wait while I decide in TouchDesigner; never work around a refusal.",
-        "For Python tasks, preview DAT source with `proposed_text` and ask me to approve callback activation separately.",
+        "Preview Python. Ask me to approve callback activation, control definitions, and control expressions separately.",
         "Make no changes to the project until I give you a task. Finish with your overview and wait for my task.",
     ]
     return "\n".join([f"I'm working in a {td_project} with TDflowMCP v{version}. Please connect and get "

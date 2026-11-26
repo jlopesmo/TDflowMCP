@@ -104,6 +104,10 @@ def script():
     ext = comp.ext.TDflowMCPExt
     if MODE != "native_screens" and (MODE != "perf" or hasattr(ext, "connector")):
         ext.connector.dialog_opener = lambda title, text, buttons, cb: False   # no real dialogs in automated runs
+    if MODE == "component_workflow":
+        ext.launcher = lambda url: True
+        yield from __import__("td_runner_component").run(comp, ext, T, frames, until, checkpoint, R)
+        return
     if MODE.startswith(("gate", "perf", "onboard", "dogfood", "memory", "native", "probe", "codex")):        # audit-worker gate + 1B-vs-worker comparison
         ext.launcher = lambda url: True
         yield from __import__("td_runner_gate").run(MODE, comp, ext, T, frames, until, checkpoint, R)

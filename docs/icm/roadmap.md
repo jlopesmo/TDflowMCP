@@ -86,6 +86,10 @@ Extend expression and Python DAT authoring, preserve approval and audit enforcem
 
 v1.1.0 shipped for Windows with TouchDesigner 2025.32440 after local, tagged-package and hosted download verification. Script CHOP, SOP and TOP lifecycle authoring remains deferred pending a design decision on callback ownership, staging and activation. [Release evidence](validation-index.md#2026-11-26-v11-developer-capabilities)
 
+## v1.2 component authoring
+
+The owner authorized development and publication subject to all applicable gates and reconfirmed the Windows/TouchDesigner 2025.32440 exception for v1.2.0. PR #9 requires independent security re-review of the custom control corrections, updated Windows and Ubuntu CI and resolution of the review threads. The release then requires clean-tag testing and hosted download checks. Script operator activation remains gated separately. [Scope and acceptance](../milestones/v1.2-component-authoring.md) · [Release procedure](../operations/verification-and-release.md#4-release-proposed)
+
 ## D28 — Codex acceptance and release of 1.0.1 (owner, GitHub Issue #3, 2026-11-25)
 
 The owner ran the hands-on check on `1.0.1rc1` and reported it passed ([Issue #3](https://github.com/jlopesmo/TDflowMCP/issues/3#issuecomment-7175371704)): OpenAI Codex selected, Connect Agent approved, the Codex chat in VS Code returned `tdflow_whoami`, TouchDesigner showed `Agent Connected — Ready` and `Codex 0.171.0`. Decided:
