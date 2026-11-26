@@ -70,7 +70,7 @@ CATALOG: Tuple[Cap, ...] = (
         ("tdflow_project_info", "tdflow_list_operators", "tdflow_list_operator_types", "tdflow_get_operator", "tdflow_get_parameters",
          "tdflow_describe_network", "tdflow_get_errors", "tdflow_get_dat_text"), ("read",),
         note="Only inside the agent's scopes; anything else is filtered out of the answers."),
-    Cap("capture", "inspect", "Look at owner-locked TOP images", ("tdflow_capture_top",), ("read",),
+    Cap("capture", "inspect", "Look at owner-locked TOP images", ("tdflow_capture_top", "tdflow_compare_tops"), ("read",),
         note="Windows with TouchDesigner 2025.32440. The owner locks the TOP with bypass off on it and its "
              "enclosing components. Up to 1920x1080, one image per second."),
     # ---- editing ----------------------------------------------------------------------------------------------

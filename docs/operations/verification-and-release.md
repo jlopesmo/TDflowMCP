@@ -49,4 +49,6 @@ Both backfills passed on GitHub-hosted Windows and Ubuntu runners. The validatio
 
 **v1.2.0 compatibility exception (owner, 2026-11-26):** The owner reconfirmed during restart recovery that TouchDesigner testing for v1.2.0 may be limited to Windows with **TouchDesigner 2025.32440**. All other v1.2.0 release gates apply, including Windows and Ubuntu CI and hosted download checks. Compatibility claims are limited to the tested build and platform.
 
+**v1.3.0 compatibility exception (owner, 2026-11-26).** The owner approved release testing on Windows with TouchDesigner **2025.32440** for v1.3.0 only. Derivative lists 2025.33230 as the current official Windows build. It is outside the v1.3.0 verification claim. All other release gates apply. [Official downloads](https://derivative.ca/download)
+
 **Never:** release from `dev`, release an untested `.tox`, or claim compatibility with a TD build that was not tested.

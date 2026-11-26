@@ -33,6 +33,23 @@ class InsightTests(unittest.TestCase):
         self.assertTrue(all(x["why"] for x in h))
         self.assertEqual(I.hints([]), [])
 
+    def test_diagnostics_trace_visible_wiring_and_label_observations(self):
+        rows = [
+            dict(path="/p/out", inputs=["/p/up"], errors="input failed", cook_count=2, cook_ms=0.5),
+            dict(path="/p/up", inputs=["/p/out", "/private/hidden"], warnings="stale", cook_count=1, cook_ms=4.0),
+            dict(path="/p/cold", inputs=[], cook_count=0, cook_ms=10.0),
+            dict(path="/p/invalid", inputs=[], cook_count=1, cook_ms=float("nan")),
+        ]
+        result = I.diagnostics(rows, partial=True, input_notes={"/p/out": {"minimum_inputs": 2, "connected_inputs": 1}})
+        self.assertTrue(result["partial_view"])
+        top = result["findings"][0]
+        self.assertEqual(top["observations"], ["confirmed_error", "missing_required_inputs"])
+        self.assertEqual(top["upstream_leads"], [
+            {"path": "/p/up", "hops": 1, "observations": ["observed_warning"]}])
+        self.assertNotIn("/private/hidden", repr(result))
+        self.assertEqual(result["performance"]["sample_count"], 2)
+        self.assertEqual([entry["path"] for entry in result["performance"]["top"]], ["/p/up", "/p/out"])
+
 
 if __name__ == "__main__":
     unittest.main()

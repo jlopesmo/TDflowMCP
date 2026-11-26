@@ -150,7 +150,7 @@ class ProtocolTests(unittest.TestCase):
 
 class RegistryTests(unittest.TestCase):
     def test_registered_tools_with_classification(self):
-        self.assertEqual(len(ALL), 32)
+        self.assertEqual(len(ALL), 33)
         reg = core_registry()
         for t in reg.all():
             d = t.describe()
@@ -415,6 +415,43 @@ class EngineTests(unittest.TestCase):
         self.ad.resolve = resolve
         r = self.eng.call(self.tid, "tdflow_set_parameters", {"path": "/project1/fx/a", "values": {"x": 1}})
         self.assertEqual(r["structuredContent"]["code"], "PRECONDITION_CHANGED")
+        self.assertEqual(self.ad.executed, [])
+
+    def test_compare_rechecks_target_identity_before_sampling(self):
+        args = {"left": "/project1/fx/a", "right": "/project1/fx/b"}
+        ids = iter(((1, 2), (1, 3)))
+        self.ad.resolve = lambda _tool, paths: Resolution(
+            [Target("read", paths["left"]), Target("read", paths["right"])],
+            {"read_identity": next(ids)})
+        r = self.eng.call(self.tid, "tdflow_compare_tops", args)
+        self.assertEqual(r["structuredContent"]["code"], "PRECONDITION_CHANGED")
+        self.assertEqual(self.ad.executed, [])
+
+    def test_compare_revocation_and_audit_fault_prevent_sampling(self):
+        from tdflowmcp.store import AuditUnavailable
+
+        args = {"left": "/project1/fx/a", "right": "/project1/fx/b"}
+        self.ad.resolve = lambda _tool, paths: Resolution(
+            [Target("read", paths["left"]), Target("read", paths["right"])],
+            {"read_identity": (1, 2)})
+        append = self.store.append
+
+        def unavailable(*_args, **_kwargs):
+            raise AuditUnavailable("test")
+
+        self.store.append = unavailable
+        self.assertEqual(self.eng.call(self.tid, "tdflow_compare_tops", args)["structuredContent"]["code"],
+                         "AUDIT_UNAVAILABLE")
+        self.store.append = append
+        steps = iter((False, True))
+
+        def dispatch(fn):
+            if next(steps):
+                self.idn.revoke(self.tid)
+            return fn()
+
+        self.eng.main = dispatch
+        self.assertEqual(self.eng.call(self.tid, "tdflow_compare_tops", args)["structuredContent"]["code"], "DENIED")
         self.assertEqual(self.ad.executed, [])
 
     def test_main_step_not_run_or_unknown(self):

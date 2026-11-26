@@ -6,11 +6,80 @@ are heuristics, labelled as such: they point at where to look, they are not find
 """
 from __future__ import annotations
 
+from collections import deque
+from math import isfinite
 from typing import Dict, List, Mapping, Sequence
 
 MAX_ROWS = 300
 SLOW_MS = 2.0              # one operator's last cook (ms) worth mentioning at 60 fps
 FRAME_MS = 1000.0 / 60.0
+MAX_FINDINGS = 12
+
+
+def _measured_cooks(rows):
+    return [r for r in rows if (r.get("cook_count") or 0) > 0
+            and isinstance(r.get("cook_ms"), (int, float)) and isfinite(r["cook_ms"]) and r["cook_ms"] >= 0]
+
+
+def _upstream_findings(path, by_path, observations):
+    queue = deque([(path, 0)])
+    seen, found = {path}, []
+    while queue and len(found) < 5:
+        current, distance = queue.popleft()
+        if distance and current in observations:
+            found.append({"path": current, "hops": distance, "observations": observations[current]})
+        if distance < 3:
+            for src in by_path[current]["inputs"]:
+                if len(seen) >= 40:
+                    break
+                if src in by_path and src not in seen:
+                    seen.add(src)
+                    queue.append((src, distance + 1))
+    return found
+
+
+def diagnostics(rows, partial, input_notes):
+    """Explain the available evidence within the scoped, bounded network snapshot."""
+    by_path = {row["path"]: row for row in rows}
+    observations = {}
+    for row in rows:
+        path = row["path"]
+        labels = [key for key, present in (
+            ("confirmed_error", row.get("errors")), ("observed_warning", row.get("warnings")),
+            ("missing_required_inputs", input_notes.get(path)), ("bypassed", row.get("bypass") is True),
+            ("cooking_disabled", row.get("allow_cooking") is False),
+            ("never_cooked", row.get("cook_count") == 0), ("cook_state_unavailable", row.get("cook_count") is None)
+        ) if present]
+        if labels:
+            observations[path] = labels
+    ordered = sorted(observations, key=lambda path: (
+        "confirmed_error" not in observations[path], "observed_warning" not in observations[path], path))
+    findings = []
+    for path in ordered[:MAX_FINDINGS]:
+        evidence = {"path": path, "observations": observations[path]}
+        if path in input_notes:
+            evidence["wiring"] = input_notes[path]
+        if "confirmed_error" in observations[path] or "observed_warning" in observations[path]:
+            evidence["upstream_leads"] = _upstream_findings(path, by_path, observations)
+        findings.append(evidence)
+
+    measured = _measured_cooks(rows)
+    ranked = sorted(measured, key=lambda row: (-row["cook_ms"], row["path"]))[:8]
+    return {
+        "partial_view": partial,
+        "findings": findings,
+        "findings_truncated": len(ordered) > len(findings),
+        "trace_note": "Upstream leads follow readable wires up to three hops. They indicate possible causes. "
+                      "Warnings and errors are recorded by TouchDesigner. Uncooked operators have unknown results.",
+        "performance": {
+            "units": "ms", "reference_frame_ms": round(FRAME_MS, 4), "sample_count": len(measured),
+            "operators_without_sample": len(rows) - len(measured),
+            "top": [dict(path=row["path"], last_cpu_cook_ms=row["cook_ms"], cook_abs_frame=row.get("cook_abs_frame"),
+                         reference_frame_budget_pct=round(100 * row["cook_ms"] / FRAME_MS, 2)) for row in ranked],
+            "note": "One last CPU cook measurement per sampled operator. Samples may be old or from different "
+                    "frames. The 60 fps reference is a comparison budget. These measurements do not report FPS."
+        }
+    }
 
 
 def summarize(rows: Sequence[Mapping], total: int, filtered: int) -> Dict:
@@ -33,7 +102,7 @@ def hints(rows: Sequence[Mapping]) -> List[Dict]:
     """Heuristic optimization hints, most expensive first. Each says what it is based on."""
     out: List[Dict] = []
     rows = list(rows)
-    cooked = [r for r in rows if isinstance(r.get("cook_ms"), (int, float))]
+    cooked = _measured_cooks(rows)
     total_ms = sum(r["cook_ms"] for r in cooked)
     for r in sorted(cooked, key=lambda r: -r["cook_ms"])[:10]:
         if r["cook_ms"] >= SLOW_MS:
@@ -42,7 +111,8 @@ def hints(rows: Sequence[Mapping]) -> List[Dict]:
                                "60 fps frame). Check its resolution, inputs and parameters"})
     if total_ms > FRAME_MS:
         out.append({"path": None, "kind": "frame_budget", "value_ms": round(total_ms, 3),
-                    "why": f"the listed operators' last cooks add up to {total_ms:.1f} ms, more than one 60 fps frame"})
+                    "why": f"last CPU cook samples total {total_ms:.1f} ms against a 60 fps reference budget. "
+                           "Samples can come from different frames"})
     for r in rows:
         if r.get("errors"):
             out.append({"path": r["path"], "kind": "error", "why": "reports an error: " + str(r["errors"])[:200]})

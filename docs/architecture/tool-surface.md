@@ -26,6 +26,12 @@
 
 The v1.1 authoring workflow reports `PYTHON_SYNTAX` with location where available, `REFERENCE_NOT_FOUND` for missing literal operator references, `DAT_TEXT_CHANGED` when a source hash is stale, and `CALLBACK_ACTIVE` when editing requires deactivation first. `DAT_SOURCE_UNAVAILABLE` directs the caller to authored source or the owner's TouchDesigner view. Activation and trigger changes show the current callback source to the owner. Script CHOP, SOP and TOP creation remains unavailable. See the [v1.1 record](../milestones/v1.1-developer-capabilities.md) for verification status.
 
+## v1.3 diagnostics
+
+For the v1.3 diagnostic workflow, `tdflow_describe_network` accepts optional `diagnostics: true`. The response includes prioritized observations, bounded readable upstream leads, and ranked last CPU cook samples with sample count and last absolute cook frame where available. A 60 fps budget is a comparison reference. The workflow reads stored expression or bind text separately when examining control relationships.
+
+`tdflow_compare_tops` requires `read` on both exact TOP paths. Both outputs must be owner-locked, outside bypass, and on the same verified Windows/TouchDesigner 2025.32440 runtime as capture. A texture is limited to 262,144 pixels. Different dimensions return dimensions alone. Same-size samples report aggregate aligned RGB deltas and near-black fractions using a 1/255 threshold. Alpha, compositing, color conversion, and source attribution are outside this measurement. Comparison shares capture's one-call-per-second budget and attaches no image. [Diagnostic milestone](../milestones/v1.3-visual-diagnostics.md)
+
 ## v1.2 component authoring
 
 - `tdflow_list_operator_types` reads a scoped COMP and lists installed, product-supported creation types. The catalog filters by name, family or a short curated purpose. It identifies types that need approval. Per-call grants and destination checks still determine creation. `tdflow_get_parameters` remains the source of exact runtime parameter names on an instance.

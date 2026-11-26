@@ -1,5 +1,7 @@
 # TDflowMCP — Project map
 
+The visual diagnostics workflow fixture is `tests/td/run_td_diagnostic_tests.py` with its in-process driver `tests/td/td_runner_diagnostics.py`. It uses disposable projects and the existing MCP harness. [Milestone](../milestones/v1.3-visual-diagnostics.md)
+
 This map lists the repository's actual contents (Phase 1C). Planned directories are listed in [source-of-truth.md](../architecture/source-of-truth.md#directory-layout). **They do not exist yet.**
 
 | Path | Purpose | Governing doc |

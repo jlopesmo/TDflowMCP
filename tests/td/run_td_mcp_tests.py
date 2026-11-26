@@ -32,7 +32,7 @@ from tdflowmcp.net import oslisteners  # noqa: E402
 
 O = "http://127.0.0.1:9480"
 TOKENS, STATE = {}, {"cookies": {}}
-EXPECTED_TOOLS = sorted(["tdflow_approval_status", "tdflow_capabilities", "tdflow_capture_top", "tdflow_describe_network", "tdflow_lease_scope", "tdflow_experiment_create",
+EXPECTED_TOOLS = sorted(["tdflow_approval_status", "tdflow_capabilities", "tdflow_capture_top", "tdflow_compare_tops", "tdflow_describe_network", "tdflow_lease_scope", "tdflow_experiment_create",
                          "tdflow_edit_custom_parameters", "tdflow_list_operator_types",
                          "tdflow_experiment_promote", "tdflow_experiment_discard", "tdflow_save_project"] + ["tdflow_connect", "tdflow_create_operator", "tdflow_delete_operator", "tdflow_disconnect",
                          "tdflow_get_dat_text", "tdflow_get_errors", "tdflow_get_operator", "tdflow_get_parameters",

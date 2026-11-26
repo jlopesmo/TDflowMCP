@@ -37,6 +37,8 @@ The existing `update` and `execute` checks cover replacing an expression, bind o
 
 **Owner approval, 2026-11-26:** TOP image capture and resolution reads are permitted only for owner-locked outputs, subject to passive-read validation on TouchDesigner 2025.32440. The guard requires the verified Windows and TouchDesigner build combination. A bypassed TOP or enclosing component makes the output ineligible. The existing `read` grant and hard denies continue to apply. Lock is set by the owner in TouchDesigner. The guard checks the current flag state.
 
+The v1.3 aggregate comparison applies this decision to both targets before any cached sample is read. Per-target authorizations, stale-target refusal, the shared readback budget and durable audit protection continue to apply. Image samples and aggregate results are absent from security audit records. [Tool surface](../architecture/tool-surface.md).
+
 ### v1.2 component authoring
 
 The owner authorized bounded custom control definitions through the existing policy and exact approval model. Defining or editing controls requires `read`, `update` and `execute` on the Base or Container COMP because a built network can react to changes. Hard denies cover protected ancestors. The allowed styles carry constant definitions. Existing expressions, bindings, dynamic menus and control groups are outside this edit path. Connector changes add `update` on the affected enclosing component. The first Out TOP of a Base COMP can expose a native connector. The owner connects that output to external consumers. See the [v1.2 milestone](../milestones/v1.2-component-authoring.md).

@@ -5,7 +5,7 @@ through MCP. It works within the permissions you grant and keeps a tamper-eviden
 computer (127.0.0.1). It never installs software, and it changes your agent's configuration only after you approve
 the exact change in TouchDesigner.
 
-**Version 1.2.0, provided for evaluation.** Release validation covers **Windows** with TouchDesigner **2025.32440**.
+**Version 1.3.0, provided for evaluation.** The verified cached TOP inspection runtime is **Windows** with TouchDesigner **2025.32440**.
 Newer TouchDesigner builds and macOS are not verified. Try it first in a copy of a project, or in one you can afford
 to experiment with. The repository has no open-source license yet: you may download and evaluate the component, but
 that does not grant rights to redistribute, modify or commercially reuse it.
@@ -28,8 +28,8 @@ Choose the `TDflowMCP-vX.Y.Z.tox` asset when available. Compare its SHA-256 with
 `SHA256SUMS-versioned` for v1.0.0 and v1.0.1 aliases. `TDflowMCP.json` records the same hash for both filenames.
 The compatibility download `TDflowMCP.tox` is listed in `SHA256SUMS`.
 
-- PowerShell, using the v1.2.0 filename: `Get-FileHash .\TDflowMCP-v1.2.0.tox -Algorithm SHA256`
-- macOS / Linux, to check the file: `shasum -a 256 TDflowMCP-v1.2.0.tox`
+- PowerShell, using the versioned filename. `Get-FileHash .\TDflowMCP-v1.3.0.tox -Algorithm SHA256`
+- macOS / Linux, to check the file. `shasum -a 256 TDflowMCP-v1.3.0.tox`
 
 ## 2. Add the component
 1. Save your project first (TDflowMCP keeps its data next to the saved `.toe`).
@@ -186,6 +186,12 @@ On Windows with TouchDesigner 2025.32440, lock the output TOP in TouchDesigner a
 The agent can search supported local operator types and inspect parameter names on an existing instance. Ask it to group the network in a Base COMP and propose a page of scalar controls. An Operator with `read`, `update` and `execute` access can request approval for definitions. Review the names, labels, defaults, and ranges, then approve expressions separately when the agent connects the controls to the network.
 
 When the agent adds the first Out TOP in a Base COMP, use that native connector to attach the component to your enclosing network. Pulse buttons in TouchDesigner after approving any associated callback changes. The agent can undo the last eligible edit to restore the previous definitions and order. Use TouchDesigner to rename or remove controls that may have existing dependencies.
+
+## Diagnosing a network
+
+Name the component or output and describe what you expected. Ask the agent for the evidence, a minimal repair, and a check of the result. Reported errors and missing required inputs are observations. Readable upstream leads guide investigation. The last CPU cook times rank sampled work in milliseconds and can be old.
+
+To compare outputs, lock both TOPs in TouchDesigner and leave bypass off on the TOPs and enclosing components. Matching dimensions allow aligned RGB comparison within the sample limit. A dark result or color difference can guide where to look upstream. Review any requested change through the normal approval flow and ask the agent to inspect the output again.
 
 ## Where data is stored
 - **Project folder:** `.tdflowmcp/<project name>/` next to the `.toe` holds the audit log, sessions and DAT

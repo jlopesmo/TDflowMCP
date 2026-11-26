@@ -90,6 +90,10 @@ v1.1.0 shipped for Windows with TouchDesigner 2025.32440 after local, tagged-pac
 
 v1.2.0 was published after both PR findings were resolved, independent security re-review completed, and Windows and Ubuntu CI passed. The clean tagged package passed TouchDesigner acceptance on Windows with 2025.32440 under the owner's release-specific exception. Both hosted download checks passed. Script operator activation remains gated separately. [Scope and acceptance](../milestones/v1.2-component-authoring.md) · [Release receipts](validation-index.md#v120-tagged-release)
 
+## v1.3 visual diagnostics
+
+The owner authorized diagnostics development and conditional release. Match the candidate against the verified four-scenario v1.2 baseline. Release gates cover passive visual safety, independent review, packaged regressions, hosted verification and the release-specific compatibility decision. [Milestone](../milestones/v1.3-visual-diagnostics.md)
+
 ## D28 — Codex acceptance and release of 1.0.1 (owner, GitHub Issue #3, 2026-11-25)
 
 The owner ran the hands-on check on `1.0.1rc1` and reported it passed ([Issue #3](https://github.com/jlopesmo/TDflowMCP/issues/3#issuecomment-7175371704)): OpenAI Codex selected, Connect Agent approved, the Codex chat in VS Code returned `tdflow_whoami`, TouchDesigner showed `Agent Connected — Ready` and `Codex 0.171.0`. Decided:
