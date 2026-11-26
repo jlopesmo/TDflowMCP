@@ -23,6 +23,7 @@ class ExprAdapter(Adapter):
 
     def __init__(self):
         self.executed, self.count, self.extra_target, self.snapshot = [], 80, None, None
+        self.approval_context = {}
 
     def resolve(self, tool, args):
         if tool.resolver == "undo":
@@ -45,7 +46,7 @@ class ExprAdapter(Adapter):
                    Target("execute", path, change="expression", param=name)]
         if self.extra_target:
             ts.append(Target("update", self.extra_target, change="param", param="x"))
-        return Resolution(ts or [Target("read", path)])
+        return Resolution(ts or [Target("read", path)], self.approval_context)
 
     def execute(self, tool, args, res, undo_label, readable):
         self.executed.append((tool.name, json.dumps(args, sort_keys=True)))
@@ -88,6 +89,108 @@ class Base(unittest.TestCase):
 
 
 class FlowTests(Base):
+    def test_callback_review_is_private_bound_and_removed_on_redemption(self):
+        preview = {"callback_source": "def onFrameStart(frame):\n    return\n", "active": {"value": False}}
+        self.ad.approval_context = {"approval_review": preview, "approval_facts": [["op_id", 12]]}
+        error, out = self.call(self.OP)
+        self.assertTrue(error)
+        self.assertNotIn("onFrameStart", json.dumps(out))
+        aid = out["approval_id"]
+        viewed = APR.view_for_user(self.store.approval_get(aid), 0)
+        self.assertEqual(viewed["review"], preview)
+        self.assertEqual(self.decide(aid)["code"], "APPROVAL_CHANGED")
+        approved = self.store.approval_decide(aid, "approved", shown_review_sha=viewed["review_sha256"])
+        self.assertTrue(approved["ok"])
+        self.assertFalse(self.call(self.OP)[0])
+        self.assertEqual(self.store.approval_get(aid)["review"], "")
+
+    def test_callback_preview_tampering_fails_closed(self):
+        self.ad.approval_context = {"approval_review": {"callback_source": "print(1)"}}
+        aid = self.call(self.OP)[1]["approval_id"]
+        self.store._cc().execute("UPDATE approvals SET review = ? WHERE id = ?", ('{"callback_source":"print(2)"}', aid))
+        row = self.store.approval_get(aid)
+        self.assertTrue(APR.view_for_user(row, 0)["review_invalid"])
+        self.assertEqual(self.decide(aid)["code"], "APPROVAL_INVALID")
+        self.assertEqual(self.ad.executed, [])
+
+    def test_code_state_changes_after_redemption_and_intent_are_refused(self):
+        self.ad.approval_context = {"approval_facts": [["op_id", 12]]}
+        aid = self.call(self.OP)[1]["approval_id"]
+        self.decide(aid)
+        steps = 0
+
+        def main(step):
+            nonlocal steps
+            steps += 1
+            if steps == 2:
+                self.ad.approval_context = {"approval_facts": [["op_id", 13]]}
+            return step()
+
+        self.assertEqual(self.call(self.OP, main=main)[1]["code"], "APPROVAL_TARGETS_CHANGED")
+        self.assertEqual(self.ad.executed, [])
+        self.assertIn(("outcome", "error"), self.kinds())
+
+    def test_token_rotation_cancels_the_old_tokens_approval(self):
+        aid = self.call(self.OP)[1]["approval_id"]
+        self.decide(aid)
+        other_token = self.idn.authenticate(self.idn.issue_token(self.op.id))
+        self.assertTrue(self.idn.revoke(self.OP))
+        self.assertEqual(self.store.approval_get(aid)["state"], "cancelled")
+        self.assertEqual(self.call(other_token)[1]["code"], "APPROVAL_REQUIRED")
+        self.assertEqual(self.ad.executed, [])
+
+    def test_runtime_generation_changes_refuse_historical_approval(self):
+        self.ad.approval_context = {"approval_facts": [["op_id", 12]]}
+        aid = self.call(self.OP)[1]["approval_id"]
+        self.decide(aid)
+        self.eng._runtime_id = "new-runtime"
+        self.assertEqual(self.call(self.OP)[1]["code"], "APPROVAL_TARGETS_CHANGED")
+        self.assertEqual(self.ad.executed, [])
+
+    def test_revocation_and_suspension_during_final_resolution_abort_execution(self):
+        for setting, expected in (("suspend", "SUSPENDED"), ("revoke", "DENIED")):
+            with self.subTest(setting=setting):
+                aid = self.call(self.OP)[1]["approval_id"]
+                self.decide(aid)
+                resolve = self.ad.resolve
+                steps = 0
+
+                def during_resolve(tool, args):
+                    nonlocal steps
+                    res = resolve(tool, args)
+                    steps += 1
+                    if steps == 2:
+                        if setting == "revoke":
+                            self.idn.revoke(self.OP)
+                        else:
+                            self.eng._suspended = lambda: True
+                    return res
+
+                self.ad.resolve = during_resolve
+                try:
+                    self.assertEqual(self.call(self.OP)[1]["code"], expected)
+                    self.assertEqual(self.ad.executed, [])
+                finally:
+                    self.ad.resolve = resolve
+                    self.eng._suspended = lambda: False
+
+    def test_token_recheck_follows_the_dispatch_lease_check(self):
+        aid = self.call(self.OP)[1]["approval_id"]
+        self.decide(aid)
+        lease_check = self.eng._leased
+        steps = 0
+
+        def while_waiting_for_leases(agent, targets):
+            nonlocal steps
+            steps += 1
+            if steps == 2:
+                self.idn.revoke(self.OP)
+            return lease_check(agent, targets)
+
+        self.eng._leased = while_waiting_for_leases
+        self.assertEqual(self.call(self.OP)[1]["code"], "DENIED")
+        self.assertEqual(self.ad.executed, [])
+
     def test_request_then_approve_then_identical_recall_runs_once(self):     # the ADR-0005 gate
         err, out = self.call(self.OP)
         self.assertTrue(err)

@@ -102,7 +102,7 @@ def script():
     comp = load()
     yield frames(20)
     ext = comp.ext.TDflowMCPExt
-    if MODE != "native_screens":
+    if MODE != "native_screens" and (MODE != "perf" or hasattr(ext, "connector")):
         ext.connector.dialog_opener = lambda title, text, buttons, cb: False   # no real dialogs in automated runs
     if MODE.startswith(("gate", "perf", "onboard", "dogfood", "memory", "native", "probe", "codex")):        # audit-worker gate + 1B-vs-worker comparison
         ext.launcher = lambda url: True

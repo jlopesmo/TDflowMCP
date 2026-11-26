@@ -189,6 +189,10 @@ def cp_codex_live(data, pid):
         T(f"live.{label}.other_servers_stayed_disabled", all(n in ("tdflow",) or not (r.get("tools") or {})
                                                              for n, r in e.servers().items()))
         whoami_ok(label, e, "live")
+        received, preview = e.call("tdflow_get_dat_text", {"path": "/project1/fx/notes", "proposed_text": "def invalid(:"})
+        T(f"live.{label}.PYTHON_PREVIEW_REPORTS_SYNTAX", received and preview.get("_isError") is False
+          and (preview.get("python_validation") or {}).get("code") == "PYTHON_SYNTAX"
+          and preview.get("text") == "hello", r=preview)
         if i == 0:
             ok, made = e.call("tdflow_create_operator", {"parent": "/project1/fx", "type": "constantTOP",
                                                          "name": "codex_probe"})

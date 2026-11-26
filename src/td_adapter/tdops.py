@@ -11,9 +11,14 @@ Implements ``tdflowmcp.engine.Adapter``:
   restoration by path and state (S4b: restored operators get new ids). DAT text is restored from a
   TDflowMCP snapshot (S4: TD's undo does not cover DAT text) after checking nothing changed since.
 """
+import ast
+import difflib
 import hashlib
 import json
 import os
+import posixpath
+import re
+import sys
 import time
 
 import td
@@ -26,18 +31,21 @@ from tdflowmcp.policy import ACTIVATION_PARAMS, APPROVABLE_CREATE_TYPES, EXECUTA
 from tdflowmcp.policy import _name_denied
 
 DATA_TAG = "tdflowdata"
+DAT_SOURCE_TYPES = frozenset({"tableDAT", "textDAT"}) | APPROVABLE_CREATE_TYPES
 EXPERIMENT_TAG = "tdflowexperiment"     # set by TDflowMCP only (agents cannot set tags, H7)
 EXPERIMENT_KEY = "tdflow_experiment_of"
 INERT_KEY = "tdflow_snapshot"
 RESERVED_TAGS = {"TDflowMCP", "tdflowProject"}
 MAX_CAPTURE_PIXELS = 1920 * 1080
 MAX_CAPTURE_BYTES = 8 * 1024 * 1024
+VERIFIED_TOP_READ_BUILD = "2025.32440"
 MAX_COPY = 500                         # operators inspected for a copy (the policy limit per call is lower)
 # Parameter styles whose value names another operator or a file: setting them can read or wire things
 # outside the agent's scope (review 6, H2), so they are classified as execute (denied in Phase 1).
 REFERENCE_STYLES = {"OP", "COMP", "OBJ", "Object", "PanelCOMP", "TOP", "CHOP", "SOP", "DAT", "MAT", "POP", "File",
                     "Folder", "FileSave", "Python"}
 MAX_TEXT = 200000
+LITERAL_OP_PATH = re.compile(r"/?(?:[A-Za-z0-9_]+|\.{1,2})(?:/(?:[A-Za-z0-9_]+|\.{1,2}))*\Z")
 MAX_WALK = 1000                    # operators visited per memory fingerprint (main-thread bound; review 10)
 MAX_LIST = 200
 README_EMBEDDED = ("Project memory for this TouchDesigner project (TDflowMCP, embedded authority).\n"
@@ -78,6 +86,66 @@ def _pos(o, attr):
 def _sha(text):
     """Hash of DAT text as TouchDesigner stores it (line endings and trailing newlines normalised)."""
     return hashlib.sha256(_norm(text).encode("utf-8")).hexdigest()
+
+
+def _source_sha(text):
+    return hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest()
+
+
+def _check_python(source, mode, description):
+    """Compile without evaluating code, including syntax checked after AST parsing."""
+    try:
+        tree = ast.parse(source, mode=mode)
+        compile(tree, "<TDflowMCP>", mode, dont_inherit=True)
+    except SyntaxError as e:
+        where = f" at line {e.lineno}" if e.lineno else ""
+        if e.offset:
+            where += f", column {e.offset}"
+        raise ToolFailure("PYTHON_SYNTAX", f"{description}{where}: {e.msg}") from None
+    except (ValueError, UnicodeError, RecursionError, OverflowError):
+        raise ToolFailure("PYTHON_SYNTAX", f"{description} could not be parsed as Python.") from None
+    return tree
+
+
+def _par_state(par):
+    mode = str(par.mode).split(".")[-1]
+    state = {"mode": mode, "value": _jsonable(par.val) if mode == "CONSTANT" else None}
+    if mode == "EXPRESSION":
+        state["expr"] = str(par.expr)
+    elif mode == "BIND":
+        state["expr"] = str(par.bindExpr)
+    elif mode == "EXPORT":
+        source = getattr(par, "exportOP", None)
+        state["export_id"] = int(source.id) if source is not None else None
+    return state
+
+
+def _state_sha(state):
+    return _source_sha(json.dumps(state, sort_keys=True, ensure_ascii=True))
+
+
+def _has_dat_source(o):
+    # Reading .text on computed DATs can cook the DAT or a Python-producing upstream operator.
+    if o.OPType not in DAT_SOURCE_TYPES or o.inputs:
+        return False
+    file_par = getattr(o.par, "file", None)
+    return file_par is None or (str(file_par.mode).split(".")[-1] == "CONSTANT" and not file_par.val)
+
+
+def _top_reads_verified():
+    return sys.platform == "win32" and str(td.app.build) == VERIFIED_TOP_READ_BUILD
+
+
+def _has_locked_top_output(o):
+    if not o.lock:
+        return False
+    while o is not None:
+        if getattr(o, "bypass", True):
+            return False
+        if o.path == "/":
+            return True
+        o = o.parent()
+    return False
 
 
 def _jsonable(v):
@@ -150,8 +218,12 @@ class TDAdapter(Adapter):
             o = self._op(args["path"])
             if k == "read_children" and not o.isCOMP:
                 raise ToolFailure("INVALID_ARGS", f"{o.path} is not a component.")
-            if tool.name == "tdflow_get_dat_text" and not o.isDAT:
-                raise ToolFailure("INVALID_ARGS", f"{o.path} is not a DAT.")
+            if tool.name == "tdflow_get_dat_text":
+                if not o.isDAT:
+                    raise ToolFailure("INVALID_ARGS", f"{o.path} is not a DAT.")
+                if not _has_dat_source(o):
+                    raise ToolFailure("DAT_SOURCE_UNAVAILABLE", "Read the authored Text DAT or Execute DAT source. "
+                                      "Computed, wired and file-linked DATs can trigger external reads or code.")
             return Resolution([self._facts(o, "read")], {"op": o})
         if k == "set_params":
             return self._resolve_params(args)
@@ -200,10 +272,8 @@ class TDAdapter(Adapter):
             o = self._op(args["path"], "DAT")
             if not o.isDAT:
                 raise ToolFailure("INVALID_ARGS", f"{o.path} is not a DAT.")
-            if o.OPType not in ("tableDAT", "textDAT") and o.OPType not in EXECUTABLE_TYPES:
-                raise ToolFailure("INVALID_ARGS", f"{o.OPType} text cannot be edited.")
-            if o.inputs:
-                raise ToolFailure("INVALID_ARGS", "DATs with inputs cannot be edited.")
+            if not _has_dat_source(o):
+                raise ToolFailure("INVALID_ARGS", "Only authored Table, Text and supported Execute DATs without inputs or file links can be edited.")
             ts = [self._facts(o, "update", change="text")]
             # Only DATs the user explicitly tagged as data; even tables can be evaluated downstream (review 6).
             data = o.OPType in ("tableDAT", "textDAT") and DATA_TAG in o.tags
@@ -212,9 +282,26 @@ class TDAdapter(Adapter):
             before = o.text
             if len(before) > MAX_TEXT:
                 raise ToolFailure("INVALID_ARGS", "the current text is too large to snapshot safely")
+            if args.get("language") == "python" and data:
+                raise ToolFailure("INVALID_ARGS", "Use a code DAT without the user's tdflowdata tag for Python.")
+            validation = None
+            if o.OPType in APPROVABLE_CREATE_TYPES or args.get("language") == "python":
+                try:
+                    _check_python(args["text"], "exec", "DAT source")
+                    if o.OPType in APPROVABLE_CREATE_TYPES and not self._callback_inactive(o):
+                        raise ToolFailure("CALLBACK_ACTIVE", "Approve setting active to false before editing this callback.")
+                except ToolFailure as e:
+                    validation = e
+            if args.get("expected_sha256", _source_sha(before)) != _source_sha(before):
+                validation = ToolFailure("DAT_TEXT_CHANGED", "Read the current DAT text and compare your proposed change again.")
             # Plain-data snapshot; the engine persists it durably (audit worker) before execution.
-            snap = (o.path, int(o.id), before, _sha(before), _sha(args.get("text", "")))
-            return Resolution(ts, {"op": o, "snapshot": snap})
+            snap = (o.path, int(o.id), before, _sha(before), _sha(args["text"]))
+            context = {"op": o, "snapshot": snap, "validation_failure": validation}
+            if not data:
+                context["approval_facts"] = [["dat_source_sha256", _source_sha(before)]]
+            if o.OPType in APPROVABLE_CREATE_TYPES:
+                context["approval_facts"].append(["callback_state_sha256", _state_sha(self._callback_state(o))])
+            return Resolution(ts, context)
         raise ToolFailure("INVALID_ARGS", "unsupported tool")
 
     def _resolve_params(self, args):
@@ -222,7 +309,10 @@ class TDAdapter(Adapter):
         values, exprs = args.get("values", {}), args.get("expressions", {}) or {}
         if not values and not exprs:
             raise ToolFailure("INVALID_ARGS", "nothing to set")
-        ts, pars = [], {}
+        if values.keys() & exprs.keys():
+            raise ToolFailure("INVALID_ARGS", "Use either values or expressions for each parameter.")
+        ts, pars, validation = [], {}, None
+        callback = o.OPType in APPROVABLE_CREATE_TYPES
         for name in list(values) + list(exprs):
             par = getattr(o.par, name, None)
             if par is None or not hasattr(par, "style"):
@@ -233,7 +323,10 @@ class TDAdapter(Adapter):
                 raise ToolFailure("INVALID_ARGS", f"parameter {name} is read-only")
             if getattr(par, "isPulse", False) or par.style in ("Pulse", "Momentary"):
                 raise ToolFailure("INVALID_ARGS", f"pulse parameters are not supported ({name})")
-            if name in values and getattr(par, "isMenu", False) and str(values[name]) not in par.menuNames:
+            if callback and name in ACTIVATION_PARAMS and name in values and values[name] not in (True, False):
+                raise ToolFailure("INVALID_ARGS", "Set active to true or false for an Execute DAT.")
+            if (name in values and getattr(par, "isMenu", False) and not getattr(par, "menuSource", "")
+                    and str(values[name]) not in par.menuNames):
                 raise ToolFailure("INVALID_ARGS", f"{name} must be one of {list(par.menuNames)[:20]}")
             pars[name] = par
             ext = name.startswith(("extension", "promoteextension")) or (name[:3] == "ext" and name[3:4].isdigit())
@@ -242,14 +335,67 @@ class TDAdapter(Adapter):
             if o.OPType in EXECUTABLE_TYPES and name in ACTIVATION_PARAMS:
                 # D20: switching an executable operator on (or off) is a code-running change: approval-gated.
                 ts.append(self._facts(o, "execute", change="activation", param=name))
-            elif o.OPType in APPROVABLE_CREATE_TYPES:
+            elif callback:
                 # Review 14: on Execute DATs every parameter decides *when* (or whether) code runs - callback
                 # toggles, watched operators and parameters. No parameter there is treated as inert.
                 ts.append(self._facts(o, "execute", change="trigger", param=name))
             if name in exprs or par.style in REFERENCE_STYLES:
                 ts.append(self._facts(o, "execute", change="expression" if name in exprs else "reference",
                                       param=name))
-        return Resolution(ts, {"op": o, "pars": pars})
+            elif str(par.mode).split(".")[-1] != "CONSTANT":
+                # Undo can restore the previous expression, bind or export. Approve that possibility first.
+                ts.append(self._facts(o, "execute", change="restore_dynamic", param=name))
+        facts, references = [], {}
+        for name, source in sorted(exprs.items()):
+            try:
+                tree = _check_python(source, "eval", f"Expression for {name}")
+                if callback and name in ACTIVATION_PARAMS:
+                    raise ToolFailure("INVALID_ARGS", "Set active to a constant boolean for an Execute DAT.")
+            except ToolFailure as e:
+                validation = validation or e
+                continue
+            for node in ast.walk(tree):
+                if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "op"
+                        and len(node.args) == 1 and not node.keywords and isinstance(node.args[0], ast.Constant)):
+                    literal = node.args[0].value
+                    if isinstance(literal, str) and LITERAL_OP_PATH.fullmatch(literal):
+                        path = posixpath.normpath(posixpath.join(o.parent().path, literal))
+                        ref = td.op(path)
+                        if ref is None or ref.path != path:
+                            ref = None
+                            validation = validation or ToolFailure("REFERENCE_NOT_FOUND", f"No operator at {path} for {name}.")
+                        references[path] = ref
+        for path, ref in sorted(references.items()):
+            ts.append(self._facts(ref, "read", path=path))
+            facts.append(["expression_reference", path, int(ref.id) if ref is not None else "missing"])
+        context = {"op": o, "pars": pars, "validation_failure": validation, "references": sorted(references)}
+        if any(t.action == "execute" for t in ts):
+            facts += [["op_id", int(o.id)], ["parameter_state_sha256", _state_sha({n: _par_state(p) for n, p in pars.items()})]]
+            if callback and not _has_dat_source(o):
+                context["validation_failure"] = ToolFailure("DAT_SOURCE_UNAVAILABLE", "The callback is wired or file-linked. "
+                                                           "Review it in TouchDesigner.")
+            elif callback:
+                source = o.text
+                state = self._callback_state(o, source)
+                facts.append(["callback_state_sha256", _state_sha(state)])
+                if len(source) > MAX_TEXT:
+                    context["validation_failure"] = ToolFailure("APPROVAL_TOO_LARGE", "The callback source is too large to review.")
+                else:
+                    context["approval_review"] = {"callback_source": source, "active": state["parameters"]["active"],
+                                                  "settings": state["parameters"], "bypass": state["bypass"]}
+            context["approval_facts"] = facts
+        return Resolution(ts, context)
+
+    @staticmethod
+    def _callback_inactive(o):
+        return str(o.par.active.mode).split(".")[-1] == "CONSTANT" and not bool(o.par.active.val)
+
+    @staticmethod
+    def _callback_state(o, source=None):
+        return {"id": int(o.id), "source": o.text if source is None else source,
+                "parameters": {p.name: _par_state(p) for p in o.pars() if not getattr(p, "isPulse", False)},
+                "inputs": [(p.path, int(p.id)) for p in o.inputs if p is not None],
+                "bypass": bool(o.bypass)}
 
     def _resolve_create(self, args):
         parent = self._op(args["parent"], "component")
@@ -264,7 +410,8 @@ class TDAdapter(Adapter):
         t = [self._facts(None, "create", path=path, op_type=args["type"])]
         if args["type"] in EXECUTABLE_TYPES:
             t.append(self._facts(None, "execute", path=path, op_type=args["type"]))
-        return Resolution(t, {"parent": parent, "cls": cls, "path": path})
+        return Resolution(t, {"parent": parent, "cls": cls, "path": path,
+                              "approval_facts": [["parent_op_id", int(parent.id)]]})
 
     # ---- execute -------------------------------------------------------------------------------
     def _stack(self):
@@ -376,28 +523,41 @@ class TDAdapter(Adapter):
             r = {"name": p.name, "label": g("label", p.name), "page": getattr(page_obj, "name", "") if page_obj else "",
                  "style": g("style", ""), "mode": g("mode", "", lambda m: str(m).split(".")[-1]),
                  "custom": bool(g("isCustom", False)), "read_only": bool(g("readOnly", False))}
-            try:
-                r["value"] = _jsonable(p.eval())
-            except Exception:
-                r["value"] = None
-            if r["mode"] == "EXPRESSION":
-                r["expr"] = g("expr", "") or ""
-            elif r["mode"] == "BIND":
-                r["expr"] = g("bindExpr", "") or ""
+            r.update(_par_state(p))
+            r.pop("export_id", None)            # internal approval/undo identity, not a parameter value
             r["default"] = _jsonable(g("default"))
-            if g("isMenu", False):
+            if g("isMenu", False) and not g("menuSource", ""):
                 r["menu"] = list(g("menuNames", []) or [])[:50]
             rows.append(r)
         off, lim = int(args.get("offset", 0)), int(args.get("limit", 100))
         return {"path": o.path, "parameters": rows[off:off + lim], "total": len(rows),
+                "value_note": "Expression, bind and export values are not evaluated by this tool.",
                 "next_offset": off + lim if off + lim < len(rows) else None}
 
     def _t_get_dat_text(self, args, res, label, readable):
         o = res.context["op"]
         text = o.text
         cap = int(args.get("max_chars", 20000))
-        return {"path": o.path, "type": o.OPType, "text": text[:cap], "length": len(text), "truncated": len(text) > cap,
-                "sha256": _sha(text)}
+        out = {"path": o.path, "type": o.OPType, "text": text[:cap], "length": len(text), "truncated": len(text) > cap,
+               "sha256": _sha(text), "source_sha256": _source_sha(text)}
+        if o.OPType in APPROVABLE_CREATE_TYPES:
+            out["active"] = _par_state(o.par.active)
+        if "proposed_text" in args:
+            proposed = args["proposed_text"]
+            validation = {"ok": True}
+            try:
+                _check_python(proposed, "exec", "DAT source")
+            except ToolFailure as e:
+                validation = {"ok": False, "code": e.code, "message": e.message}
+            out["python_validation"] = validation
+            out["proposed_sha256"] = _source_sha(proposed)
+            old_lines = text.splitlines(keepends=True)
+            new_lines = proposed.splitlines(keepends=True)
+            bounded = max(len(text), len(proposed)) <= 16000 and max(len(old_lines), len(new_lines)) <= 500
+            out["diff_omitted"] = not bounded
+            if bounded:
+                out["diff"] = list(difflib.unified_diff(old_lines, new_lines, "current", "proposed"))
+        return out
 
     def _t_get_errors(self, args, res, label, readable):
         o = res.context["op"]
@@ -424,16 +584,20 @@ class TDAdapter(Adapter):
         return r
 
     def _t_capture_top(self, args, res, label, readable):
-        """Phase 4 visual analysis: the TOP's current image as PNG or JPEG (TouchDesigner's own encoder, on the main
-        thread, so the size is bounded; review 17: at most one capture per second per process). Reading the
-        pixels may let TouchDesigner finish a pending cook of that TOP."""
+        """Read the owner's locked texture without asking TouchDesigner to cook the network."""
         o = res.context["op"]
         if o.family != "TOP":
             raise ToolFailure("INVALID_ARGS", f"{o.path} is not a TOP.")
+        if not _top_reads_verified():
+            raise ToolFailure("TOP_READ_UNVERIFIED", f"Passive TOP reads are verified only on Windows with "
+                              f"TouchDesigner {VERIFIED_TOP_READ_BUILD}.")
+        if not _has_locked_top_output(o):
+            raise ToolFailure("TOP_LOCK_REQUIRED", "Ask the owner to lock the output TOP in TouchDesigner. "
+                              "The TOP and its enclosing components must have bypass off.")
         w, h = int(o.width), int(o.height)
         if w * h > MAX_CAPTURE_PIXELS:
             raise ToolFailure("INVALID_ARGS", f"{o.path} is {w}x{h}; capture works up to {MAX_CAPTURE_PIXELS} pixels. "
-                                              "Capture a smaller TOP (for example a resolution TOP after it).")
+                                              "Capture a smaller locked output TOP.")
         now = time.monotonic()
         if now - self._last_capture < 1.0:
             raise ToolFailure("RATE_LIMITED", "one capture per second; try again in a moment")
@@ -443,14 +607,12 @@ class TDAdapter(Adapter):
         if not data or len(data) > MAX_CAPTURE_BYTES:
             raise ToolFailure("EXECUTION_FAILED", "the image could not be captured within the size limit")
         return {"path": o.path, "width": w, "height": h, "format": fmt, "bytes": len(data),
-                "cook_count": _cooks(o), "note": "The image is attached as image content. An operator that never "
-                "cooked may show an empty image. A TOP can show content from outside your scope (for example a "
-                "Select or Render TOP).",
+                "cook_count": _cooks(o), "note": "The locked image is attached. A TOP can show content from "
+                "outside your scope (for example a Select or Render TOP).",
                 "_image": {"bytes": data, "mimeType": "image/png" if fmt == "png" else "image/jpeg"}}
 
     def _t_describe_network(self, args, res, label, readable):
-        """Phase 4: one network level (the children of a COMP) as facts TouchDesigner already measured, plus
-        heuristic hints. Reads attributes only; never cooks or evaluates anything."""
+        """Report one network level and derive hints from facts available to the caller."""
         o = res.context["op"]
         if not o.isCOMP:
             raise ToolFailure("INVALID_ARGS", f"{o.path} is not a component.")
@@ -476,7 +638,7 @@ class TDAdapter(Adapter):
                 r["errors"], r["warnings"] = (c.errors() or "")[:500], (c.warnings() or "")[:500]
             except Exception:
                 pass
-            if c.family == "TOP":
+            if c.family == "TOP" and _top_reads_verified() and _has_locked_top_output(c):
                 try:
                     r["resolution"] = [int(c.width), int(c.height)]
                 except Exception:
@@ -494,33 +656,37 @@ class TDAdapter(Adapter):
     def _t_set_parameters(self, args, res, label, readable):
         o, pars = res.context["op"], res.context["pars"]
         values, exprs = args.get("values", {}), args.get("expressions", {}) or {}
-        prev = {}
-        for name, par in pars.items():
-            mode = str(par.mode).split(".")[-1]
-            prev[name] = {"mode": mode, "value": _jsonable(par.eval())}
-            if mode == "EXPRESSION":
-                prev[name]["expr"] = str(par.expr)
+        prev = {name: _par_state(par) for name, par in pars.items()}
+        callback = o.OPType in APPROVABLE_CREATE_TYPES
+
         def do():
-            for name, v in values.items():
-                par = pars[name]
-                const = type(par.mode).CONSTANT          # td.ParMode is not exposed on the td module
-                if par.mode != const:
-                    par.mode = const
-                par.val = v
-            # Phase 2B: expressions run as Python inside TouchDesigner. Policy classified them as execute, and
-            # the engine only gets here after the user approved exactly this text (security-model §4).
+            if callback and "active" in values and not bool(values["active"]):
+                pars["active"].val = False
+            for name, value in values.items():
+                if not (callback and name == "active"):
+                    pars[name].val = value
             for name, text in exprs.items():
-                par = pars[name]
-                par.expr = str(text)
-                par.mode = type(par.mode).EXPRESSION
+                pars[name].expr = text
+            if callback and values.get("active"):
+                pars["active"].val = True
+            for name in values:
+                if _par_state(pars[name])["mode"] != "CONSTANT":
+                    raise ToolFailure("EXECUTION_FAILED", f"TouchDesigner did not set {name} to constant mode.")
+            for name, text in exprs.items():
+                state = _par_state(pars[name])
+                if state["mode"] != "EXPRESSION" or state["expr"] != text:
+                    raise ToolFailure("EXECUTION_FAILED", f"TouchDesigner did not set the expression for {name}.")
         _, stack = self._mutate(label, do)
-        now = {n: _jsonable(pars[n].eval()) for n in values}
+        now = {n: _par_state(pars[n])["value"] for n in values}
         out = {"path": o.path, "previous": {n: prev[n]["value"] for n in values}, "now": now,
-               "_audit": {"kind": "set_params", "path": o.path, "stack": stack, "prev": prev,
+               "previous_modes": {n: state["mode"] for n, state in prev.items()},
+               "_audit": {"kind": "set_params", "path": o.path, "stack": stack, "prev": prev, "op_id": int(o.id),
                           "reversible": "td_undo" if stack else "no"}}
+        if callback:
+            out["_audit"]["callback_state_sha256"] = _state_sha(self._callback_state(o))
         if exprs:
             out["expressions_set"] = {n: str(pars[n].expr) for n in exprs}
-            out["previous_modes"] = {n: prev[n]["mode"] for n in exprs}
+            out["validated_operator_references"] = res.context["references"]
         return out
 
     def _t_create_operator(self, args, res, label, readable):
@@ -610,7 +776,9 @@ class TDAdapter(Adapter):
             ts.append(self._facts(None, "create", path=p, op_type=o.OPType))
             if o.OPType in EXECUTABLE_TYPES:
                 ts.append(self._facts(None, "execute", path=p, op_type=o.OPType, change="copy"))
-            if o.isDAT and (o.OPType in EXECUTABLE_TYPES or DATA_TAG not in o.tags):
+                if o.OPType not in APPROVABLE_CREATE_TYPES:
+                    continue                  # policy denies creation; do not inspect code-bearing output
+            if _has_dat_source(o) and (o.OPType in EXECUTABLE_TYPES or DATA_TAG not in o.tags):
                 try:
                     code.update(f"{o.path}\0{o.text}\0".encode("utf-8", "replace"))
                 except Exception:
@@ -631,7 +799,7 @@ class TDAdapter(Adapter):
                     elif par.style in REFERENCE_STYLES:
                         ts.append(self._facts(None, "execute", path=p, op_type=o.OPType, change="copied_reference",
                                               param=par.name))
-                        code.update(f"{o.path}\0{par.name}\0{par.eval()}\0".encode("utf-8", "replace"))
+                        code.update(f"{o.path}\0{par.name}\0{par.val}\0".encode("utf-8", "replace"))
                 except ToolFailure:
                     raise
                 except Exception:
@@ -768,7 +936,7 @@ class TDAdapter(Adapter):
         o, text = res.context["op"], args["text"]
         snap, planned = res.context.get("snapshot_id"), res.context.get("planned_snapshot")
         before = o.text
-        if snap is None or not planned or _sha(before) != planned[3]:
+        if snap is None or not planned or int(o.id) != planned[1] or before != planned[2]:
             # The durable snapshot must describe exactly the text being replaced.
             raise ToolFailure("PRECONDITION_CHANGED", "the DAT text changed since the request was checked; "
                               "nothing was written. Retry.")
@@ -778,7 +946,9 @@ class TDAdapter(Adapter):
             raise ToolFailure("EXECUTION_FAILED", "the DAT did not accept the text", rolled_back=True,
                               _audit={"rolled_back": _sha(o.text) == _sha(before)})
         return {"path": o.path, "length": len(text), "previous_sha256": _sha(before), "sha256": _sha(o.text),
+                "source_sha256": _source_sha(o.text),
                 "_audit": {"kind": "dat_text", "path": o.path, "snapshot": snap, "after_sha": _sha(o.text),
+                           "after_source_sha256": _source_sha(o.text), "before_source_sha256": _source_sha(before),
                            "op_id": int(o.id), "type": o.OPType,
                            "before_sha": planned[3]}}             # anchors the snapshot in the hash chain
 
@@ -790,6 +960,14 @@ class TDAdapter(Adapter):
             return self._undo_text(d, snapshot)
         if not d.get("stack") or self._stack() != d.get("stack"):     # None/unrecorded is never 'unchanged'
             raise ToolFailure("UNDO_CONFLICT", "other changes happened since (or TouchDesigner was restarted)")
+        if kind == "set_params":
+            o = td.op(d["path"])
+            callback_sha = d.get("callback_state_sha256")
+            if (o is None or (d.get("op_id") is not None and int(o.id) != d["op_id"])
+                    or (o.OPType in APPROVABLE_CREATE_TYPES and
+                        (not _has_dat_source(o) or callback_sha != _state_sha(self._callback_state(o))))
+                    or (not record.get("approval_id") and any(p["mode"] != "CONSTANT" for p in d.get("prev", {}).values()))):
+                raise ToolFailure("UNDO_CONFLICT", "The parameter target or its callback changed since the edit.")
         td.ui.undo.undo()
         if kind == "promote":
             # TouchDesigner's undo does not revert tags or storage: mark the restored copy as an experiment again.
@@ -821,10 +999,8 @@ class TDAdapter(Adapter):
             if kind == "set_params":
                 o = td.op(path)
                 return o is not None and all(
-                    str(getattr(o.par, n).mode).split(".")[-1] == v["mode"] and
-                    (v["mode"] != "CONSTANT" or _jsonable(getattr(o.par, n).eval()) == v["value"]) and
-                    (v["mode"] != "EXPRESSION" or "expr" not in v or str(getattr(o.par, n).expr) == v["expr"])
-                    for n, v in d.get("prev", {}).items())
+                    all(_par_state(getattr(o.par, n)).get(k) == value for k, value in v.items()
+                        if k != "value" or v["mode"] == "CONSTANT") for n, v in d.get("prev", {}).items())
             if kind in ("connect", "disconnect"):
                 src, dst = td.op(d["src"]), td.op(d["dst"])
                 if src is None or dst is None:
@@ -838,17 +1014,22 @@ class TDAdapter(Adapter):
     def _undo_text(self, d, snap):
         o = td.op(d["path"])
         expected = d.get("after_sha") or (snap or {}).get("after_sha")   # hash of the text actually written
-        if snap is None or snap["restored_at"] or o is None or _sha(o.text) != expected:
+        if snap is None or snap["restored_at"] or o is None or not _has_dat_source(o):
             raise ToolFailure("UNDO_CONFLICT", "the DAT text changed since (or was already restored)")
         # Review 14: restore only into the same operator. A DAT replaced at that path (say by an Execute DAT
         # holding the same text) must not receive the old text without its own approval.
         if snap.get("op_id") is None or int(o.id) != int(snap["op_id"]) or \
                 ("type" in d and o.OPType != d["type"]) or ("op_id" in d and int(o.id) != int(d["op_id"])):
             raise ToolFailure("UNDO_CONFLICT", "the DAT at this path was replaced since; nothing was restored")
+        current = o.text
+        if (_sha(current) != expected or (o.OPType in APPROVABLE_CREATE_TYPES and not self._callback_inactive(o))
+                or (d.get("after_source_sha256") and _source_sha(current) != d["after_source_sha256"])):
+            raise ToolFailure("UNDO_CONFLICT", "The DAT was activated or its exact source changed since the edit.")
         # Review 7: the snapshot row lives in the project folder; only restore text whose hash matches both the
         # row and the value recorded in the (chain-covered) outcome event.
         anchored = d.get("before_sha")
-        if _sha(snap["before_text"]) != snap["before_sha"] or (anchored and anchored != snap["before_sha"]):
+        if (_sha(snap["before_text"]) != snap["before_sha"] or (anchored and anchored != snap["before_sha"])
+                or (d.get("before_source_sha256") and _source_sha(snap["before_text"]) != d["before_source_sha256"])):
             raise ToolFailure("UNDO_FAILED", "the recovery snapshot does not match the audit log; nothing was restored")
         o.text = snap["before_text"]
         ok = _sha(o.text) == snap["before_sha"]
@@ -874,28 +1055,39 @@ class TDAdapter(Adapter):
             return "ambiguous", (f"There are {len(comps)} tdflowProject components; project memory needs exactly "
                                  "one (single authority). Ask the user to keep only one."), None
         c = comps[0]
-        pid = getattr(c.par, "Projectid", None)
-        if pid is None or not MEM.MEMORY_ID.match(str(pid.eval())):
+        if not MEM.MEMORY_ID.match(str(self._memory_constant(c, "Projectid"))):
             return "uninitialized", ("The tdflowProject component has no valid Projectid. Ask the user to create "
                                      "project memory with Create Project Memory."), c
+        if any(getattr(c.par, name, None) is not None and self._memory_constant(c, name) is None
+               for name in ("Memoryauthority", "Repopath")):
+            return "uninitialized", "Project memory settings must be in constant mode. Review them in TouchDesigner.", c
+        if not self._valid_memory_sources(c):
+            return "uninitialized", "Project memory contains a linked or computed record. Review it in TouchDesigner.", c
         if self._authority(c) == "repo" and not self._repopath(c):
             return "uninitialized", ("Project memory is in repository mode but no folder is linked. Ask the user to "
                                      "link one on the TDflowMCP Setup page (Project memory)."), c
         return "ready", "", c
 
     @staticmethod
-    def _authority(c):
-        auth = getattr(c.par, "Memoryauthority", None)
-        return "repo" if auth is not None and str(auth.eval()) == "repo" else "embedded"
+    def _memory_constant(c, name):
+        par = getattr(c.par, name, None)
+        return par.val if par is not None and str(par.mode).split(".")[-1] == "CONSTANT" else None
+
+    def _authority(self, c):
+        return "repo" if self._memory_constant(c, "Memoryauthority") == "repo" else "embedded"
+
+    def _repopath(self, c):
+        return str(self._memory_constant(c, "Repopath") or "").strip()
 
     @staticmethod
-    def _repopath(c):
-        rp = getattr(c.par, "Repopath", None)
-        return str(rp.eval()).strip() if rp is not None else ""
+    def _valid_memory_sources(c):
+        return all(d.OPType == "textDAT" and _has_dat_source(d) for d in c.children
+                   if d.name in (MEM.DERIVED_NAME, "README", "MIGRATIONS") or MEM.RECORD_NAME.match(d.name))
 
     @staticmethod
     def _record_dats(c):
-        return [(d.name, d.text) for d in c.children if d.OPType == "textDAT" and MEM.RECORD_NAME.match(d.name)]
+        return [(d.name, d.text if d.OPType == "textDAT" and _has_dat_source(d) else "")
+                for d in c.children if MEM.RECORD_NAME.match(d.name)]
 
     def memory_entries(self):
         """Main thread: (status, comp_path, memory_id, entries) for the Setup page and Tell Your Coding Agent.
@@ -904,8 +1096,8 @@ class TDAdapter(Adapter):
         if status != "ready":
             return status, (c.path if c is not None else None), None, []
         if self._authority(c) == "repo":
-            return status, c.path, str(c.par.Projectid.eval()), []
-        return status, c.path, str(c.par.Projectid.eval()), MEM.read_records(self._record_dats(c), self._mem_cache)
+            return status, c.path, str(self._memory_constant(c, "Projectid")), []
+        return status, c.path, str(self._memory_constant(c, "Projectid")), MEM.read_records(self._record_dats(c), self._mem_cache)
 
     def memory_info(self, with_dats=True):
         """Main thread, no disk I/O: where project memory lives. Plain data for other threads."""
@@ -918,11 +1110,11 @@ class TDAdapter(Adapter):
                "project_file": os.path.join(str(td.project.folder or ""), str(td.project.name or ""))}
         if c is None or status not in ("ready", "uninitialized"):
             return out
-        pid = getattr(c.par, "Projectid", None)
-        out.update(memory_id=str(pid.eval()) if pid is not None else None, authority=self._authority(c),
+        pid = self._memory_constant(c, "Projectid")
+        out.update(memory_id=str(pid) if pid is not None else None, authority=self._authority(c),
                    repopath=self._repopath(c), dats=self._record_dats(c) if with_dats else [])
         d = c.op(MEM.DERIVED_NAME)
-        out["derived"] = d.text if d is not None and d.isDAT else ""
+        out["derived"] = d.text if d is not None and d.OPType == "textDAT" and _has_dat_source(d) else ""
         return out
 
     @staticmethod
@@ -968,7 +1160,7 @@ class TDAdapter(Adapter):
                 parts.append(f + "=" + str(bool(getattr(o, f))))
             except Exception:
                 pass
-        if o.OPType in ("textDAT", "tableDAT") and not ins:        # authored text only (cooked DATs change alone)
+        if o.OPType in ("textDAT", "tableDAT") and _has_dat_source(o):
             parts.append("t=" + _sha(o.text))
         digest = hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()[:16]
         return [digest, away] if detail else digest
@@ -984,7 +1176,7 @@ class TDAdapter(Adapter):
         if status != "ready":
             return out
         repo = self._authority(c) == "repo"
-        out.update(comp=c.path, memory_id=str(c.par.Projectid.eval()), authority="repo" if repo else "embedded",
+        out.update(comp=c.path, memory_id=str(self._memory_constant(c, "Projectid")), authority="repo" if repo else "embedded",
                    repopath=self._repopath(c), dats=[] if repo else self._record_dats(c))
         if scopes is None and task_id and repo:
             # The task's recorded scopes are in the record files, which are never read on the main thread: the
@@ -1039,7 +1231,7 @@ class TDAdapter(Adapter):
                         par = getattr(o.par, str(c2["param"]), None)
                         try:
                             if par is not None and str(par.mode).split(".")[-1] == "CONSTANT" and not par.readOnly:
-                                f["values"][str(c2["param"])] = _jsonable(par.eval())
+                                f["values"][str(c2["param"])] = _jsonable(par.val)
                         except Exception:
                             pass
             out["live"][p] = f
@@ -1056,7 +1248,7 @@ class TDAdapter(Adapter):
     # -- repository mode (increment 3): the component holds only the pointer and a derived index --
     def memory_check(self, comp, memory_id, authority, repopath):
         status, _, c = self.memory_component()
-        if (status != "ready" or c.path != comp or str(c.par.Projectid.eval()) != memory_id
+        if (status != "ready" or c.path != comp or str(self._memory_constant(c, "Projectid")) != memory_id
                 or self._authority(c) != authority or self._repopath(c) != repopath):
             raise ToolFailure("MEMORY_CONFLICT", "project memory changed since the request was checked; nothing "
                               "was recorded. Retry.")
@@ -1064,7 +1256,7 @@ class TDAdapter(Adapter):
 
     def memory_derived(self, comp, memory_id, text):
         status, _, c = self.memory_component()
-        if status != "ready" or c.path != comp or str(c.par.Projectid.eval()) != memory_id or self._authority(c) != "repo":
+        if status != "ready" or c.path != comp or str(self._memory_constant(c, "Projectid")) != memory_id or self._authority(c) != "repo":
             return {"written": False}
         d = c.op(MEM.DERIVED_NAME)
         if d is None:
@@ -1097,7 +1289,7 @@ class TDAdapter(Adapter):
         exactly these records. The component becomes a pointer: record DATs are removed, the derived index and
         a migration note stay. Refused if the records changed since they were copied."""
         status, _, c = self.memory_component()
-        if status != "ready" or c.path != comp or str(c.par.Projectid.eval()) != memory_id or self._authority(c) != "embedded":
+        if status != "ready" or c.path != comp or str(self._memory_constant(c, "Projectid")) != memory_id or self._authority(c) != "embedded":
             raise ValueError("project memory changed during the migration; nothing was switched")
         if MEM.dats_digest(self._record_dats(c)) != expect_digest:
             raise ValueError("a record changed during the migration; nothing was switched")
@@ -1124,8 +1316,8 @@ class TDAdapter(Adapter):
         audit ledger."""
         comps = self._memory_comps()
         c = comps[0] if len(comps) == 1 else None
-        pid = getattr(c.par, "Projectid", None) if c is not None else None
-        if c is None or c.path != comp or pid is None or str(pid.eval()) != memory_id or self._authority(c) != "repo":
+        if (c is None or c.path != comp or str(self._memory_constant(c, "Projectid")) != memory_id
+                or self._authority(c) != "repo" or not self._valid_memory_sources(c)):
             raise ValueError("project memory changed during the request; nothing was re-linked")
         auth, rp = self._memory_pars(c)
         self._set_ro(rp, repopath)
@@ -1141,7 +1333,7 @@ class TDAdapter(Adapter):
         """User-confirmed migration back (main thread): the component's record DATs become exactly ``records``
         ((name, text) read and link-checked from the folder)."""
         status, _, c = self.memory_component()
-        if status != "ready" or c.path != comp or str(c.par.Projectid.eval()) != memory_id or self._authority(c) != "repo":
+        if status != "ready" or c.path != comp or str(self._memory_constant(c, "Projectid")) != memory_id or self._authority(c) != "repo":
             raise ValueError("project memory changed during the migration; nothing was switched")
         want = dict(records)
         for d in [x for x in c.children if x.OPType == "textDAT" and MEM.RECORD_NAME.match(x.name)]:
@@ -1179,7 +1371,7 @@ class TDAdapter(Adapter):
 
     def memory_write(self, comp, memory_id, name, text, expect_digest):
         status, _, c = self.memory_component()
-        if (status != "ready" or c.path != comp or str(c.par.Projectid.eval()) != memory_id
+        if (status != "ready" or c.path != comp or str(self._memory_constant(c, "Projectid")) != memory_id
                 or self._authority(c) != "embedded"):
             raise ToolFailure("MEMORY_CONFLICT", "project memory changed since the request was checked; nothing "
                               "was recorded. Retry.")

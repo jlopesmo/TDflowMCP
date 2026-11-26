@@ -50,14 +50,16 @@ ORIGINAL = {"numStartups": 12, "theme": "dark", "tipsHistory": {"x": 3},
             "projects": {"F:/elsewhere": {"allowedTools": []}}}
 ALLOWED = ["mcp__tdflow__tdflow_whoami", "mcp__tdflow__tdflow_list_operators", "mcp__tdflow__tdflow_create_operator",
            "mcp__tdflow__tdflow_set_parameters", "mcp__tdflow__tdflow_get_parameters", "mcp__tdflow__tdflow_connect",
-           "mcp__tdflow__tdflow_undo"]
+           "mcp__tdflow__tdflow_undo", "mcp__tdflow__tdflow_get_dat_text"]
 PROMPT2 = ("You are connected to a TouchDesigner project through the MCP server named tdflow. 1) Call tdflow_whoami. "
            "2) With tdflow_create_operator create a Level TOP named probe_level inside /project1/fx. 3) With "
            "tdflow_connect connect the output of /project1/fx/noise1 to the first input of /project1/fx/probe_level. "
            "4) Set parameter opacity of /project1/fx/probe_level to 0.5 with tdflow_set_parameters, then read it back "
            "with tdflow_get_parameters. 5) Call tdflow_undo once to undo that last change, then read opacity again. "
+           "6) Use tdflow_get_dat_text on /project1/fx/notes with proposed_text set to 'def invalid(:'. "
+           "Read the code field in python_validation. "
            "Finish with exactly one line: RESULT role=<role from whoami> set=<value read in step 4> "
-           "after_undo=<value read in step 5>")
+           "after_undo=<value read in step 5> preview=<validation code from step 6>")
 PROMPT = ("You are connected to a TouchDesigner project through the MCP server named tdflow. 1) Call tdflow_whoami. "
           "2) Call tdflow_list_operators for /project1/fx. 3) With tdflow_create_operator create a Constant TOP named "
           "probe1 inside /project1/fx. 4) With tdflow_create_operator try to create a Constant TOP named probe_outside "
@@ -191,6 +193,7 @@ def make_live(tag):
             rl = out.get("result_line", "")
             T(f"{tag}.LIVE_SESSION_AFTER_RESTART", out.get("rc") == 0 and "role=builder" in rl and "set=0.5" in rl
               and re.search(r"after_undo=1(\.0+)?\b", rl) is not None, line=rl)
+            T(f"{tag}.LIVE_SESSION_PREVIEWS_INVALID_PYTHON", "preview=PYTHON_SYNTAX" in rl, line=rl)
         return out
     return cp
 
@@ -207,18 +210,24 @@ def live_session(prompt, label):
                                                              "--allowedTools", *ALLOWED, *ob.ISOLATION,
                                                              "--output-format", "stream-json", "--verbose"],
                                    STATE["proj"], env, 600)
-    res = {}
+    res, preview_calls = {}, []
     for ln in sout.splitlines():
         try:
             m = json.loads(ln)
         except ValueError:
             continue
+        if m.get("type") == "assistant":
+            for item in (m.get("message") or {}).get("content") or []:
+                if item.get("type") == "tool_use" and item.get("name") == "mcp__tdflow__tdflow_get_dat_text":
+                    preview_calls.append(item.get("input"))
         if m.get("type") == "result":
             res = m
     text = str(res.get("result", ""))
     rl = next((x for x in text.splitlines() if x.strip().startswith("RESULT")), "")
     secret = (STATE.get("token") or "x.\0").split(".", 1)[-1]
     T(f"{label}.no_token_in_agent_output", secret not in sout and secret not in serr)
+    if prompt == PROMPT2:
+        T(f"{label}.MCP_PREVIEW_CALLED", {"path": "/project1/fx/notes", "proposed_text": "def invalid(:"} in preview_calls)
     return {"rc": rc, "result_line": rl, "seconds": round(time.time() - t0, 1), "turns": res.get("num_turns")}
 
 

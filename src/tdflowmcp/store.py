@@ -102,7 +102,7 @@ CREATE TABLE IF NOT EXISTS capabilities (agent_id TEXT NOT NULL, name TEXT NOT N
 CREATE TABLE IF NOT EXISTS approvals (id TEXT PRIMARY KEY, created_at TEXT NOT NULL, expires_at REAL NOT NULL,
   agent_id TEXT NOT NULL, token_id TEXT, tool TEXT NOT NULL, args TEXT NOT NULL, args_sha256 TEXT NOT NULL,
   targets TEXT NOT NULL, policy_version TEXT, reasons TEXT, state TEXT NOT NULL, decided_at TEXT, note TEXT,
-  mac TEXT, redeemed_at TEXT);
+  mac TEXT, redeemed_at TEXT, review TEXT NOT NULL DEFAULT '');
 CREATE INDEX IF NOT EXISTS approvals_lookup ON approvals(agent_id, tool, args_sha256);
 """
 
@@ -170,6 +170,14 @@ class Store:
             self.cconn.execute("PRAGMA journal_mode=WAL")
             self.cconn.execute("PRAGMA synchronous=FULL")
             self.cconn.executescript(_DDL_CRED)
+            self.cconn.execute("BEGIN IMMEDIATE")
+            try:
+                if "review" not in {row[1] for row in self.cconn.execute("PRAGMA table_info(approvals)")}:
+                    self.cconn.execute("ALTER TABLE approvals ADD COLUMN review TEXT NOT NULL DEFAULT ''")
+                self.cconn.execute("COMMIT")
+            except BaseException:
+                self.cconn.execute("ROLLBACK")
+                raise
         except (OSError, ValueError, sqlite3.Error) as e:
             self.last_error = type(e).__name__
             self.close()
@@ -422,9 +430,17 @@ class Store:
                           (token_id, agent_id, salt, digest, now_iso()))
 
     def revoke_token(self, token_id: str) -> bool:
-        cur = self._cc().execute("UPDATE tokens SET revoked_at=? WHERE token_id=? AND revoked_at IS NULL",
-                                (now_iso(), token_id))
-        return cur.rowcount == 1
+        c = self._cc()
+        c.execute("BEGIN IMMEDIATE")
+        try:
+            cur = c.execute("UPDATE tokens SET revoked_at=? WHERE token_id=? AND revoked_at IS NULL", (now_iso(), token_id))
+            c.execute("UPDATE approvals SET state='cancelled', args='', review='' WHERE token_id=? AND "
+                      "state IN ('pending','approved')", (token_id,))
+            c.execute("COMMIT")
+            return cur.rowcount == 1
+        except BaseException:
+            c.execute("ROLLBACK")
+            raise
 
     def set_agent_enabled(self, agent_id: str, enabled: bool) -> bool:
         cur = self._cc().execute("UPDATE agents SET enabled=? WHERE id=?", (1 if enabled else 0, agent_id))
@@ -467,7 +483,7 @@ class Store:
             c.execute("DELETE FROM capabilities WHERE agent_id=?", (agent_id,))
             for name in sorted(set(capabilities)):
                 c.execute("INSERT INTO capabilities(agent_id, name) VALUES (?,?)", (agent_id, name))
-            n = c.execute("UPDATE approvals SET state='cancelled', args='' WHERE agent_id=? AND "
+            n = c.execute("UPDATE approvals SET state='cancelled', args='', review='' WHERE agent_id=? AND "
                           "state IN ('pending','approved')", (str(agent_id),)).rowcount
             c.execute("COMMIT")
             return n
@@ -541,27 +557,29 @@ class Store:
     # with the installation key, and the digest of the stored arguments is recomputed before a decision. Every transition is also an audit event (written by the caller). These methods never raise an
     # ApprovalError: the audit worker would turn it into "audit unavailable". They return {"ok": False, ...}.
     _APR_COLS = ("id", "created_at", "expires_at", "agent_id", "token_id", "tool", "args", "args_sha256", "targets",
-                 "policy_version", "reasons", "state", "decided_at", "note", "mac", "redeemed_at")
+                 "policy_version", "reasons", "state", "decided_at", "note", "mac", "redeemed_at", "review")
 
     def _apr_row(self, r) -> Optional[Dict[str, Any]]:
         return dict(zip(self._APR_COLS, r)) if r else None
 
     def _apr_expire(self, c, now: float):
-        c.execute("UPDATE approvals SET state='expired' WHERE state IN ('pending','approved') AND expires_at <= ?", (now,))
+        c.execute("UPDATE approvals SET state='expired', review='' WHERE state IN ('pending','approved') AND expires_at <= ?", (now,))
 
     def approval_get(self, approval_id: str) -> Optional[Dict[str, Any]]:
         r = self._cc().execute(f"SELECT {', '.join(self._APR_COLS)} FROM approvals WHERE id=?", (str(approval_id),)).fetchone()
         return self._apr_row(r)
 
-    def approval_find(self, agent_id: str, tool: str, args_sha: str) -> Optional[Dict[str, Any]]:
+    def approval_find(self, agent_id: str, tool: str, args_sha: str, token_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """The newest request of this agent for exactly this call (any state)."""
+        token_clause = " AND token_id=?" if token_id is not None else ""
+        params = (agent_id, tool, args_sha) + ((token_id,) if token_id is not None else ())
         r = self._cc().execute(f"SELECT {', '.join(self._APR_COLS)} FROM approvals WHERE agent_id=? AND tool=? AND "
-                              "args_sha256=? ORDER BY rowid DESC LIMIT 1", (agent_id, tool, args_sha)).fetchone()
+                              f"args_sha256=?{token_clause} ORDER BY rowid DESC LIMIT 1", params).fetchone()
         return self._apr_row(r)
 
     def approval_request(self, agent_id: str, token_id: str, tool: str, args_text: str, args_sha: str, targets: str,
                          policy_version: str, reasons: List[str], now: Optional[float] = None,
-                         ttl: float = APR.EXPIRY_S) -> Dict[str, Any]:
+                         ttl: float = APR.EXPIRY_S, review: str = "") -> Dict[str, Any]:
         """Create a pending request, or return the open one for the identical call. One transaction."""
         now = time.time() if now is None else float(now)
         c = self._cc()
@@ -569,8 +587,8 @@ class Store:
         try:
             self._apr_expire(c, now)
             r = c.execute(f"SELECT {', '.join(self._APR_COLS)} FROM approvals WHERE agent_id=? AND tool=? AND "
-                          "args_sha256=? AND state IN ('pending','approved') ORDER BY rowid DESC LIMIT 1",
-                          (agent_id, tool, args_sha)).fetchone()
+                          "args_sha256=? AND token_id=? AND state IN ('pending','approved') ORDER BY rowid DESC LIMIT 1",
+                          (agent_id, tool, args_sha, token_id)).fetchone()
             if r:
                 c.execute("COMMIT")
                 return {"ok": True, "created": False, "approval": self._apr_row(r)}
@@ -580,7 +598,7 @@ class Store:
                 return {"ok": False, "code": "APPROVAL_QUEUE_FULL",
                         "message": f"{n} of your requests are already waiting for the user; wait for a decision"}
             row = (APR.new_id(), now_iso(), now + float(ttl), agent_id, token_id, tool, args_text, args_sha, targets,
-                   policy_version, json.dumps([str(x)[:200] for x in reasons][:10]), "pending", None, None, None, None)
+                   policy_version, json.dumps([str(x)[:200] for x in reasons][:10]), "pending", None, None, None, None, review)
             c.execute(f"INSERT INTO approvals({', '.join(self._APR_COLS)}) VALUES ({', '.join('?' * len(row))})", row)
             c.execute("COMMIT")
             return {"ok": True, "created": True, "approval": dict(zip(self._APR_COLS, row))}
@@ -588,7 +606,8 @@ class Store:
             c.execute("ROLLBACK")
             raise
 
-    def approval_decide(self, approval_id: str, decision: str, note: str = "", now: Optional[float] = None) -> Dict[str, Any]:
+    def approval_decide(self, approval_id: str, decision: str, note: str = "", now: Optional[float] = None,
+                        shown_review_sha: Optional[str] = None) -> Dict[str, Any]:
         """The user's decision (paired admin session). Only a pending, unexpired request can be decided."""
         if decision not in ("approved", "denied"):
             return {"ok": False, "code": "INVALID_ARGS", "message": "decision must be approved or denied"}
@@ -602,21 +621,25 @@ class Store:
             if a is not None and a["state"] == "pending":
                 try:
                     shown_sha = APR.digest(a["tool"], json.loads(a["args"]))[1]
+                    _, review_sha = APR.checked_review(a)
                 except (ValueError, APR.ApprovalError):
                     shown_sha = None
                 if shown_sha != a["args_sha256"]:      # what the user saw must be exactly what will run
-                    c.execute("UPDATE approvals SET state='cancelled' WHERE id=?", (a["id"],))
+                    c.execute("UPDATE approvals SET state='cancelled', args='', review='' WHERE id=?", (a["id"],))
                     c.execute("COMMIT")
                     return {"ok": False, "code": "APPROVAL_INVALID", "message": "the stored request does not match its "
                             "digest; it was cancelled"}
+                if decision == "approved" and review_sha and shown_review_sha != review_sha:
+                    c.execute("COMMIT")
+                    return {"ok": False, "code": "APPROVAL_CHANGED", "message": "Review the callback source before approving."}
             if a is None or a["state"] != "pending":
                 c.execute("COMMIT")
                 return {"ok": False, "code": "APPROVAL_NOT_PENDING", "state": a["state"] if a else None,
                         "message": "that request is not waiting for a decision (decided, used or expired)"}
             decided_at = now_iso()
             mac = APR.decision_mac(self._key_for(b"approval"), a, decision, decided_at)
-            c.execute("UPDATE approvals SET state=?, decided_at=?, note=?, mac=? WHERE id=? AND state='pending'",
-                      (decision, decided_at, str(note)[:500], mac, a["id"]))
+            c.execute("UPDATE approvals SET state=?, decided_at=?, note=?, mac=?, review=? WHERE id=? AND state='pending'",
+                      (decision, decided_at, str(note)[:500], mac, a["review"] if decision == "approved" else "", a["id"]))
             c.execute("COMMIT")
             return {"ok": True, "approval": dict(a, state=decision, decided_at=decided_at, note=str(note)[:500], mac=mac)}
         except BaseException:
@@ -624,7 +647,8 @@ class Store:
             raise
 
     def approval_redeem(self, approval_id: str, agent_id: str, tool: str, args_sha: str, targets: List[List[str]],
-                        policy_version: str, given_id: Optional[str] = None, now: Optional[float] = None) -> Dict[str, Any]:
+                        policy_version: str, given_id: Optional[str] = None, now: Optional[float] = None,
+                        token_id: Optional[str] = None) -> Dict[str, Any]:
         """Use an approval once, for exactly this call. Checked and marked in one transaction, so two identical
         re-calls can never both run."""
         now = time.time() if now is None else float(now)
@@ -637,17 +661,19 @@ class Store:
                 c.execute("COMMIT")
                 return {"ok": False, "code": "APPROVAL_NOT_FOUND", "message": "no such approval"}
             try:
+                if token_id is not None and a.get("token_id") != token_id:
+                    raise APR.ApprovalError("APPROVAL_MISMATCH", "this approval was requested by a different credential")
                 APR.check_redemption(a, self._key_for(b"approval"), agent_id, tool, args_sha, targets, now, given_id)
                 if str(a.get("policy_version") or "") != str(policy_version or ""):
                     raise APR.ApprovalError("APPROVAL_POLICY_CHANGED", "your permissions or the project settings changed "
                                             "since the request; ask again")
             except APR.ApprovalError as e:
                 if e.code in ("APPROVAL_TARGETS_CHANGED", "APPROVAL_POLICY_CHANGED", "APPROVAL_INVALID"):
-                    c.execute("UPDATE approvals SET state='cancelled' WHERE id=? AND state='approved'", (a["id"],))
+                    c.execute("UPDATE approvals SET state='cancelled', args='', review='' WHERE id=? AND state='approved'", (a["id"],))
                 c.execute("COMMIT")
                 return {"ok": False, "code": e.code, "message": e.message}
             # Single use; the complete arguments are no longer kept once used (review 13: retention).
-            cur = c.execute("UPDATE approvals SET state='redeemed', redeemed_at=?, args='' WHERE id=? AND state='approved'",
+            cur = c.execute("UPDATE approvals SET state='redeemed', redeemed_at=?, args='', review='' WHERE id=? AND state='approved'",
                             (now_iso(), a["id"]))
             c.execute("COMMIT")
             if cur.rowcount != 1:
@@ -660,11 +686,11 @@ class Store:
     def approvals_cancel_agent(self, agent_id: str) -> int:
         """Review 14: a permission change cancels the agent's open approvals (a grant added and removed again
         restores the old policy version, so the version check alone would let them be redeemed)."""
-        return self._cc().execute("UPDATE approvals SET state='cancelled', args='' WHERE agent_id=? AND "
+        return self._cc().execute("UPDATE approvals SET state='cancelled', args='', review='' WHERE agent_id=? AND "
                                   "state IN ('pending','approved')", (str(agent_id),)).rowcount
 
     def approval_cancel(self, approval_id: str) -> None:
-        self._cc().execute("UPDATE approvals SET state='cancelled', args='' WHERE id=? AND state IN ('pending','approved')",
+        self._cc().execute("UPDATE approvals SET state='cancelled', args='', review='' WHERE id=? AND state IN ('pending','approved')",
                            (str(approval_id),))
 
     def approvals_list(self, state: Optional[str] = None, limit: int = 100, now: Optional[float] = None) -> List[Dict[str, Any]]:

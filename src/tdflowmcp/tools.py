@@ -10,7 +10,7 @@ Resolver kinds (the adapter turns them into policy Targets):
   read_path      read on args.path
   read_children  read on args.path/* (results filtered)
   read_tree      read on args.path/** (results filtered)
-  set_params     update on args.path per parameter (+ execute for expressions / Python-style pars)
+  set_params     update on args.path per parameter; execute for code effects; read on literal op() references
   create         create on args.parent/args.name (+ execute for executable types)
   delete         delete on args.path/** (count = subtree size)
   wire           update on args.dst, read on args.src
@@ -141,25 +141,29 @@ def core_registry() -> Registry:
            ("read",), "read_children", "list_operators", read_only=True, idempotent=True))
     T(Tool("tdflow_get_operator", "Get operator", "Type, family, flags, inputs, outputs and errors of one operator.",
            obj({"path": PATH}, ["path"]), ("read",), "read_path", "get_operator", read_only=True, idempotent=True))
-    T(Tool("tdflow_get_parameters", "Get parameters", "Parameter values, modes, expressions and defaults, "
-           "optionally for one parameter page or only the named parameters.",
+    T(Tool("tdflow_get_parameters", "Get parameters", "Parameter constants, modes, expression source and defaults, "
+           "optionally for one parameter page or only the named parameters. Expression, bind and export values "
+           "are not evaluated. Use tdflow_get_errors for reported runtime errors.",
            obj({"path": PATH, "page": {"type": "string", "maxLength": 64},
                 "names": {"type": "array", "maxItems": 50, "items": {"type": "string", "minLength": 1, "maxLength": 64}},
                                                       "offset": {"type": "integer", "minimum": 0, "maximum": 10000},
                                                       "limit": {"type": "integer", "minimum": 1, "maximum": 200}}, ["path"]),
            ("read",), "read_path", "get_parameters", read_only=True, idempotent=True))
-    T(Tool("tdflow_set_parameters", "Set parameters", "Set constant parameter values. Returns previous values. "
-           "Expressions (the expressions argument) and parameters that name operators or files make TouchDesigner "
-           "run code: they need the operator role and the user's approval of that exact call. Reversible with "
-           "tdflow_undo.",
+    T(Tool("tdflow_set_parameters", "Set parameters", "Use values to set constants or replace expressions with "
+           "constants. Use expressions to set Python expression source. It checks syntax and simple literal op() "
+           "references before requesting approval. Expression changes, including replacement with a constant, "
+           "reference parameters and Execute DAT settings "
+           "require scoped execute and approval of the exact call. Repeat the identical call after approval. "
+           "Check tdflow_get_errors and the resulting output. Reversible with tdflow_undo.",
            obj({"path": PATH, "values": {"type": "object", "maxProperties": 50, "additionalProperties":
                                          {"type": ["string", "number", "integer", "boolean"]}},
                 "expressions": {"type": "object", "maxProperties": 50,
                                 "additionalProperties": {"type": "string", "maxLength": 2000}}}, ["path"]),
-           ("update", "execute?"), "set_params", "set_parameters", idempotent=True, reversible="td_undo"))
+           ("update", "execute?", "read?"), "set_params", "set_parameters", idempotent=True, reversible="td_undo"))
     T(Tool("tdflow_create_operator", "Create operator", "Create an operator by type and name inside a COMP. "
            "Without x and y it is placed to the right of the existing nodes (the answer gives its position). "
-           "Executable and network operator types need execute and are not available in Phase 1. "
+           "The six supported Execute DAT types need scoped execute and approval and start inactive. "
+           "Script CHOP, SOP and TOP and network operator creation are unavailable. "
            "Reversible with tdflow_undo.",
            obj({"parent": PATH, "type": OPTYPE, "name": NAME,
                 "x": {"type": "integer", "minimum": -100000, "maximum": 100000},
@@ -175,13 +179,20 @@ def core_registry() -> Registry:
            W, ("update", "read"), "wire", "connect", idempotent=True, reversible="td_undo"))
     T(Tool("tdflow_disconnect", "Disconnect", "Remove the wire from src into dst. Reversible with tdflow_undo.",
            W, ("update", "read"), "wire", "disconnect", idempotent=True, reversible="td_undo"))
-    T(Tool("tdflow_get_dat_text", "Get DAT text", "Text of a DAT (size-capped).",
-           obj({"path": PATH, "max_chars": {"type": "integer", "minimum": 1, "maximum": 200000}}, ["path"]),
+    T(Tool("tdflow_get_dat_text", "Get DAT text", "Read authored Table, Text or Execute DAT source (size-capped) "
+           "and its exact source_sha256. Computed, wired and file-linked DATs are refused. "
+           "Supply proposed_text to validate Python syntax without running it and get a bounded unified diff.",
+           obj({"path": PATH, "max_chars": {"type": "integer", "minimum": 1, "maximum": 200000},
+                "proposed_text": {"type": "string", "maxLength": 200000}}, ["path"]),
            ("read",), "read_path", "get_dat_text", read_only=True, idempotent=True))
-    T(Tool("tdflow_set_dat_text", "Set DAT text", "Replace the text of a data DAT (Table DAT, or a Text DAT the "
-           "user tagged 'tdflowdata'). Text in DATs TouchDesigner may execute needs execute and is not available "
-           "in Phase 1. Reversible with tdflow_undo (TDflowMCP snapshot; TD's own undo does not cover DAT text).",
-           obj({"path": PATH, "text": {"type": "string", "maxLength": 200000}}, ["path", "text"]),
+    T(Tool("tdflow_set_dat_text", "Set DAT text", "Replace DAT text. For a Python Text DAT module, use language: "
+           "python to check syntax. Execute DAT source is always checked as Python and the callback must be inactive. "
+           "Pass expected_sha256 from tdflow_get_dat_text's source_sha256 to require the exact prior source. "
+           "Code writes require scoped execute and approval of the exact call. Repeat the identical call after "
+           "approval. Reversible with tdflow_undo using a durable TDflowMCP snapshot.",
+           obj({"path": PATH, "text": {"type": "string", "maxLength": 200000},
+                "language": {"type": "string", "enum": ["python"]},
+                "expected_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}, ["path", "text"]),
            ("update", "execute?"), "dat_text", "set_dat_text", idempotent=True, reversible="snapshot"))
     # Phase 4: scope leases for several agents working in one project.
     T(Tool("tdflow_lease_scope", "Lease scope", "Reserve a scope you can change (not the whole project), so other "
@@ -190,17 +201,17 @@ def core_registry() -> Registry:
            "1800) or when you release them (release: true). Leases do not survive a restart.",
            obj({"scope": PATH, "ttl_s": {"type": "integer", "minimum": 30, "maximum": 1800},
                 "release": {"type": "boolean"}}, ["scope"]), ("update",), "lease", "lease_scope"))
-    # Phase 4: visual analysis. The image is returned as MCP image content (read only, never cooks).
-    T(Tool("tdflow_capture_top", "Capture TOP", "The current image of a TOP as image content you can look at "
-           "(PNG or JPEG, up to 1920x1080 pixels, one per second). Use it to check what a network shows. An operator "
-           "that never cooked may show an empty image.",
+    # Phase 4: visual analysis. The adapter gates access to the frozen output.
+    T(Tool("tdflow_capture_top", "Capture TOP", "Read an owner-locked TOP image (PNG or JPEG, up to 1920x1080, "
+           "one per second). The TOP and enclosing components must have bypass off. "
+           "Available on Windows with TouchDesigner 2025.32440.",
            obj({"path": PATH, "format": {"type": "string", "enum": ["png", "jpg"]}}, ["path"]), ("read",),
            "read_path", "capture_top", read_only=True, idempotent=True))
     # Phase 4 (dogfood finding 5): bounded network summary with heuristic hints; reads facts, never cooks.
     T(Tool("tdflow_describe_network", "Describe network", "One network level (the children of a COMP) in one call: "
            "each readable operator's type, family, inputs, flags, errors and TouchDesigner's own cook count and "
            "last cook time, the wiring as edges, counts by family, and heuristic hints (slow cooks, frame budget, "
-           "large textures, errors, outputs nothing reads). Hints point at where to look; they are not findings.",
+           "large locked textures, errors, outputs nothing reads). Hints point at where to look; they are not findings.",
            obj({"path": PATH}, ["path"]), ("read",), "read_children", "describe_network", read_only=True,
            idempotent=True))
     T(Tool("tdflow_get_errors", "Get errors", "Errors and warnings of an operator and its children (filtered).",

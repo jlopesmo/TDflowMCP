@@ -59,7 +59,7 @@ def unmatched_intents(events):
 
 
 def run(mode, comp, ext, T, frames, until, checkpoint, R):
-    if mode != "native_screens":
+    if mode != "native_screens" and (mode != "perf" or hasattr(ext, "connector")):
         # No real TouchDesigner dialog in automated runs: the native modes record dialogs and click their buttons;
         # every other mode takes the no-dialog path (parameters), as before.
         ext.connector.dialog_opener = lambda title, text, buttons, cb: False
@@ -1550,6 +1550,21 @@ def memory(comp, ext, T, frames, until, checkpoint, R):
     T("memory.tell_has_no_agent_text", "UNTRUSTED_MARKER" not in tell)
     T("memory.records_are_text_dats", sorted(d.name for d in mc.children if d.name != "README")
       == ["checkpoint_blur_r1", "handoff_blur_r2"], names=sorted(d.name for d in mc.children))
+    guarded = mc.create(td.scriptDAT, "checkpoint_guard_r1")
+    callbacks = list(guarded.docked)
+    cooks = int(guarded.totalCooks)
+    source_state = ext._memory_ops().memory_info()
+    T("memory.REFUSES_COMPUTED_RECORD_BEFORE_READING", source_state.get("status") == "uninitialized"
+      and int(guarded.totalCooks) == cooks)
+    for callback in callbacks:
+        callback.destroy()
+    guarded.destroy()
+    authority = mc.par.Memoryauthority
+    authority.readOnly = False
+    authority.expr = "'embedded'"
+    T("memory.REQUIRES_CONSTANT_AUTHORITY", ext._memory_ops().memory_info()["status"] == "uninitialized")
+    authority.val = "embedded"
+    authority.readOnly = True
     # The user edits a parameter outside TDflowMCP (no audit event).
     td.op("/project1/fx/noise1").par.amp = 0.7
     yield frames(3)

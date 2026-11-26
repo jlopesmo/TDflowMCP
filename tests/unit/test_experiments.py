@@ -48,9 +48,9 @@ class ExperimentPolicyTests(unittest.TestCase):
         self.assertIn("cannot be undone", self.pol.approval_reasons(save)[0])
 
     def test_the_approval_binds_the_code_a_copy_carries(self):
-        from tdflowmcp.engine import Resolution, _snapshot_fact
-        a = _snapshot_fact(Resolution([], {"content_fact": ["copies_code_sha256", "aa"]}))
-        b = _snapshot_fact(Resolution([], {"content_fact": ["copies_code_sha256", "bb"]}))
+        from tdflowmcp.engine import Resolution, _approval_facts
+        a = _approval_facts(Resolution([], {"content_fact": ["copies_code_sha256", "aa"]}))
+        b = _approval_facts(Resolution([], {"content_fact": ["copies_code_sha256", "bb"]}))
         self.assertEqual(a, [["copies_code_sha256", "aa"]])
         self.assertNotEqual(a, b)                                  # changed code between approval and execution
 

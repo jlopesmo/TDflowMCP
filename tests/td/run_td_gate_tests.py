@@ -211,7 +211,8 @@ GATE = {"setup_ready": mt.cp_setup_ready, "pair_approved": mt.cp_pair_approved, 
         "load_slow": cp_load_slow, "race": cp_race, "race_checked": cp_race_checked, "overflow": cp_overflow,
         "outcome_fail": cp_outcome_fail, "gate_done": lambda d, p: {}, "crash_load": cp_crash_load,
         "restart_ready": cp_restart_ready, "after_crash_call": cp_after_crash_call, "after_move": cp_after_move}
-PERF = {"setup_ready": mt.cp_setup_ready, "pair_approved": mt.cp_pair_approved, "load": cp_load}
+PERF = {"setup_ready": mt.cp_setup_ready,
+        "pair_approved": lambda data, pid: mt.cp_pair_approved(data, pid, include_operator=False), "load": cp_load}
 
 
 def launch(mode, tox, run_dir, proj_dir, env, handlers, expect_kill=False, deadline_s=900, toe=None):

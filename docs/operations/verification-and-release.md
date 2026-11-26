@@ -45,4 +45,6 @@ Both backfills passed on GitHub-hosted Windows and Ubuntu runners. The validatio
 
 **v1.0.1, the same scope (owner D28, 2026-11-25):** the owner scoped v1.0.1 to Windows with **TouchDesigner 2025.32440** ([Issue #3](https://github.com/jlopesmo/TDflowMCP/issues/3#issuecomment-7175371704)) and instructed that TouchDesigner is not upgraded and that the final `.tox` is built and tested on 2025.32440. That is recorded here as the separate approval the paragraph above requires: the latest-build test of step 1 was not run for v1.0.1 either, and no compatibility with newer builds, macOS or Linux is claimed. Everything else in §4 applies.
 
+**v1.1.0 compatibility exception (owner, 2026-11-26):** The owner approved Windows with **TouchDesigner 2025.32440** for v1.1.0, subject to passing every other release gate. The latest-build test is waived for this release only. The compatibility claim is limited to tested builds and platforms.
+
 **Never:** release from `dev`, release an untested `.tox`, or claim compatibility with a TD build that was not tested.

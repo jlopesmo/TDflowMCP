@@ -22,6 +22,7 @@ Guarantees enforced here (unit-tested with a fake adapter):
 """
 from __future__ import annotations
 
+import secrets
 import threading
 import time
 from typing import Callable, Dict, List, Optional, Sequence
@@ -137,6 +138,7 @@ class Engine:
         self.on_audit_failure = on_audit_failure or (lambda: None)
         self.main = main or (lambda fn: fn())
         self.audit_failed = False                  # sticky: an outcome could not be recorded
+        self._runtime_id = secrets.token_hex(16)   # operator IDs are unique only within the running instance
         self.code_mode = False                     # ADR-0004: off until the user turns it on (dashboard)
         self.dashboard_page: Callable[[], str] = lambda: ""   # D25: the Capabilities page address (no credential)
         self.seen: Dict[str, dict] = {}            # agent_id -> {last, client}: authenticated requests (UX: Connected)
@@ -324,6 +326,10 @@ class Engine:
             return {"deny": {"code": f.code, "rule": "R0", "reason": f.message, "target": None}}
         verdict = self.policy.evaluate(agent, res.targets)
         targets = [[t.action, t.path] for t in res.targets]
+        failure = res.context.get("validation_failure")
+        if failure and (verdict.allow or verdict.code == "APPROVAL_REQUIRED"):
+            return {"deny": {"code": failure.code, "rule": "V1", "reason": failure.message, "target": None,
+                             "policy_version": verdict.policy_version, "targets": targets}}
         if not verdict.allow and verdict.code == "APPROVAL_REQUIRED" and tool.name not in APPROVABLE.get(verdict.rule_id, ()):
             # Phase 2B increment 1: only the effects with a tested execution path can be approved. Others stay
             # denied as before (for example text written into a DAT that TouchDesigner runs).
@@ -332,11 +338,17 @@ class Engine:
                              "policy_version": verdict.policy_version, "targets": targets}}
         if not verdict.allow and verdict.code == "APPROVAL_REQUIRED":
             # Everything else passed (hard denies, role, grants, allowlists, limits): only approval is missing.
+            try:
+                review = res.context.get("approval_review")
+                review_text, review_sha = APR.digest("approval review", review) if review else ("", "")
+            except APR.ApprovalError as e:
+                return {"deny": {"code": e.code, "rule": verdict.rule_id, "reason": e.message, "target": None,
+                                 "policy_version": verdict.policy_version, "targets": targets}}
             return {"deny": None, "targets": targets, "rule": verdict.rule_id, "policy_version": verdict.policy_version,
                     "snapshot": res.context.get("snapshot"),
                     "approval": {"rule": verdict.rule_id, "reason": verdict.reason,
                                  "reasons": self.policy.approval_reasons(res.targets),
-                                 "facts": APR.target_facts(res.targets) + _snapshot_fact(res)}}
+                                 "facts": _approval_facts(res, review_sha, self._runtime_id), "review": review_text}}
         if not verdict.allow:
             return {"deny": {"code": verdict.code, "rule": verdict.rule_id, "reason": verdict.reason,
                              "target": verdict.target, "policy_version": verdict.policy_version, "targets": targets}}
@@ -355,13 +367,13 @@ class Engine:
             return self._deny(base, e.code, ap["rule"], e.message, None)
         try:
             now = time.time()
-            row = self.store.approval_find(agent.id, tool.name, sha)
+            row = self.store.approval_find(agent.id, tool.name, sha, token_id=base["token_id"])
             state = APR.usable(row, now) if row else None
             if state == "approved":
                 # Announced before the approval is consumed: a crash in between leaves a trace (review 13).
                 self.store.append("approval", outcome="redeeming", rule_id=ap["rule"], **dict(base, approval_id=row["id"]))
                 r = self.store.approval_redeem(row["id"], agent.id, tool.name, sha, ap["facts"],
-                                               plan["policy_version"], given_id)
+                                               plan["policy_version"], given_id, token_id=base["token_id"])
                 if not r.get("ok"):
                     self.store.append("approval", outcome="refused", error_code=r["code"], rule_id=ap["rule"],
                                       **dict(base, approval_id=row["id"]))
@@ -382,7 +394,8 @@ class Engine:
                 return tool_error("APPROVAL_DENIED", "The user denied this request. Nothing was executed. Do not retry "
                                   "it or look for another way; ask the user.", **APR.summary_for_agent(row, now))
             r = self.store.approval_request(agent.id, base["token_id"], tool.name, text, sha,
-                                            APR.targets_key(ap["facts"]), plan["policy_version"], ap["reasons"])
+                                            APR.targets_key(ap["facts"]), plan["policy_version"], ap["reasons"],
+                                            review=ap.get("review", ""))
             if not r.get("ok"):
                 return self._deny(base, r["code"], ap["rule"], r["message"], None)
             row = r["approval"]
@@ -414,23 +427,35 @@ class Engine:
         if [[t.action, t.path] for t in res.targets] != plan["targets"]:
             raise ToolFailure("PRECONDITION_CHANGED", "The project changed since the request was checked; "
                                                       "nothing was executed. Retry.")
-        # Policy is evaluated again at execution, at the current version. With a redeemed approval only the
-        # approval rules are skipped; a grant revoked in between still denies.
-        v = self.policy.evaluate(current, res.targets, approved=bool(plan.get("approved")))
-        if not v.allow:
-            raise ToolFailure(v.code, v.reason, rule_id=v.rule_id)
-        if plan.get("approved") and APR.target_facts(res.targets) + _snapshot_fact(res) != plan["approval"]["facts"]:
-            raise ToolFailure("APPROVAL_TARGETS_CHANGED", "The project changed since the approval; nothing was "
-                                                          "executed. Ask again.")
+        if plan.get("approved"):
+            review = res.context.get("approval_review")
+            try:
+                review_sha = APR.digest("approval review", review)[1] if review else ""
+            except APR.ApprovalError:
+                review_sha = None
+            if review_sha is None or _approval_facts(res, review_sha, self._runtime_id) != plan["approval"]["facts"]:
+                raise ToolFailure("APPROVAL_TARGETS_CHANGED", "The operator, source or execution settings changed "
+                                  "since the approval. Nothing was executed. Ask again.")
+        if res.context.get("validation_failure"):
+            raise res.context["validation_failure"]
         held = self._leased(current, res.targets)
         if held:
             raise ToolFailure("LEASED", self._lease_msg(current, held) + "; nothing was executed")
-        if plan.get("approved") and v.policy_version != plan["policy_version"]:
-            raise ToolFailure("APPROVAL_POLICY_CHANGED", "Your permissions changed since the approval; nothing was "
-                                                         "executed. Ask again.")
         if snap_id is not None:
             res.context["snapshot_id"] = snap_id
             res.context["planned_snapshot"] = plan.get("snapshot")
+        # Resolution, hashing and lease checks can take time. Authorize against the latest identity before dispatch.
+        current = self.identity.agent_for_token(token_id)
+        if current is None or current.id != agent.id:
+            raise ToolFailure("DENIED", "The token was revoked; nothing was executed.")
+        v = self.policy.evaluate(current, res.targets, approved=bool(plan.get("approved")))
+        if not v.allow:
+            raise ToolFailure(v.code, v.reason, rule_id=v.rule_id)
+        if plan.get("approved") and v.policy_version != plan["policy_version"]:
+            raise ToolFailure("APPROVAL_POLICY_CHANGED", "Your permissions changed since the approval; nothing was "
+                                                         "executed. Ask again.")
+        if self.suspended():
+            raise ToolFailure("SUSPENDED", "All agents are suspended; nothing was executed.")
         return self.adapter.execute(tool, args, res, label, lambda ts: self.policy.filter_readable(current, ts)[0])
 
     # ---- Code Mode (Phase 3, ADR-0004) -----------------------------------------------------------
@@ -769,15 +794,24 @@ class Engine:
         def run_undo():
             if self.suspended():
                 raise ToolFailure("SUSPENDED", "All agents are suspended; nothing was undone.")
+            path_facts = getattr(self.adapter, "path_facts", None)
+            live_targets = targets
+            if path_facts:
+                live_targets = []
+                for target in targets:
+                    protected, ancestor = path_facts(target.path)
+                    live_targets.append(Target(target.action, target.path, protected=protected, ancestor_of=ancestor))
+            held = self._leased(agent, targets)
+            if held:                                # review 17: an undo is a change like any other
+                raise ToolFailure("LEASED", self._lease_msg(agent, held) + "; nothing was undone")
             current = self.identity.agent_for_token(base["token_id"])
             if current is None or current.id != agent.id:
                 raise ToolFailure("DENIED", "The token was revoked; nothing was undone.")
-            v = self.policy.evaluate(current, targets or [Target("update", self.policy.root + "/__none__")])
+            v = self.policy.evaluate(current, live_targets or [Target("update", self.policy.root + "/__none__")])
             if not v.allow:
                 raise ToolFailure(v.code, v.reason, rule_id=v.rule_id)
-            held = self._leased(current, targets)
-            if held:                                # review 17: an undo is a change like any other
-                raise ToolFailure("LEASED", self._lease_msg(current, held) + "; nothing was undone")
+            if self.suspended():
+                raise ToolFailure("SUSPENDED", "All agents are suspended; nothing was undone.")
             return self.adapter.undo(dict(rec, detail=detail), snap)
         try:
             r = m(run_undo)
@@ -1257,14 +1291,20 @@ def _main_reason(code: str, default: str = "TouchDesigner did not process the re
     return NOT_COOKING if code == "TDFLOW_NOT_COOKING" else default
 
 
-def _snapshot_fact(res) -> list:
+def _approval_facts(res, review_sha="", runtime_id="") -> list:
     """For text writes, the approval also binds the hash of the text being replaced (D20): approved code is never
     written over different code than the user saw replaced."""
     ctx = res.context if hasattr(res, "context") else {}
     snap = ctx.get("snapshot")
-    out = [["replaces_text_sha256", str(snap[3])], ["op_id", str(snap[1])]] if snap else []
+    out = APR.target_facts(res.targets) + ctx.get("approval_facts", [])
+    if runtime_id and ctx.get("approval_facts"):
+        out.append(["runtime_id", runtime_id])
+    if snap:
+        out.extend([["replaces_text_sha256", str(snap[3])], ["op_id", str(snap[1])]])
     if ctx.get("content_fact"):                  # review 16: the code a copy carries, as it is now
         out.append([str(x) for x in ctx["content_fact"]])
+    if review_sha:
+        out.append(["review_sha256", review_sha])
     return out
 
 

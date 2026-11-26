@@ -97,13 +97,31 @@ def target_facts(targets) -> List[List[Any]]:
     return [[t.action, t.path, t.change, t.param, int(t.count), t.op_type] for t in targets]
 
 
-_INVISIBLE = re.compile("[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u00ad\u061c\u180e"
+def checked_review(approval: Mapping) -> tuple:
+    """Return the server-derived preview and its digest only when they match the bound facts."""
+    try:
+        facts = json.loads(approval["targets"])
+        hashes = [row[1] for row in facts if row[0] == "review_sha256"]
+        raw = approval.get("review") or ""
+        if not raw and not hashes:
+            return None, ""
+        review = json.loads(raw)
+        canonical, sha = digest("approval review", review)
+        if isinstance(review, dict) and canonical == raw and hashes == [sha]:
+            return review, sha
+    except (ValueError, TypeError, KeyError, IndexError, ApprovalError):
+        pass
+    raise ApprovalError("APPROVAL_INVALID", "the execution preview does not match the stored request")
+
+
+_INVISIBLE = re.compile("[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u00ad\u061c\u180e\ud800-\udfff"
                         "\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u206f\ufeff\ufff9-\ufffb]")
 
 
 def decision_mac(key: bytes, approval: Mapping, decision: str, decided_at: str) -> str:
     """Binds a decision to exactly this request. ``key``: the store's key for the label ``approval``."""
-    blob = "\n".join([str(approval["id"]), str(approval["agent_id"]), str(approval["tool"]), str(approval["args_sha256"]),
+    blob = "\n".join([str(approval["id"]), str(approval["agent_id"]), str(approval.get("token_id") or ""),
+                      str(approval["tool"]), str(approval["args_sha256"]),
                       str(approval["targets"]), str(approval["policy_version"]), str(approval["expires_at"]),
                       decision, decided_at])
     return hmac.new(key, blob.encode("utf-8", "replace"), hashlib.sha256).hexdigest()
@@ -161,11 +179,19 @@ def view_for_user(approval: Mapping, now: float) -> dict:
         targets = json.loads(approval.get("targets") or "[]")
     except ValueError:
         targets = []
-    return {"id": approval["id"], "state": usable(approval, now), "created_at": approval.get("created_at"),
+    state = usable(approval, now)
+    review, review_sha, review_invalid = None, "", False
+    if state in OPEN:
+        try:
+            review, review_sha = checked_review(approval)
+        except ApprovalError:
+            review_invalid = True
+    return {"id": approval["id"], "state": state, "created_at": approval.get("created_at"),
             "expires_in_s": max(0, int(float(approval.get("expires_at") or 0) - now)),
             "agent_id": approval.get("agent_id"), "agent_name": approval.get("agent_name"), "tool": approval.get("tool"),
             "reasons": _reasons(approval.get("reasons")), "targets": targets,
             "args": approval.get("args"), "args_sha256": approval.get("args_sha256"),
+            "review": review, "review_sha256": review_sha, "review_invalid": review_invalid,
             "policy_version": approval.get("policy_version"), "decided_at": approval.get("decided_at"),
             "note": approval.get("note"), "agent_text_untrusted": True}
 

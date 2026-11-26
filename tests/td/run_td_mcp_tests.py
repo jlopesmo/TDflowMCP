@@ -137,7 +137,7 @@ def cp_setup_ready(data, pid):
     return {"match_code": j.get("match_code")}
 
 
-def cp_pair_approved(data, pid):
+def cp_pair_approved(data, pid, *, include_operator=True):
     st = http("GET", "/setup/api/pair/status", {"X-TDflow-Request": "1"})
     j = base.jbody(st) or {}
     STATE["csrf"] = j.get("csrf")
@@ -161,6 +161,8 @@ def cp_pair_approved(data, pid):
              "C": ("Agent C (observer)", "observer", "/project1/**", None),
              "D": ("Agent D (builder root)", "builder", "/project1/**", None),
              "E": ("Agent E (operator fx)", "operator", "/project1/fx/**", None)}
+    if not include_operator:
+        del specs["E"]
     for k, (name, role, scope, acts) in specs.items():
         body = {"display_name": name, "role": role, "scope": scope}
         if acts:
@@ -365,8 +367,15 @@ def approved(E, tool, args):
     r = E.call(tool, args)
     if r.get("code") != "APPROVAL_REQUIRED":
         return r, r
-    admin("POST", "/api/approvals/decide", {"id": r.get("approval_id"), "decision": "approved"})
+    approve_request(r["approval_id"])
     return r, E.call(tool, args)
+
+
+def approve_request(aid):
+    rows = (base.jbody(admin("GET", "/api/approvals")) or {}).get("approvals", [])
+    row = next((a for a in rows if a.get("id") == aid), {})
+    return admin("POST", "/api/approvals/decide", {"id": aid, "decision": "approved",
+                  "args_sha256": row.get("args_sha256"), "review_sha256": row.get("review_sha256")})
 
 
 def code_dat_flow(E):
@@ -399,6 +408,8 @@ def code_dat_flow(E):
     time.sleep(1.0)
     mk = E.call("tdflow_get_dat_text", {"path": "/project1/fx/marker"}).get("text", "")
     T("code.APPROVED_CODE_RUNS", mk.startswith("ran "), marker=mk)
+    blocked = E.call("tdflow_set_dat_text", {"path": "/project1/fx/ex1", "text": code + "\n"})
+    T("v11.ACTIVE_CALLBACK_SOURCE_REQUIRES_DEACTIVATION", blocked.get("code") == "CALLBACK_ACTIVE")
     T("code.builder_cannot_switch_it", B.call("tdflow_set_parameters", {"path": "/project1/fx/ex1", "values": {"active": False}})
       .get("rule_id") == "R1")
     # Review 14: callback toggles decide when code runs; they are execute changes too, not plain updates.
@@ -407,8 +418,19 @@ def code_dat_flow(E):
     tg = E.call("tdflow_set_parameters", {"path": "/project1/fx/ex1", "values": {"frameend": True}})
     T("code.CALLBACK_TOGGLE_NEEDS_APPROVAL", tg.get("code") == "APPROVAL_REQUIRED" and "decides when its code runs"
       in json.dumps(tg.get("reasons")), r=tg)
+    rows = (base.jbody(admin("GET", "/api/approvals")) or {}).get("approvals", [])
+    row = next((a for a in rows if a["id"] == tg.get("approval_id")), {})
+    review = row.get("review") or {}
+    T("v11.ACTIVATION_REVIEW_SHOWS_CURRENT_CODE_AND_STATE", review.get("callback_source", "").rstrip() == code.rstrip()
+      and review.get("active", {}).get("value") is True and "callback_source" not in tg)
+    T("v11.APPROVAL_REQUIRES_CALLBACK_PREVIEW_DIGEST", admin("POST", "/api/approvals/decide", {
+        "id": tg.get("approval_id"), "decision": "approved"})["status"] != 200)
+    if tg.get("approval_id"):
+        approve_request(tg["approval_id"])
     req, off = approved(E, "tdflow_set_parameters", {"path": "/project1/fx/ex1", "values": {"active": False}})
     T("code.deactivation_is_approval_gated_and_works", req.get("code") == "APPROVAL_REQUIRED" and ok(off), r=off)
+    stale = E.call("tdflow_set_parameters", {"path": "/project1/fx/ex1", "values": {"frameend": True}})
+    T("v11.STALE_CALLBACK_ACTIVATION_STATE_REFUSED", stale.get("code") == "APPROVAL_TARGETS_CHANGED", r=stale)
     time.sleep(0.5)
     a1 = E.call("tdflow_get_dat_text", {"path": "/project1/fx/marker"}).get("text", "")
     time.sleep(0.6)
@@ -416,6 +438,63 @@ def code_dat_flow(E):
     d = B.call("tdflow_delete_operator", {"path": "/project1/fx/ex1"})
     T("code.staged_operator_removable", ok(d), r=d)
     B.call("tdflow_delete_operator", {"path": "/project1/fx/marker"})
+
+
+def developer_flow(E):
+    B, R = MCP(TOKENS["B"]), MCP(TOKENS["C"])
+    parent = "/project1/fx"
+    for op_type, name in (("constantTOP", "dev_color"), ("levelTOP", "dev_level"), ("nullTOP", "dev_out"),
+                          ("textDAT", "dev_module")):
+        T(f"v11.create_{name}", ok(B.call("tdflow_create_operator", {"parent": parent, "type": op_type, "name": name})))
+    color, level, output, module = [parent + "/" + name for name in ("dev_color", "dev_level", "dev_out", "dev_module")]
+    for src, dst in ((color, level), (level, output)):
+        T("v11.wire_" + dst.rsplit("/", 1)[-1], ok(B.call("tdflow_connect", {"src": src, "dst": dst})))
+    get_text, set_text, set_par = "tdflow_get_dat_text", "tdflow_set_dat_text", "tdflow_set_parameters"
+    for name in ("script_output_probe", "wired_source_probe", "file_source_probe"):
+        result = R.call(get_text, {"path": parent + "/" + name, "proposed_text": "def f(): pass"})
+        T("v11.NO_IMPLICIT_DAT_COOK_" + name, result.get("code") == "DAT_SOURCE_UNAVAILABLE", r=result)
+    invalid = "def intensity(:\n    return 0.25\n"
+    check = B.call(get_text, {"path": module, "proposed_text": invalid})
+    T("v11.DAT_PREVIEW_DIAGNOSES_PYTHON_SYNTAX", (check.get("python_validation") or {}).get("code") == "PYTHON_SYNTAX"
+      and "line 1" in (check.get("python_validation") or {}).get("message", ""), r=check)
+    bad = E.call(set_text, {"path": module, "text": invalid, "language": "python"})
+    T("v11.INVALID_PYTHON_DAT_IS_REFUSED_BEFORE_APPROVAL", bad.get("code") == "PYTHON_SYNTAX", r=bad)
+    code = "def intensity():\n    return 0.25\n"
+    check = B.call(get_text, {"path": module, "proposed_text": code})
+    edit = {"path": module, "text": code, "language": "python", "expected_sha256": check.get("source_sha256")}
+    T("v11.DAT_DIFF_PREVIEWS_CORRECTION", (check.get("python_validation") or {}).get("ok") is True
+      and "+def intensity():" in "".join(check.get("diff") or []))
+    T("v11.BUILDER_CANNOT_WRITE_CODE", B.call(set_text, edit).get("rule_id") == "R1")
+    T("v11.OBSERVER_CANNOT_WRITE_CODE", R.call(set_text, edit).get("rule_id") == "R1")
+    req, edit_result = approved(E, set_text, edit)
+    T("v11.TEXT_DAT_MODULE_APPROVED", req.get("code") == "APPROVAL_REQUIRED" and ok(edit_result), r=edit_result)
+    T("v11.CAS_REJECTS_STALE_SOURCE", E.call(set_text, edit).get("code") == "DAT_TEXT_CHANGED")
+    u = E.call("tdflow_undo")
+    T("v11.CODE_DAT_SNAPSHOT_UNDO", ok(u) and u.get("verified") and
+      E.call(get_text, {"path": module}).get("source_sha256") == check.get("source_sha256"), r=u)
+    approved(E, set_text, edit)
+    bad = E.call(set_par, {"path": level, "expressions": {"opacity": "op('dev_color')."}})
+    T("v11.BAD_EXPRESSION_REFUSED", bad.get("code") == "PYTHON_SYNTAX", r=bad)
+    missing = E.call(set_par, {"path": level, "expressions": {"opacity": "op('dev_missing').par.colorr"}})
+    T("v11.MISSING_OPERATOR_REFERENCE", missing.get("code") == "REFERENCE_NOT_FOUND", r=missing)
+    protected = E.call(set_par, {"path": level, "expressions": {"opacity": "op('/sys').id"}})
+    T("v11.PROTECTED_EXPRESSION_REFERENCE", protected.get("rule_id") == "H1", r=protected)
+    expr = "float(op('dev_color').par.colorr) * op('dev_module').module.intensity()"
+    req, result = approved(E, set_par, {"path": level, "expressions": {"opacity": expr}})
+    T("v11.REFERENCE_EXPRESSION_APPROVED", req.get("code") == "APPROVAL_REQUIRED" and ok(result)
+      and set(result.get("validated_operator_references", [])) == {color, module}, r=result)
+    read = R.call("tdflow_get_parameters", {"path": level, "names": ["opacity"]})
+    state = (read.get("parameters") or [{}])[0]
+    T("v11.OBSERVER_READS_EXPRESSION_WITHOUT_EVALUATING", state.get("value") is None and state.get("expr") == expr)
+    replace = {"path": level, "values": {"opacity": 0.5}}
+    T("v11.BUILDER_CANNOT_REPLACE_AND_RESTORE_EXPRESSION", B.call(set_par, replace).get("rule_id") == "R1")
+    _, rep = approved(E, set_par, replace)
+    T("v11.CONSTANT_REPLACES_EXPRESSION", ok(rep) and rep.get("previous_modes", {}).get("opacity") == "EXPRESSION", r=rep)
+    u = E.call("tdflow_undo")
+    T("v11.EXPRESSION_SOURCE_RECOVERED", ok(u) and u.get("verified"), r=u)
+    for kind in ("scriptCHOP", "scriptSOP", "scriptTOP"):
+        denied_create = E.call("tdflow_create_operator", {"parent": parent, "type": kind, "name": "dev_script"})
+        T("v11.CREATION_DENIED_" + kind, denied_create.get("rule_id") == "G2", r=denied_create)
 
 
 def script_flow(E):
@@ -554,7 +633,7 @@ def network_flow(B):
     T("network.DESCRIBES_ONE_LEVEL", ok(d) and d.get("shown", 0) >= 1 and isinstance(d.get("edges"), list)
       and isinstance(d.get("hints"), list) and "by_family" in d, d={k: d.get(k) for k in ("shown", "total", "by_family", "code")})
     T("network.only_readable_operators", all(o["path"].startswith("/project1/fx/") for o in d.get("operators", [])))
-    st, j, _ = B.rpc("tools/call", {"name": "tdflow_capture_top", "arguments": {"path": "/project1/fx/noise1"}})
+    st, j, _ = B.rpc("tools/call", {"name": "tdflow_capture_top", "arguments": {"path": "/project1/fx/capture_snapshot"}})
     content = ((j or {}).get("result") or {}).get("content") or []
     img = next((c for c in content if c.get("type") == "image"), {})
     import base64 as _b64
@@ -564,6 +643,17 @@ def network_flow(B):
     T("capture.not_in_structured_or_audit", "_image" not in json.dumps(((j or {}).get("result") or {}).get("structuredContent") or {}))
     T("capture.non_top_refused", B.call("tdflow_capture_top", {"path": "/project1/fx"}).get("code") in ("INVALID_ARGS", "DENIED"))
     T("network.out_of_scope_denied", B.call("tdflow_describe_network", {"path": "/project1"}).get("code") == "DENIED")
+
+
+def cp_top_reads(data, pid, *, label="unlocked"):
+    reader = MCP(TOKENS["C"])
+    path = data["path"]
+    result = reader.call("tdflow_describe_network", {"path": path})
+    T(f"v11.{label}_network_metadata_read", ok(result))
+    image = reader.call("tdflow_capture_top", {"path": path + "/unlocked_output"})
+    refusal = "TOP_READ_UNVERIFIED" if label == "unverified" else "TOP_LOCK_REQUIRED"
+    T(f"v11.{label}_top_capture", (ok(image) and image.get("width", 0) > 0 and image.get("bytes", 0) > 0)
+      if label == "locked" else image.get("code") == refusal, r=image)
 
 
 def rcode(r):
@@ -712,7 +802,7 @@ def approval_flow():
     T("approval.IDENTICAL_RECALL_RUNS", ok(ran) and ran.get("expressions_set") == {"opacity": "0.25 + 0.5"}, result=ran)
     p = (E.call("tdflow_get_parameters", {"path": "/project1/fx/level1", "names": ["opacity"]}).get("parameters") or [{}])[0]
     T("approval.expression_set_in_td", p.get("mode") == "EXPRESSION" and p.get("expr") == "0.25 + 0.5"
-      and abs(float(p.get("value") or 0) - 0.75) < 1e-6, par=p)
+      and p.get("value") is None, par=p)
     T("approval.SINGLE_USE", E.call("tdflow_set_parameters", args).get("code") == "APPROVAL_REQUIRED")
     u = E.call("tdflow_undo")
     p = (E.call("tdflow_get_parameters", {"path": "/project1/fx/level1", "names": ["opacity"]}).get("parameters") or [{}])[0]
@@ -722,6 +812,7 @@ def approval_flow():
     kinds = {(e["kind"], e.get("approval_id")) for e in ev.get("events", [])}
     T("approval.execution_audited_with_its_approval", ("intent", aid) in kinds and ("outcome", aid) in kinds, n=len(kinds))
     code_dat_flow(E)
+    developer_flow(E)
     script_flow(E)
     network_flow(MCP(TOKENS["B"]))
     experiment_flow(E)
@@ -961,6 +1052,11 @@ HANDLERS = {"caps_native": cp_caps_native, "setup_ready": cp_setup_ready, "pair_
             "human_edited": cp_human_edited, "suspended": cp_suspended, "resumed": cp_resumed, "minimized": cp_minimized,
             "queue_block": cp_queue_block, "queue_checked": cp_queue_checked, "audit_down": cp_audit_down,
             "audit_up": cp_audit_up, "scan": cp_scan, "revoked": cp_revoked, "disabled": cp_disabled,
+            "unlocked_top_reads": cp_top_reads,
+            "locked_top_reads": lambda d, p: cp_top_reads(d, p, label="locked"),
+            "unverified_top_reads": lambda d, p: cp_top_reads(d, p, label="unverified"),
+            "bypassed_top_reads": lambda d, p: cp_top_reads(d, p, label="bypassed"),
+            "ancestor_bypassed_top_reads": lambda d, p: cp_top_reads(d, p, label="ancestor_bypassed"),
             "restart_enabled": cp_restart_enabled}
 
 

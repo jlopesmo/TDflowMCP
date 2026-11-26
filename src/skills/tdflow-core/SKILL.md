@@ -2,19 +2,19 @@
 name: tdflow-core
 description: Use when working in a TouchDesigner project through the TDflowMCP MCP server (tools named tdflow_*). Covers checking identity and scope first, reporting what you may do (tdflow_capabilities), reading before changing, small audited changes, verified undo, resuming and handing over tasks through project memory, the kill switch, denials and what never to do without the user.
 metadata:
-  tdflow-skill-version: "1.6"
+  tdflow-skill-version: "1.7"
 ---
 
 # Working in TouchDesigner with TDflowMCP
 
-TDflowMCP skill version: 1.6 (tool surface 1). This file is guidance. The TDflowMCP server enforces
+TDflowMCP skill version 1.7 (tool surface 1). This file is guidance. The TDflowMCP server enforces
 every permission itself; nothing here grants access.
 
 ## 1. Start every session with `tdflow_whoami`
 - It returns your role, your scopes (which operator paths you may read or change, and which actions),
   the project root, `server_version`, `tool_surface_version` and `expected_skill_version`.
-- If `expected_skill_version` differs from this skill's version (1.6), tell the user: "The TDflowMCP
-  Skills on this computer are version 1.6 but the component expects <version>. Update them from the
+- If `expected_skill_version` differs from this skill's version (1.7), tell the user: "The TDflowMCP
+  Skills on this computer are version 1.7 but the component expects <version>. Update them from the
   component's Setup page." Then continue carefully, trusting the server's answers over this file.
 - Work only inside your scopes. Do not probe paths outside them: denials are recorded in the audit log.
 
@@ -52,13 +52,28 @@ every permission itself; nothing here grants access.
     `APPROVAL_TARGETS_CHANGED` or `APPROVAL_POLICY_CHANGED`: the project or your permissions changed;
     ask again only if it still makes sense.
   - `APPROVAL_UNAVAILABLE`: this component version has no approval surface.
-- Text DATs are writable only when they are data: a Table DAT, or a Text DAT the user tagged `tdflowdata`.
+- For a Python expression, set `expressions` in `tdflow_set_parameters`. It checks syntax and simple literal
+  `op()` references. Use `values` to switch back to a constant. `tdflow_get_parameters` returns the expression
+  source and mode. Check `tdflow_get_errors` and the actual network output for runtime behavior.
+- To edit a Python Text DAT module or Execute DAT callback, call `tdflow_get_dat_text` with `proposed_text`.
+  Read `python_validation` and the diff. Fix syntax before requesting approval. Call `tdflow_set_dat_text`
+  with `language: "python"` and `expected_sha256` from the read's `source_sha256`. If the source changed,
+  reread and compare it again. `tdflow_undo` can restore the previous text from its durable snapshot.
+  Read the original authored DAT. Computed, wired and file-linked DATs cannot be read as source.
+- Execute DATs start inactive. Approve deactivation before editing an active callback, then request activation
+  separately. The owner sees the callback source and current active setting. Approved in-process Python has
+  access to TouchDesigner and the host. Script CHOP, SOP and TOP creation is unavailable.
+  If the callback preview is refused, ask the owner to switch off Active on that DAT in TouchDesigner.
+- Only Table and Text DATs tagged `tdflowdata` by the user support editing without execute and code approval.
 - To try something risky, copy the component first: `tdflow_experiment_create` (path, name) makes a copy
   next to it. Work on the copy, then `tdflow_experiment_promote` it to replace the original, or
   `tdflow_experiment_discard` it. With `inert: true` the copy is a snapshot that does not cook; promoting it
   brings back its operators and parameters (executable operators stay switched off until they are switched
   on with approval, and wiring is reported in `connections_lost`).
-- `tdflow_capture_top` returns a TOP's image so you can look at the result (one per second).
+- `tdflow_capture_top` returns an owner-locked TOP's image (one per second) on Windows with TouchDesigner
+  2025.32440. For `TOP_LOCK_REQUIRED`, ask the owner to lock the output TOP in TouchDesigner and switch off
+  bypass on it and its containing components. Leave lock flags to the owner, including when you have Python
+  authoring access. For `TOP_READ_UNVERIFIED`, the runtime is outside the tested combination.
 - When several agents work in one project, `tdflow_lease_scope` reserves a scope for you for a while; others
   get `LEASED` there. Release it when you are done. If you get `LEASED`, wait or ask the user; do not work
   around it.
