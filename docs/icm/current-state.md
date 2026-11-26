@@ -343,3 +343,9 @@ The four-scenario v1.2 diagnostic baseline verified passive inspection, separate
 The v1.3 development candidate adds opt-in network evidence and ranked CPU samples. It compares the cached RGB values of two readable owner-locked TOPs on Windows with TouchDesigner 2025.32440. The first four-scenario replay verified these paths and embedded Skill 1.9. [Candidate evidence](validation-index.md#v130-diagnostic-candidate)
 
 The candidate passed the full packaged regression and independent review. In a disposable project, a live agent diagnosed a disconnected output, used a scoped Builder credential to restore the one wire and verified the edge. An unchanged cook count explained why the previously reported error still needed a cook to verify. An owner-side check confirmed the restored output and preserved the unrelated operator. [Validation](validation-index.md#v130-diagnostic-candidate)
+
+### v1.3.0 release
+
+The owner merged PR #11 as `dace425b07314354468dbac75dab470d2b8f4374`. The merge tree matched the reviewed candidate, Windows and Ubuntu CI passed, and the annotated `v1.3.0` tag points to that commit. The clean tagged package passed the full TouchDesigner acceptance suite on Windows with 2025.32440. [Release PR](https://github.com/jlopesmo/TDflowMCP/pull/11) · [Main CI](https://github.com/jlopesmo/TDflowMCP/actions/runs/45867953194)
+
+The GitHub Release contains the versioned and byte-identical compatibility binaries, build manifest, checksums, and installation guide. GitHub-hosted Windows and Ubuntu jobs anonymously downloaded and verified all five assets. [Public release](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.3.0) · [Release receipts](validation-index.md#v130-tagged-release)

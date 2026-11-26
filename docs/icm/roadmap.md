@@ -92,7 +92,7 @@ v1.2.0 was published after both PR findings were resolved, independent security 
 
 ## v1.3 visual diagnostics
 
-The owner authorized diagnostics development and conditional release. Match the candidate against the verified four-scenario v1.2 baseline. Release gates cover passive visual safety, independent review, packaged regressions, hosted verification and the release-specific compatibility decision. [Milestone](../milestones/v1.3-visual-diagnostics.md)
+v1.3.0 was published after passive visual checks, independent review, and Windows and Ubuntu CI passed. The clean tagged package passed acceptance on Windows with TouchDesigner 2025.32440 under the owner's release-specific exception. Both hosted jobs verified the five public assets. Active profiling and Script CHOP, SOP and TOP lifecycle authoring remain deferred. [Milestone](../milestones/v1.3-visual-diagnostics.md) · [Release receipts](validation-index.md#v130-tagged-release)
 
 ## D28 — Codex acceptance and release of 1.0.1 (owner, GitHub Issue #3, 2026-11-25)
 
