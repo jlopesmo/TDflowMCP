@@ -37,4 +37,4 @@ Phase 1C acceptance: Claude Code connects using only the generated text, and a S
 
 ## v1.1 implementation note
 
-Skill 1.7 and Copy Agent Prompt guide agents through Python DAT previews and staged callback authoring using the existing tools. Capability and scope checks continue to come from the server. See the [v1.1 record](../milestones/v1.1-developer-capabilities.md) for validation.
+Skill 1.7 and Copy Agent Prompt guide agents through Python DAT previews and staged callback authoring using the existing tools. The Skill directs agents to leave TOP lock flags to the owner. Capability and scope checks continue to come from the server. See the [v1.1 record](../milestones/v1.1-developer-capabilities.md) for validation.

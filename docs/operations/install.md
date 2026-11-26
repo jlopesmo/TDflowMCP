@@ -5,7 +5,7 @@ through MCP. It works within the permissions you grant and keeps a tamper-eviden
 computer (127.0.0.1). It never installs software, and it changes your agent's configuration only after you approve
 the exact change in TouchDesigner.
 
-**Version 1.0.1, provided for evaluation.** It is verified only on **Windows** with TouchDesigner **2025.32440**.
+**Version 1.1.0, provided for evaluation.** It is verified on **Windows** with TouchDesigner **2025.32440**.
 Newer TouchDesigner builds and macOS are not verified. Try it first in a copy of a project, or in one you can afford
 to experiment with. The repository has no open-source license yet: you may download and evaluate the component, but
 that does not grant rights to redistribute, modify or commercially reuse it.
@@ -21,7 +21,7 @@ that does not grant rights to redistribute, modify or commercially reuse it.
     manual setup. Codex running in a remote or cloud environment cannot use this connection.
   - Cursor and VS Code (GitHub Copilot) use a short manual setup. They are listed from their documentation and are
     not tested yet.
-  - Any other MCP client works with the generic instructions.
+  - Other Streamable HTTP MCP clients can try the manual setup instructions.
 
 ## 1. Check the download
 Choose the `TDflowMCP-vX.Y.Z.tox` asset when available. Compare its SHA-256 with `SHA256SUMS`, or with
@@ -173,13 +173,13 @@ the files; it never runs Git.
 
 ## Authoring Python in v1.1
 
-Use an Operator with `update` and `execute` access to the relevant operators. The agent can show Python syntax results and a DAT diff before making a request. Review the requested code and target in **View Approval** or the dashboard, then approve the exact call so the agent can repeat it.
+Use an Operator with `read`, `update` and `execute` access to the relevant operators. Add `create` in that scope to stage a new DAT. The agent can show Python syntax results and a DAT diff before making a request. Review the requested code and target in **View Approval** or the dashboard, then approve the exact call so the agent can repeat it.
 
 For the supported Execute DATs, approve creation, editing and activation as separate changes. The DAT starts inactive. When changing an existing callback, use the displayed source and trigger settings to review activation. If a callback cannot be displayed for approval, switch off **Active** on that DAT in TouchDesigner. Have the agent check TouchDesigner's runtime diagnostics and the resulting output after activation.
 
 Approved Python runs inside TouchDesigner with access to the host. The scopes govern MCP actions. Script CHOP, SOP and TOP authoring is outside the v1.1 workflow.
 
-To let an agent inspect an image, lock the output TOP in TouchDesigner and keep bypass off on the TOP and its containing components. The agent can capture that frozen image through `tdflow_capture_top`.
+On Windows with TouchDesigner 2025.32440, lock the output TOP in TouchDesigner and keep bypass off on the TOP and its containing components. The agent can then capture the frozen image. Network summaries use resolution for texture-size hints only for eligible TOPs. A frozen image can include content from outside the agent's scope. Other runtimes omit texture-size hints and refuse image capture.
 
 ## Where data is stored
 - **Project folder:** `.tdflowmcp/<project name>/` next to the `.toe` holds the audit log, sessions and DAT

@@ -201,10 +201,10 @@ def core_registry() -> Registry:
            "1800) or when you release them (release: true). Leases do not survive a restart.",
            obj({"scope": PATH, "ttl_s": {"type": "integer", "minimum": 30, "maximum": 1800},
                 "release": {"type": "boolean"}}, ["scope"]), ("update",), "lease", "lease_scope"))
-    # Phase 4: visual analysis. The image is returned as MCP image content (read only, never cooks).
+    # Phase 4: visual analysis. The adapter gates access to the frozen output.
     T(Tool("tdflow_capture_top", "Capture TOP", "Read an owner-locked TOP image (PNG or JPEG, up to 1920x1080, "
            "one per second). The TOP and enclosing components must have bypass off. "
-           "Use it to inspect the frozen output without starting a cook.",
+           "Available on Windows with TouchDesigner 2025.32440.",
            obj({"path": PATH, "format": {"type": "string", "enum": ["png", "jpg"]}}, ["path"]), ("read",),
            "read_path", "capture_top", read_only=True, idempotent=True))
     # Phase 4 (dogfood finding 5): bounded network summary with heuristic hints; reads facts, never cooks.

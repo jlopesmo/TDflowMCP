@@ -18,6 +18,7 @@ import json
 import os
 import posixpath
 import re
+import sys
 import time
 
 import td
@@ -37,6 +38,7 @@ INERT_KEY = "tdflow_snapshot"
 RESERVED_TAGS = {"TDflowMCP", "tdflowProject"}
 MAX_CAPTURE_PIXELS = 1920 * 1080
 MAX_CAPTURE_BYTES = 8 * 1024 * 1024
+VERIFIED_TOP_READ_BUILD = "2025.32440"
 MAX_COPY = 500                         # operators inspected for a copy (the policy limit per call is lower)
 # Parameter styles whose value names another operator or a file: setting them can read or wire things
 # outside the agent's scope (review 6, H2), so they are classified as execute (denied in Phase 1).
@@ -130,16 +132,20 @@ def _has_dat_source(o):
     return file_par is None or (str(file_par.mode).split(".")[-1] == "CONSTANT" and not file_par.val)
 
 
+def _top_reads_verified():
+    return sys.platform == "win32" and str(td.app.build) == VERIFIED_TOP_READ_BUILD
+
+
 def _has_locked_top_output(o):
     if not o.lock:
         return False
     while o is not None:
-        if getattr(o, "bypass", False):
+        if getattr(o, "bypass", True):
             return False
         if o.path == "/":
-            break
+            return True
         o = o.parent()
-    return True
+    return False
 
 
 def _jsonable(v):
@@ -582,6 +588,9 @@ class TDAdapter(Adapter):
         o = res.context["op"]
         if o.family != "TOP":
             raise ToolFailure("INVALID_ARGS", f"{o.path} is not a TOP.")
+        if not _top_reads_verified():
+            raise ToolFailure("TOP_READ_UNVERIFIED", f"Passive TOP reads are verified only on Windows with "
+                              f"TouchDesigner {VERIFIED_TOP_READ_BUILD}.")
         if not _has_locked_top_output(o):
             raise ToolFailure("TOP_LOCK_REQUIRED", "Ask the owner to lock the output TOP in TouchDesigner. "
                               "The TOP and its enclosing components must have bypass off.")
@@ -603,8 +612,7 @@ class TDAdapter(Adapter):
                 "_image": {"bytes": data, "mimeType": "image/png" if fmt == "png" else "image/jpeg"}}
 
     def _t_describe_network(self, args, res, label, readable):
-        """Phase 4: one network level (the children of a COMP) as facts TouchDesigner already measured, plus
-        heuristic hints. Reads attributes only; never cooks or evaluates anything."""
+        """Report one network level and derive hints from facts available to the caller."""
         o = res.context["op"]
         if not o.isCOMP:
             raise ToolFailure("INVALID_ARGS", f"{o.path} is not a component.")
@@ -630,7 +638,7 @@ class TDAdapter(Adapter):
                 r["errors"], r["warnings"] = (c.errors() or "")[:500], (c.warnings() or "")[:500]
             except Exception:
                 pass
-            if c.family == "TOP" and _has_locked_top_output(c):
+            if c.family == "TOP" and _top_reads_verified() and _has_locked_top_output(c):
                 try:
                     r["resolution"] = [int(c.width), int(c.height)]
                 except Exception:

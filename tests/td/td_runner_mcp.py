@@ -372,28 +372,61 @@ def run(comp, ext, T, frames, until, checkpoint, R, restart=False):
     output = probe.create(td.nullTOP, "unlocked_output")
     source.viewer = output.viewer = False
     output.inputConnectors[0].connect(source.outputConnectors[0])
+    callback = next(o for o in source.docked if o.isDAT)
+    callback.text = ('def onCook(scriptOp):\n'
+                     '    scriptOp.store("top_read_callback_runs", scriptOp.fetch("top_read_callback_runs", 0) + 1)\n')
+
+    def read_state():
+        return [source.totalCooks, output.totalCooks, source.fetch("top_read_callback_runs", 0)]
+
+    def setup_cooks_reported():
+        source_cooks, _, runs = read_state()
+        return source_cooks == runs and runs > 0
+
+    tdops = ext._m.tdops
+
+    def check_reads(label, expected, *, eligible=False):
+        resolutions = []
+        hints = tdops.INS.hints
+
+        def observe_hints(rows):
+            resolutions.extend((row["path"], row["resolution"]) for row in rows if "resolution" in row)
+            return hints(rows)
+
+        try:
+            tdops.INS.hints = observe_hints
+            yield checkpoint(label + "_top_reads", {"path": probe.path})
+        finally:
+            tdops.INS.hints = hints
+        after = read_state()
+        T(f"v11.{label}_top_reads_passive", after == expected, before=expected, after=after)
+        T(f"v11.{label}_top_resolution", [path for path, _ in resolutions] == ([output.path] if eligible else []),
+          resolutions=resolutions)
+
     probe.allowCooking = True
-    before = [source.totalCooks, output.totalCooks]
-    yield checkpoint("unlocked_top_reads", {"path": probe.path})
-    T("v11.UNLOCKED_TOP_READS_DID_NOT_COOK", [source.totalCooks, output.totalCooks] == before and before == [0, 0])
+    yield from check_reads("unlocked", [0, 0, 0])
     output.cook(force=True)
     output.lock = True
-    callback = next(o for o in source.docked if o.isDAT)
+    T("v11.TOP_CALLBACK_COUNTER_POSITIVE_CONTROL", read_state()[2] > 0, counts=read_state())
     callback.text += "\n# Update the upstream source after caching the output.\n"
-    before = [source.totalCooks, output.totalCooks]
-    yield checkpoint("locked_top_reads", {"path": probe.path})
-    T("v11.LOCKED_TOP_READS_DID_NOT_COOK", [source.totalCooks, output.totalCooks] == before)
+    # The fixture runs one callback per cook. Wait for TD to report all known setup cooks.
+    yield frames(3)
+    yield until(setup_cooks_reported, 10, "top_read_setup_cooks_reported")
+    before = read_state()
+    yield from check_reads("locked", before, eligible=True)
+    verified_build = tdops.VERIFIED_TOP_READ_BUILD
+    try:
+        tdops.VERIFIED_TOP_READ_BUILD = "0.0.0"
+        yield from check_reads("unverified", read_state())
+    finally:
+        tdops.VERIFIED_TOP_READ_BUILD = verified_build
     output.bypass = True
-    before = [source.totalCooks, output.totalCooks]
-    yield checkpoint("bypassed_top_reads", {"path": probe.path})
-    T("v11.BYPASSED_TOP_READS_DID_NOT_COOK", [source.totalCooks, output.totalCooks] == before)
+    yield from check_reads("bypassed", read_state())
     output.bypass = False
     output.lock = True
     probe.bypass = True
     T("v11.INHERITED_BYPASS_WITH_LOCK_HELD", output.lock and probe.bypass and not output.bypass)
-    before = [source.totalCooks, output.totalCooks]
-    yield checkpoint("ancestor_bypassed_top_reads", {"path": probe.path})
-    T("v11.INHERITED_BYPASS_READS_DID_NOT_COOK", [source.totalCooks, output.totalCooks] == before)
+    yield from check_reads("ancestor_bypassed", read_state())
     probe.destroy()
     comp.par.Enablemcp = False
     yield frames(5)

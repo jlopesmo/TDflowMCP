@@ -651,8 +651,9 @@ def cp_top_reads(data, pid, *, label="unlocked"):
     result = reader.call("tdflow_describe_network", {"path": path})
     T(f"v11.{label}_network_metadata_read", ok(result))
     image = reader.call("tdflow_capture_top", {"path": path + "/unlocked_output"})
+    refusal = "TOP_READ_UNVERIFIED" if label == "unverified" else "TOP_LOCK_REQUIRED"
     T(f"v11.{label}_top_capture", (ok(image) and image.get("width", 0) > 0 and image.get("bytes", 0) > 0)
-      if label == "locked" else image.get("code") == "TOP_LOCK_REQUIRED", r=image)
+      if label == "locked" else image.get("code") == refusal, r=image)
 
 
 def rcode(r):
@@ -1053,6 +1054,7 @@ HANDLERS = {"caps_native": cp_caps_native, "setup_ready": cp_setup_ready, "pair_
             "audit_up": cp_audit_up, "scan": cp_scan, "revoked": cp_revoked, "disabled": cp_disabled,
             "unlocked_top_reads": cp_top_reads,
             "locked_top_reads": lambda d, p: cp_top_reads(d, p, label="locked"),
+            "unverified_top_reads": lambda d, p: cp_top_reads(d, p, label="unverified"),
             "bypassed_top_reads": lambda d, p: cp_top_reads(d, p, label="bypassed"),
             "ancestor_bypassed_top_reads": lambda d, p: cp_top_reads(d, p, label="ancestor_bypassed"),
             "restart_enabled": cp_restart_enabled}

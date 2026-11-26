@@ -71,7 +71,8 @@ CATALOG: Tuple[Cap, ...] = (
          "tdflow_describe_network", "tdflow_get_errors", "tdflow_get_dat_text"), ("read",),
         note="Only inside the agent's scopes; anything else is filtered out of the answers."),
     Cap("capture", "inspect", "Look at owner-locked TOP images", ("tdflow_capture_top",), ("read",),
-        note="The owner locks the TOP in TouchDesigner. Bypass must be off. Up to 1920x1080, one image per second."),
+        note="Windows with TouchDesigner 2025.32440. The owner locks the TOP with bypass off on it and its "
+             "enclosing components. Up to 1920x1080, one image per second."),
     # ---- editing ----------------------------------------------------------------------------------------------
     Cap("set_values", "edit", "Set constant parameter values", ("tdflow_set_parameters",), ("update",),
         note="Parameters that run code or name files are never plain values (see below)."),
