@@ -47,6 +47,6 @@ Both backfills passed on GitHub-hosted Windows and Ubuntu runners. The validatio
 
 **v1.1.0 compatibility exception (owner, 2026-11-26):** The owner approved Windows with **TouchDesigner 2025.32440** for v1.1.0, subject to passing every other release gate. The latest-build test is waived for this release only. The compatibility claim is limited to tested builds and platforms.
 
-**v1.2.0 compatibility exception (owner, 2026-11-26):** The owner approved a separate release-specific exception for Windows with **TouchDesigner 2025.32440**. All other v1.2.0 release gates apply. Compatibility claims are limited to the tested build and platform.
+**v1.2.0 compatibility exception (owner, 2026-11-26):** The owner reconfirmed during restart recovery that TouchDesigner testing for v1.2.0 may be limited to Windows with **TouchDesigner 2025.32440**. All other v1.2.0 release gates apply, including Windows and Ubuntu CI and hosted download checks. Compatibility claims are limited to the tested build and platform.
 
 **Never:** release from `dev`, release an untested `.tox`, or claim compatibility with a TD build that was not tested.

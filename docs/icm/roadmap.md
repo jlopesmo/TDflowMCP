@@ -88,7 +88,7 @@ v1.1.0 shipped for Windows with TouchDesigner 2025.32440 after local, tagged-pac
 
 ## v1.2 component authoring
 
-The owner authorized development and publication subject to all applicable gates. The verified v1.1 baseline prioritized custom controls, native Base COMP TOP outputs, and local operator discovery. Validate the four component scenarios, independent review and the minimum and current official TouchDesigner builds before release. Script operator activation remains gated separately. [Scope and acceptance](../milestones/v1.2-component-authoring.md)
+The owner authorized development and publication subject to all applicable gates. The recovered v1.2.0 candidate passed the four component scenarios and the candidate regressions. The owner reconfirmed the Windows/TouchDesigner 2025.32440 exception for v1.2.0. Release requires passing CI and owner approval of the release PR, clean-tag testing and hosted download checks. Script operator activation remains gated separately. [Scope and acceptance](../milestones/v1.2-component-authoring.md) · [Release procedure](../operations/verification-and-release.md#4-release-proposed)
 
 ## D28 — Codex acceptance and release of 1.0.1 (owner, GitHub Issue #3, 2026-11-25)
 
