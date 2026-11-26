@@ -84,6 +84,8 @@ Decision record: [ADR-0017](../decisions/0017-codex-one-click-connection.md). St
 
 Extend expression and Python DAT authoring, preserve approval and audit enforcement, and investigate safe staging for Script CHOP, SOP and TOP. The owner authorizes development on `dev` and release integration and publication after all required gates pass. Scope, acceptance and the compatibility decision are tracked in the [v1.1 development and release record](../milestones/v1.1-developer-capabilities.md).
 
+v1.1.0 shipped for Windows with TouchDesigner 2025.32440 after local, tagged-package and hosted download verification. Script CHOP, SOP and TOP lifecycle authoring remains deferred pending a design decision on callback ownership, staging and activation. [Release evidence](validation-index.md#2026-11-26-v11-developer-capabilities)
+
 ## D28 — Codex acceptance and release of 1.0.1 (owner, GitHub Issue #3, 2026-11-25)
 
 The owner ran the hands-on check on `1.0.1rc1` and reported it passed ([Issue #3](https://github.com/jlopesmo/TDflowMCP/issues/3#issuecomment-7175371704)): OpenAI Codex selected, Connect Agent approved, the Codex chat in VS Code returned `tdflow_whoami`, TouchDesigner showed `Agent Connected — Ready` and `Codex 0.171.0`. Decided:
