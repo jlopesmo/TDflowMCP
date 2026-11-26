@@ -14,7 +14,7 @@ on:
         required: true
         type: string
       expect_sums_sha256:
-        description: "SHA-256 of the SHA256SUMS file recorded when the package was built (it covers every asset)"
+        description: "SHA-256 of the original SHA256SUMS file recorded when the package was built"
         required: true
         type: string
       expect_tox_sha256:
@@ -22,6 +22,11 @@ on:
         required: false
         type: string
         default: ""
+      require_versioned:
+        description: "Require the versioned .tox (also checks SHA256SUMS-versioned for legacy releases)"
+        required: false
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -50,10 +55,15 @@ jobs:
           TAG: ${{ inputs.tag }}
           EXPECT_SUMS: ${{ inputs.expect_sums_sha256 }}
           EXPECT_TOX: ${{ inputs.expect_tox_sha256 }}
+          REQUIRE_VERSIONED: ${{ inputs.require_versioned }}
         run: |
           [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "The tag must be of the form vX.Y.Z"; exit 2; }
           # The commit the tag points to, read anonymously from the public repository.
           git fetch --quiet --depth=1 origin "refs/tags/$TAG:refs/tags/$TAG"
           COMMIT="$(git rev-parse "refs/tags/$TAG^{commit}")"
+          EXTRA_ARGS=()
+          if [[ "$REQUIRE_VERSIONED" == true ]]; then
+            EXTRA_ARGS+=(--require-versioned)
+          fi
           python -I tools/verify_release.py "$TAG" --expect-sums-sha256 "$EXPECT_SUMS" \
-            --expect-tox-sha256 "$EXPECT_TOX" --expect-commit "$COMMIT"
+            --expect-tox-sha256 "$EXPECT_TOX" --expect-commit "$COMMIT" "${EXTRA_ARGS[@]}"

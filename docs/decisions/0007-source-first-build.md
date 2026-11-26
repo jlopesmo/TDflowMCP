@@ -11,7 +11,7 @@
    - `tests/td/`: an in-TD runner loads the built `.tox` into a disposable test project, runs integration tests and writes `build/td-test-results.json`. Runs locally or on a self-hosted runner, because TD licensing limits hosted CI.
    - `tools/check_docs.py`: ICM, link and ADR-status validation (exists since Phase 0).
 5. **Versioning:** SemVer. The tool surface and the policy schema each carry their own version.
-6. **Releases:** GitHub Releases from `main` only, after owner approval. Assets: `.tox`, `.json` manifest, changelog.
+6. **Releases:** GitHub Releases from `main` only, after owner approval. **Filename amendment accepted by the owner on 2026-11-25.** The primary download is `TDflowMCP-vX.Y.Z.tox`, with a byte-identical `TDflowMCP.tox` compatibility download. Both names share one source-first build and the tagged release's `SHA256SUMS`, alongside `TDflowMCP.json` and `INSTALL.md`. For v1.0.0 and v1.0.1, verify the original receipt before adding the versioned binary and `SHA256SUMS-versioned`, and retain the original assets and annotated tags. Independently download and verify both names before recommending a new direct link.
 
 ## Alternatives
 Commit the `.tox` binary as source (not diffable; merge conflicts); depend on Embody for externalization (coupling; open issue #194).
