@@ -2,7 +2,7 @@
 
 A source-first, AI-powered TouchDesigner development environment: an MCP server packaged as a reusable `.tox`, with server-side permissions, agent identity, audit logging, approvals, a local browser dashboard, safe experimentation and optional Code Mode orchestration.
 
-> **Status: TDflowMCP 1.0.1 — released 2026-11-25 for evaluation. [Download v1.0.1](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.0.1).**
+> **Status: TDflowMCP 1.0.1 — released 2026-11-25 for evaluation. [Download TDflowMCP-v1.0.1.tox](https://github.com/jlopesmo/TDflowMCP/releases/download/v1.0.1/TDflowMCP-v1.0.1.tox).**
 > - New in 1.0.1: a one-click connection for **OpenAI Codex on Windows**, next to the one for Claude Code. Everything else is 1.0.0.
 > - Tests passed on Windows with TouchDesigner **2025.32440**, the only verified combination; newer builds, macOS and Linux are **not verified**.
 > - Claude Code and Codex on Windows support consent-based Connect Agent without copying credentials. Codex was tested with the Codex CLI 0.160.0 and the Codex VS Code extension 26.1120; the Codex desktop app is not verified. Other documented clients use a manual setup fallback.
@@ -12,15 +12,13 @@ A source-first, AI-powered TouchDesigner development environment: an MCP server 
 
 ## Download and first run
 
-**Choose the verified `TDflowMCP-vX.Y.Z.tox` download when available.** Its SHA-256 matches the unversioned compatibility download for the same release.
-
-1. Download the verified v1.0.1 compatibility asset, [`TDflowMCP.tox`](https://github.com/jlopesmo/TDflowMCP/releases/download/v1.0.1/TDflowMCP.tox). Find the checksum file and installation guide on the [v1.0.1 release page](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.0.1).
-2. Check the download. In PowerShell: `Get-FileHash .\TDflowMCP.tox -Algorithm SHA256` must print
+1. Download [`TDflowMCP-v1.0.1.tox`](https://github.com/jlopesmo/TDflowMCP/releases/download/v1.0.1/TDflowMCP-v1.0.1.tox). The byte-identical [compatibility download `TDflowMCP.tox`](https://github.com/jlopesmo/TDflowMCP/releases/download/v1.0.1/TDflowMCP.tox) remains available.
+2. Run `Get-FileHash .\TDflowMCP-v1.0.1.tox -Algorithm SHA256` in PowerShell. Compare the hash to this value or the [published checksum](https://github.com/jlopesmo/TDflowMCP/releases/download/v1.0.1/SHA256SUMS-versioned).
 
    `873d9f7522bffcb9d86618ccea4dfeb90d9b820063738f975944a1775c832532`
-3. Save your TouchDesigner project, then drag `TDflowMCP.tox` into it. Use Windows with TouchDesigner 2025.32440, and try it first in a copy of a project.
+3. Save your TouchDesigner project, then drag the verified `.tox` into it. Use Windows with TouchDesigner 2025.32440, and try it first in a copy of a project.
 
-There is no binary in the `main` branch: the tested `.tox` is built from the `v1.0.1` tag and attached to the release, not committed as a build output. The published files were downloaded and checked from outside the build network ([run](https://github.com/jlopesmo/TDflowMCP/actions/runs/45726797505)). The download is for evaluation ([License](#license)).
+The `.tox` was built from the `v1.0.1` tag. GitHub-hosted Windows and Ubuntu runners downloaded both filenames anonymously and verified their byte equality and recorded SHA-256. [Verification run](https://github.com/jlopesmo/TDflowMCP/actions/runs/45743927646) · [Release notes and installation guide](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.0.1)
 
 Then, in TouchDesigner:
 
@@ -31,7 +29,7 @@ Then, in TouchDesigner:
 
 The browser dashboard is optional for initial setup. Keep TouchDesigner open and unminimized while an agent modifies the project. [Installation and security details](docs/operations/install.md).
 
-**User experience** (Windows with Claude Code or Codex, verified): drag `TDflowMCP.tox` into a project → the compatibility checks run → pulse **Connect Agent** and approve the plan in TouchDesigner (Claude Code and Codex are configured with no token to copy; other agents get a short manual setup) → pulse **Copy Agent Prompt** and paste it as the first message of a new chat → work under enforced, audited scopes (see and change what each agent may do on the dashboard's **Capabilities** page; ask the agent "What can you do?") → resume later from verified handoffs.
+**User experience** (Windows with Claude Code or Codex, verified): drag the TDflowMCP `.tox` into a project → the compatibility checks run → pulse **Connect Agent** and approve the plan in TouchDesigner (Claude Code and Codex are configured with no token to copy; other agents get a short manual setup) → pulse **Copy Agent Prompt** and paste it as the first message of a new chat → work under enforced, audited scopes (see and change what each agent may do on the dashboard's **Capabilities** page; ask the agent "What can you do?") → resume later from verified handoffs.
 
 ## Start here
 
