@@ -52,3 +52,7 @@ Phase 2A:
 - **Project identity (D18; passed 2026-11-22 in TD):** a `tdflowProject` whose `Projectid` differs from the one this project's audit log created or claimed is detected and read-only until the user claims it. Repository mode's `tdflow-project.json` check passed in increment 3 (above).
 - **Restart persistence (D18; passed 2026-11-22 in TD):** saved records, ledger and fingerprints survive a TouchDesigner restart. A record written after the last save is reported missing, and memory is restored by Claim Project Memory.
 - Additional checks in increment 1 (passed): a single authority (two `tdflowProject` components are refused), and edited, missing or foreign records make memory read-only until the user's Claim Project Memory. Fork and rewind detection uses the audit log as ledger instead of a `Datadir` registry ([continuity §7](../architecture/continuity-and-memory.md#7-phase-2a-increment-1-what-is-implemented-2026-11-22)).
+
+## v1.1 implementation note
+
+Reserved records and generated DATs must be local authored Text DATs. The adapter refuses wired, computed or file-linked sources and reads memory identity and link settings only in constant mode. This keeps inspection and recovery within the existing memory permissions. See [safe source reads](../architecture/continuity-and-memory.md#9-safe-source-reads-in-v11).

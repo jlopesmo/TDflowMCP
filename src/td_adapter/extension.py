@@ -1764,7 +1764,8 @@ class TDflowMCPExt:
                     # The decision is in the audit log before it takes effect, with the digest it applies to.
                     st.append("admin", tool="approval_decide", approval_id=aid, agent_id=cur["agent_id"],
                               detail={"decision": decision, "args_sha256": cur["args_sha256"], "tool": cur["tool"]})
-                    r = st.approval_decide(aid, decision, str(body.get("note", ""))[:500])
+                    r = st.approval_decide(aid, decision, str(body.get("note", ""))[:500],
+                                           shown_review_sha=body.get("review_sha256"))
                     if not r.get("ok"):
                         st.append("approval", outcome="decision_refused", approval_id=aid, agent_id=cur["agent_id"],
                                   error_code=r["code"], tool=cur["tool"])

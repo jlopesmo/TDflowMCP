@@ -167,27 +167,40 @@
       for (const x of a.reasons || []) reasons.append(el("li", x));
       card.append(el("p", "Why it needs you:"), reasons);
       card.append(el("p", "Operators it would change (resolved by the server):"));
-      card.append(el("pre", (a.targets || []).map((t) => t[0] + "  " + t[1]).join("\n") || "(none)"));
+      card.append(el("pre", (a.targets || []).filter((t) => ["read", "create", "update", "delete", "execute"].includes(t[0]))
+        .map((t) => t[0] + "  " + t[1]).join("\n") || "(none)"));
       card.append(el("p", "Complete arguments, exactly as the server stored them (" + String(a.args || "").length +
         " characters, sha256 " + String(a.args_sha256).slice(0, 16) + "…). Read all of it:"));
       card.append(el("pre", a.args || "(no longer kept)"));
+      if (a.review) {
+        const settings = el("details");
+        settings.append(el("summary", "Current callback settings"), el("pre",
+          JSON.stringify({ bypass: a.review.bypass, ...a.review.settings }, null, 2)));
+        card.append(el("p", "Current active parameter · " + JSON.stringify(a.review.active)), settings);
+        card.append(el("p", "Callback source"), el("pre", a.review.callback_source));
+      } else if (a.review_invalid) {
+        card.append(el("p", "The callback preview could not be verified. Request a fresh approval."));
+      }
       if (a.note) card.append(el("p", "Your note: " + a.note));
       if (a.state === "pending") {
         const row = el("div", undefined, "row");
         const note = el("input"); note.maxLength = 500; note.placeholder = "Note to the agent (optional)";
         const yes = el("button", "Approve " + a.id.slice(-6) + " (" + String(a.args_sha256).slice(0, 8) + ")", "approve"); yes.type = "button";
         const no = el("button", "Deny", "secondary"); no.type = "button";
-        yes.addEventListener("click", () => decide(a.id, "approved", note.value, yes, no));
-        no.addEventListener("click", () => decide(a.id, "denied", note.value, yes, no));
+        yes.disabled = a.review_invalid;
+        yes.addEventListener("click", () => decide(a, "approved", note.value, yes, no));
+        no.addEventListener("click", () => decide(a, "denied", note.value, yes, no));
         row.append(yes, no, note);
         card.append(row);
       }
       box.append(card);
     }
   }
-  async function decide(id, decision, note, ...buttons) {
+  async function decide(approval, decision, note, ...buttons) {
     for (const b of buttons) b.disabled = true;
-    const r = await api("POST", "/api/approvals/decide", { id, decision, note });
+    const r = await api("POST", "/api/approvals/decide", {
+      id: approval.id, decision, note, args_sha256: approval.args_sha256, review_sha256: approval.review_sha256
+    });
     $("apr-status").textContent = r.ok ? (decision === "approved" ? "Approved. It runs when the agent repeats the identical call." : "Denied.") : "Not done: " + why(r) + ".";
     refreshApprovals(true);
     refreshOverview();

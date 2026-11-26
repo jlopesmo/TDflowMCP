@@ -171,6 +171,14 @@ the files; it never runs Git.
 - `tdflow_undo` reverts an agent's own last change only if nothing else changed since.
 - Code-running changes (expressions, code DATs, Execute DATs, Code Mode scripts) always wait for your approval.
 
+## Authoring Python in v1.1
+
+Use an Operator with `update` and `execute` access to the relevant operators. The agent can show Python syntax results and a DAT diff before making a request. Review the requested code and target in **View Approval** or the dashboard, then approve the exact call so the agent can repeat it.
+
+For the supported Execute DATs, approve creation, editing and activation as separate changes. The DAT starts inactive. When changing an existing callback, use the displayed source and trigger settings to review activation. If a callback cannot be displayed for approval, switch off **Active** on that DAT in TouchDesigner. Have the agent check TouchDesigner's runtime diagnostics and the resulting output after activation.
+
+Approved Python runs inside TouchDesigner with access to the host. The scopes govern MCP actions. Script CHOP, SOP and TOP authoring is outside the v1.1 workflow.
+
 ## Where data is stored
 - **Project folder:** `.tdflowmcp/<project name>/` next to the `.toe` holds the audit log, sessions and DAT
   snapshots. This folder is git-ignored automatically (it contains a `.gitignore` with `*`).

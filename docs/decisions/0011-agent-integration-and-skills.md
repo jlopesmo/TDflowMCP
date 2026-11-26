@@ -34,3 +34,7 @@ Phase 1C acceptance: Claude Code connects using only the generated text, and a S
 
 ## Amendment (owner D25, 2026-11-25): agents report their own capabilities
 `tdflow_capabilities` lets an agent report its own effective capabilities and send the user to the dashboard's Capabilities page through Open Dashboard; Skill 1.6, the full instructions and the Copy Agent Prompt say so ([ADR-0016](0016-capabilities-page-and-permission-editing.md)). The generated texts still contain no secret and no claim about the agent's permissions: the server reports them.
+
+## v1.1 implementation note
+
+Skill 1.7 and Copy Agent Prompt guide agents through Python DAT previews and staged callback authoring using the existing tools. Capability and scope checks continue to come from the server. See the [v1.1 record](../milestones/v1.1-developer-capabilities.md) for validation.

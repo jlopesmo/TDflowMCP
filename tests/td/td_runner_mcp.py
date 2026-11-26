@@ -45,6 +45,39 @@ def fixtures():
     return {"level_opacity": lvl.par.opacity.eval()}
 
 
+def _script_operator_probe(T, frames):
+    """Owner-side probe in this disposable project, with no operator allowlist changes."""
+    scratch = td.op("/project1").create(td.baseCOMP, "script_probe")
+    try:
+        scratch.allowCooking = False
+        samples = [scratch.create(cls) for cls in (td.scriptCHOP, td.scriptSOP, td.scriptTOP, td.scriptDAT)]
+        before = {op.OPType: int(op.totalCooks) for op in samples}
+        yield frames(3)
+        blocked = {op.OPType: int(op.totalCooks) for op in samples}
+        callback_docked = {op.OPType: any(d.isDAT for d in op.docked) for op in samples}
+        scratch.allowCooking = True
+        dat = samples[-1]
+        before_read = int(dat.totalCooks)
+        dat.text
+        after_read = int(dat.totalCooks)
+        top = samples[2]
+        before_top_read = int(top.totalCooks)
+        _ = top.width, top.height
+        after_top_metadata = int(top.totalCooks)
+        top.saveByteArray(".png")
+        after_top_image = int(top.totalCooks)
+        for o in samples[:3]:
+            o.cook(force=True)
+        after = {op.OPType: int(op.totalCooks) for op in samples}
+        T("v11.SCRIPT_OPERATOR_STAGING_PROBE", all(callback_docked.values()) and all(after[o.OPType] > blocked[o.OPType]
+          for o in samples[:3]), before=before, blocked=blocked, docked=callback_docked, after=after,
+          script_dat_text_read_cooks=after_read - before_read,
+          script_top_metadata_read_cooks=after_top_metadata - before_top_read,
+          script_top_image_read_cooks=after_top_image - after_top_metadata)
+    finally:
+        scratch.destroy()
+
+
 def _caps_native(comp, ext, T, frames, until, checkpoint, g):
     """Owner D25: a role changed on the dashboard's Capabilities page shows on TouchDesigner's Agents page at once, and
     a scope added there shows on the page (checked by the harness at 'caps_native'). One backend, no second copy."""
@@ -184,6 +217,11 @@ def run(comp, ext, T, frames, until, checkpoint, R, restart=False):
         yield from _restart(comp, ext, T, frames, until, checkpoint, R)
         return
     fx = fixtures()
+    network = td.op("/project1/fx")
+    scripted = network.create(td.scriptDAT, "script_output_probe")
+    wired = network.create(td.nullDAT, "wired_source_probe")
+    wired.inputConnectors[0].connect(scripted.outputConnectors[0])
+    network.create(td.textDAT, "file_source_probe").par.file.expr = "''"  # no file opened by this fixture
     yield frames(5)
     # Enable MCP before any agent exists: refused with a reason, toggle reverts.
     comp.par.Enablemcp = True
@@ -331,6 +369,16 @@ def run(comp, ext, T, frames, until, checkpoint, R, restart=False):
     yield checkpoint("disabled", {})
     R["datadir_files"] = sorted(os.listdir(ext.worker.datadir))
     R["frame_stats_onframe"] = ext.FrameStats()
+    # Owner-side output and Script operator checks run after the minimized-window regression.
+    source = td.op("/project1/fx/dev_color")
+    level = td.op("/project1/fx/dev_level")
+    output = td.op("/project1/fx/dev_out")
+    expected = float(source.par.colorr.val) * 0.25 if source is not None else None
+    if output is not None:
+        output.cook(force=True)
+    T("v11.PROCEDURAL_TOP_OUTPUT_AND_EXPRESSION", expected is not None and level is not None and output is not None
+      and output.totalCooks > 0 and not output.errors() and abs(float(level.par.opacity.eval()) - expected) < 1e-6)
+    yield from _script_operator_probe(T, frames)
 
 
 def _intent_pairs(events):

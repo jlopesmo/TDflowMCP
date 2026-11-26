@@ -266,7 +266,9 @@ class Policy:
         out = []
         for t in targets:
             if t.action == "execute":
-                what = {"expression": f"sets an expression on parameter {t.param}", "reference": f"sets parameter "
+                what = {"expression": f"sets an expression on parameter {t.param}",
+                        "restore_dynamic": f"sets {t.param} to a constant whose undo would restore its dynamic mode",
+                        "reference": f"sets parameter "
                         f"{t.param}, which names another operator or a file", "text": "writes text TouchDesigner may run "
                         "as code", "wire": "wires data into an operator that may evaluate it",
                         "activation": f"switches {t.param} of an executable operator (its code starts or stops "

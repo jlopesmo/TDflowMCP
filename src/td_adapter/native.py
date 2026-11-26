@@ -90,7 +90,7 @@ class Native:
         self.pending_connect = None          # (name, role, scope) waiting for the store to open
         self.approvals = []                  # pending approvals (no arguments), refreshed in the background
         self._appr_at = 0.0
-        self.viewed = None                   # (id, args_sha256, shown_at): the request View Approval showed
+        self.viewed = None                   # (id, args_sha256, review_sha256, shown_at)
         self._clip = None                    # (sha256 of the token, clear_at): clipboard clearing, separate from handoff
         self.clipboard_writer = set_secret_clipboard     # replaceable by tests
 
@@ -149,7 +149,7 @@ class Native:
             if not h["copied_at"]:
                 ext._set_note("Token expired unused. Pulse New Token to make another.")
         v = self.viewed
-        if v and now - v[2] > APPROVAL_VIEW_SECONDS:
+        if v and now - v[3] > APPROVAL_VIEW_SECONDS:
             self.viewed = None
             d = ext.ownerComp.op("approval_view")
             if d is not None and d.text:
@@ -463,11 +463,18 @@ class Native:
             self.ext._set_note("No approval request is waiting.")
             return
         a = self.approvals[-1]                               # the oldest is last (newest first from the backend)
-        self.viewed = (a["id"], a.get("args_sha256"), time.monotonic())
+        self.viewed = (a["id"], a.get("args_sha256"), a.get("review_sha256"), time.monotonic())
         lines = [f"Approval request {a.get('id')} from {a.get('agent_name') or a.get('agent_id')}", f"Tool: {a.get('tool')}",
                  "", "Why it needs approval:"] + [f"- {r}" for r in a.get("reasons") or []] + \
                 ["", "Targets:"] + [f"- {t}" for t in a.get("targets") or []] + \
                 ["", "Complete arguments (exactly what will run):", str(a.get("args") or "")]
+        if a.get("review"):
+            review = a["review"]
+            lines += ["", "Current callback settings (dynamic values are not evaluated):",
+                      json.dumps(review["settings"], indent=2, ensure_ascii=False),
+                      f"Bypass: {review['bypass']}", "Callback source:", review["callback_source"]]
+        elif a.get("review_invalid"):
+            lines += ["", "The callback preview could not be verified. Request a fresh approval."]
         self._show("approval_view", "\n".join(lines))
         self.ext._set_note("Review, then approve/deny", 30)
 
@@ -476,7 +483,7 @@ class Native:
         if not self.viewed:
             self.ext._set_note("Pulse View Approval first")
             return
-        aid, sha, _ = self.viewed
+        aid, sha, review_sha, _ = self.viewed
         a = {"id": aid}
         decision = "approved" if approve else "denied"
 
@@ -488,4 +495,5 @@ class Native:
             d = self.ext.ownerComp.op("approval_view")
             if d is not None:
                 d.text = ""                                  # never keep agent arguments in the project
-        self._call("/api/approvals/decide", {"id": aid, "decision": decision, "args_sha256": sha}, done)
+        self._call("/api/approvals/decide", {"id": aid, "decision": decision, "args_sha256": sha,
+                                             "review_sha256": review_sha}, done)

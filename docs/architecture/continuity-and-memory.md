@@ -143,3 +143,7 @@ The component keeps the read-only `Repopath`, the `Projectid`, a `derived_index`
 - All three write `memory_migrate` audit events before (`started`) and after (`ok`, `error` or `unknown`), with the relative folder. A failure after `started` always closes the trail. Record text and hashes do not change, so no claim is needed after a move.
 
 **Friction fixes delivered with this increment** ([record](../research/2026-11-23-phase-2a-increment-3.md#dogfood-friction)): an optional `status` on handoffs; the parameters that changed, per operator, in the resume answer (`fingerprint.parameter_changes`; digests of non-default parameters are keyed with the installation key, kept in the record only in the room the rest of the record leaves, at most 20,000 characters, and never returned; with another key the detail is `known: false`); default placement of created operators.
+
+## 9. Safe source reads in v1.1
+
+The adapter reads the project id, authority and repository link in constant mode. Reserved records, the derived index and migration notes must be authored Text DATs without inputs or external file links. Invalid reserved sources block normal memory use and require owner inspection in TouchDesigner. Network fingerprints skip the text of wired, linked or computed DATs so resuming a task cannot cook those outputs.

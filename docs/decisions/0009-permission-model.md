@@ -30,3 +30,7 @@ Target resolution is security-critical. Each resolver needs dedicated tests cove
 
 ## Amendment (owner D25, 2026-11-25): changing an agent's role
 An agent's role can change after creation, through preview and apply ([ADR-0016](0016-capabilities-page-and-permission-editing.md)): allow grants with the old role's full action set get the new role's set, narrowed grants keep only actions the new role has, deny grants never change, and allow grants never exceed the role. The change and the cancellation of the agent's open approvals are one transaction; more access needs explicit confirmation. Evaluation (§3.2 of the security model) is unchanged.
+
+## v1.1 implementation note
+
+The existing `update` and `execute` checks cover replacing an expression, bind or export when undo can restore it. Recognized literal operator references require `read` on the resolved path. Code authoring approvals additionally bind runtime identity and source or parameter state. Callback editing requires inactive staging for the existing six Execute DAT types. Script operator authoring remains outside the supported set. The [v1.1 record](../milestones/v1.1-developer-capabilities.md) tracks evidence.
