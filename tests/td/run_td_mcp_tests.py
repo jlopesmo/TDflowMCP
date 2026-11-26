@@ -137,7 +137,7 @@ def cp_setup_ready(data, pid):
     return {"match_code": j.get("match_code")}
 
 
-def cp_pair_approved(data, pid):
+def cp_pair_approved(data, pid, *, include_operator=True):
     st = http("GET", "/setup/api/pair/status", {"X-TDflow-Request": "1"})
     j = base.jbody(st) or {}
     STATE["csrf"] = j.get("csrf")
@@ -161,6 +161,8 @@ def cp_pair_approved(data, pid):
              "C": ("Agent C (observer)", "observer", "/project1/**", None),
              "D": ("Agent D (builder root)", "builder", "/project1/**", None),
              "E": ("Agent E (operator fx)", "operator", "/project1/fx/**", None)}
+    if not include_operator:
+        del specs["E"]
     for k, (name, role, scope, acts) in specs.items():
         body = {"display_name": name, "role": role, "scope": scope}
         if acts:
