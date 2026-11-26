@@ -176,6 +176,13 @@ class Browser:
         return path
 
     def close(self):
+        # Edge can relaunch itself with the same profile and leave the original Popen process behind.
+        # The DevTools connection reaches the actual browser instance created for this test.
+        if hasattr(self, "ws"):
+            try:
+                self.ws.send(json.dumps({"id": self.n + 1, "method": "Browser.close"}))
+            except OSError:
+                pass
         try:
             self.proc.terminate()
             self.proc.wait(10)

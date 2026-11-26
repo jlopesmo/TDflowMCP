@@ -15,6 +15,7 @@ import json
 import os
 import shutil
 import sys
+import tempfile
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -339,11 +340,11 @@ def main():
     srv = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{srv.server_address[1]}"
-    prof = os.path.join(ROOT, ".tmp", "web-screens-profile")
-    shutil.rmtree(prof, ignore_errors=True)
-    b = cdp.Browser(prof)
+    prof = tempfile.mkdtemp(prefix="web-screens-profile-", dir=os.path.join(ROOT, ".tmp"))
+    b = None
     t0 = time.time()
     try:
+        b = cdp.Browser(prof)
         ver = b.call("Browser.getVersion")
         print("browser:", ver.get("product"))
         pairing(b, base, "/ui/", [(1920, 1080), (1280, 800), (768, 1024), (480, 800), (360, 740)])
@@ -351,7 +352,8 @@ def main():
         capabilities(b, base, [(1920, 1080), (1600, 900), (1366, 768), (1280, 800)])
         editing(b, base)
     finally:
-        b.close()
+        if b is not None:
+            b.close()
         srv.shutdown()
         shutil.rmtree(prof, ignore_errors=True)
     failed = [r for r in RESULTS if not r["ok"]]
