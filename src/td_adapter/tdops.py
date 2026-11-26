@@ -130,6 +130,18 @@ def _has_dat_source(o):
     return file_par is None or (str(file_par.mode).split(".")[-1] == "CONSTANT" and not file_par.val)
 
 
+def _has_locked_top_output(o):
+    if not o.lock:
+        return False
+    while o is not None:
+        if getattr(o, "bypass", False):
+            return False
+        if o.path == "/":
+            break
+        o = o.parent()
+    return True
+
+
 def _jsonable(v):
     if isinstance(v, (str, int, float, bool)) or v is None:
         return v
@@ -566,16 +578,17 @@ class TDAdapter(Adapter):
         return r
 
     def _t_capture_top(self, args, res, label, readable):
-        """Phase 4 visual analysis: the TOP's current image as PNG or JPEG (TouchDesigner's own encoder, on the main
-        thread, so the size is bounded; review 17: at most one capture per second per process). Reading the
-        pixels may let TouchDesigner finish a pending cook of that TOP."""
+        """Read the owner's locked texture without asking TouchDesigner to cook the network."""
         o = res.context["op"]
         if o.family != "TOP":
             raise ToolFailure("INVALID_ARGS", f"{o.path} is not a TOP.")
+        if not _has_locked_top_output(o):
+            raise ToolFailure("TOP_LOCK_REQUIRED", "Ask the owner to lock the output TOP in TouchDesigner. "
+                              "The TOP and its enclosing components must have bypass off.")
         w, h = int(o.width), int(o.height)
         if w * h > MAX_CAPTURE_PIXELS:
             raise ToolFailure("INVALID_ARGS", f"{o.path} is {w}x{h}; capture works up to {MAX_CAPTURE_PIXELS} pixels. "
-                                              "Capture a smaller TOP (for example a resolution TOP after it).")
+                                              "Capture a smaller locked output TOP.")
         now = time.monotonic()
         if now - self._last_capture < 1.0:
             raise ToolFailure("RATE_LIMITED", "one capture per second; try again in a moment")
@@ -585,9 +598,8 @@ class TDAdapter(Adapter):
         if not data or len(data) > MAX_CAPTURE_BYTES:
             raise ToolFailure("EXECUTION_FAILED", "the image could not be captured within the size limit")
         return {"path": o.path, "width": w, "height": h, "format": fmt, "bytes": len(data),
-                "cook_count": _cooks(o), "note": "The image is attached as image content. An operator that never "
-                "cooked may show an empty image. A TOP can show content from outside your scope (for example a "
-                "Select or Render TOP).",
+                "cook_count": _cooks(o), "note": "The locked image is attached. A TOP can show content from "
+                "outside your scope (for example a Select or Render TOP).",
                 "_image": {"bytes": data, "mimeType": "image/png" if fmt == "png" else "image/jpeg"}}
 
     def _t_describe_network(self, args, res, label, readable):
@@ -618,7 +630,7 @@ class TDAdapter(Adapter):
                 r["errors"], r["warnings"] = (c.errors() or "")[:500], (c.warnings() or "")[:500]
             except Exception:
                 pass
-            if c.family == "TOP":
+            if c.family == "TOP" and _has_locked_top_output(c):
                 try:
                     r["resolution"] = [int(c.width), int(c.height)]
                 except Exception:

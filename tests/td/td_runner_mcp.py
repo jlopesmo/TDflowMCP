@@ -218,6 +218,9 @@ def run(comp, ext, T, frames, until, checkpoint, R, restart=False):
         return
     fx = fixtures()
     network = td.op("/project1/fx")
+    snapshot = network.create(td.constantTOP, "capture_snapshot")
+    snapshot.cook(force=True)
+    snapshot.lock = True
     scripted = network.create(td.scriptDAT, "script_output_probe")
     wired = network.create(td.nullDAT, "wired_source_probe")
     wired.inputConnectors[0].connect(scripted.outputConnectors[0])
@@ -363,6 +366,35 @@ def run(comp, ext, T, frames, until, checkpoint, R, restart=False):
                               "events": events, "token_rows": [list(r) for r in tokens_rows], "diagnostics": diag})
     # Revocation is immediate (harness revoked one token); disabling MCP closes /mcp.
     yield checkpoint("revoked", {})
+    probe = network.create(td.baseCOMP, "top_read_probe")
+    probe.allowCooking = False
+    source = probe.create(td.scriptTOP, "uncooked_script")
+    output = probe.create(td.nullTOP, "unlocked_output")
+    source.viewer = output.viewer = False
+    output.inputConnectors[0].connect(source.outputConnectors[0])
+    probe.allowCooking = True
+    before = [source.totalCooks, output.totalCooks]
+    yield checkpoint("unlocked_top_reads", {"path": probe.path})
+    T("v11.UNLOCKED_TOP_READS_DID_NOT_COOK", [source.totalCooks, output.totalCooks] == before and before == [0, 0])
+    output.cook(force=True)
+    output.lock = True
+    callback = next(o for o in source.docked if o.isDAT)
+    callback.text += "\n# Update the upstream source after caching the output.\n"
+    before = [source.totalCooks, output.totalCooks]
+    yield checkpoint("locked_top_reads", {"path": probe.path})
+    T("v11.LOCKED_TOP_READS_DID_NOT_COOK", [source.totalCooks, output.totalCooks] == before)
+    output.bypass = True
+    before = [source.totalCooks, output.totalCooks]
+    yield checkpoint("bypassed_top_reads", {"path": probe.path})
+    T("v11.BYPASSED_TOP_READS_DID_NOT_COOK", [source.totalCooks, output.totalCooks] == before)
+    output.bypass = False
+    output.lock = True
+    probe.bypass = True
+    T("v11.INHERITED_BYPASS_WITH_LOCK_HELD", output.lock and probe.bypass and not output.bypass)
+    before = [source.totalCooks, output.totalCooks]
+    yield checkpoint("ancestor_bypassed_top_reads", {"path": probe.path})
+    T("v11.INHERITED_BYPASS_READS_DID_NOT_COOK", [source.totalCooks, output.totalCooks] == before)
+    probe.destroy()
     comp.par.Enablemcp = False
     yield frames(5)
     T("disable.status", comp.par.Status.eval() == "Setup", status=comp.par.Status.eval())

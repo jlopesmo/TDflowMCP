@@ -34,3 +34,5 @@ An agent's role can change after creation, through preview and apply ([ADR-0016]
 ## v1.1 implementation note
 
 The existing `update` and `execute` checks cover replacing an expression, bind or export when undo can restore it. Recognized literal operator references require `read` on the resolved path. Code authoring approvals additionally bind runtime identity and source or parameter state. Callback editing requires inactive staging for the existing six Execute DAT types. Script operator authoring remains outside the supported set. The [v1.1 record](../milestones/v1.1-developer-capabilities.md) tracks evidence.
+
+**Owner approval, 2026-11-26:** TOP image capture and resolution reads are permitted only for owner-locked outputs, subject to passive-read validation on TouchDesigner 2025.32440. A bypassed TOP or enclosing component makes the output ineligible. The existing `read` grant and hard denies continue to apply. Lock is set by the owner in TouchDesigner.

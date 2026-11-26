@@ -28,8 +28,8 @@ Choose the `TDflowMCP-vX.Y.Z.tox` asset when available. Compare its SHA-256 with
 `SHA256SUMS-versioned` for v1.0.0 and v1.0.1 aliases. `TDflowMCP.json` records the same hash for both filenames.
 The compatibility download `TDflowMCP.tox` is listed in `SHA256SUMS`.
 
-- PowerShell, using the v1.0.1 filename: `Get-FileHash .\TDflowMCP-v1.0.1.tox -Algorithm SHA256`
-- macOS / Linux, to check the file: `shasum -a 256 TDflowMCP-v1.0.1.tox`
+- PowerShell, using the v1.1.0 filename: `Get-FileHash .\TDflowMCP-v1.1.0.tox -Algorithm SHA256`
+- macOS / Linux, to check the file: `shasum -a 256 TDflowMCP-v1.1.0.tox`
 
 ## 2. Add the component
 1. Save your project first (TDflowMCP keeps its data next to the saved `.toe`).
@@ -178,6 +178,8 @@ Use an Operator with `update` and `execute` access to the relevant operators. Th
 For the supported Execute DATs, approve creation, editing and activation as separate changes. The DAT starts inactive. When changing an existing callback, use the displayed source and trigger settings to review activation. If a callback cannot be displayed for approval, switch off **Active** on that DAT in TouchDesigner. Have the agent check TouchDesigner's runtime diagnostics and the resulting output after activation.
 
 Approved Python runs inside TouchDesigner with access to the host. The scopes govern MCP actions. Script CHOP, SOP and TOP authoring is outside the v1.1 workflow.
+
+To let an agent inspect an image, lock the output TOP in TouchDesigner and keep bypass off on the TOP and its containing components. The agent can capture that frozen image through `tdflow_capture_top`.
 
 ## Where data is stored
 - **Project folder:** `.tdflowmcp/<project name>/` next to the `.toe` holds the audit log, sessions and DAT

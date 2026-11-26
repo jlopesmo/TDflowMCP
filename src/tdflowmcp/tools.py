@@ -202,16 +202,16 @@ def core_registry() -> Registry:
            obj({"scope": PATH, "ttl_s": {"type": "integer", "minimum": 30, "maximum": 1800},
                 "release": {"type": "boolean"}}, ["scope"]), ("update",), "lease", "lease_scope"))
     # Phase 4: visual analysis. The image is returned as MCP image content (read only, never cooks).
-    T(Tool("tdflow_capture_top", "Capture TOP", "The current image of a TOP as image content you can look at "
-           "(PNG or JPEG, up to 1920x1080 pixels, one per second). Use it to check what a network shows. An operator "
-           "that never cooked may show an empty image.",
+    T(Tool("tdflow_capture_top", "Capture TOP", "Read an owner-locked TOP image (PNG or JPEG, up to 1920x1080, "
+           "one per second). The TOP and enclosing components must have bypass off. "
+           "Use it to inspect the frozen output without starting a cook.",
            obj({"path": PATH, "format": {"type": "string", "enum": ["png", "jpg"]}}, ["path"]), ("read",),
            "read_path", "capture_top", read_only=True, idempotent=True))
     # Phase 4 (dogfood finding 5): bounded network summary with heuristic hints; reads facts, never cooks.
     T(Tool("tdflow_describe_network", "Describe network", "One network level (the children of a COMP) in one call: "
            "each readable operator's type, family, inputs, flags, errors and TouchDesigner's own cook count and "
            "last cook time, the wiring as edges, counts by family, and heuristic hints (slow cooks, frame budget, "
-           "large textures, errors, outputs nothing reads). Hints point at where to look; they are not findings.",
+           "large locked textures, errors, outputs nothing reads). Hints point at where to look; they are not findings.",
            obj({"path": PATH}, ["path"]), ("read",), "read_children", "describe_network", read_only=True,
            idempotent=True))
     T(Tool("tdflow_get_errors", "Get errors", "Errors and warnings of an operator and its children (filtered).",

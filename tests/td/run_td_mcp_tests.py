@@ -633,7 +633,7 @@ def network_flow(B):
     T("network.DESCRIBES_ONE_LEVEL", ok(d) and d.get("shown", 0) >= 1 and isinstance(d.get("edges"), list)
       and isinstance(d.get("hints"), list) and "by_family" in d, d={k: d.get(k) for k in ("shown", "total", "by_family", "code")})
     T("network.only_readable_operators", all(o["path"].startswith("/project1/fx/") for o in d.get("operators", [])))
-    st, j, _ = B.rpc("tools/call", {"name": "tdflow_capture_top", "arguments": {"path": "/project1/fx/noise1"}})
+    st, j, _ = B.rpc("tools/call", {"name": "tdflow_capture_top", "arguments": {"path": "/project1/fx/capture_snapshot"}})
     content = ((j or {}).get("result") or {}).get("content") or []
     img = next((c for c in content if c.get("type") == "image"), {})
     import base64 as _b64
@@ -643,6 +643,16 @@ def network_flow(B):
     T("capture.not_in_structured_or_audit", "_image" not in json.dumps(((j or {}).get("result") or {}).get("structuredContent") or {}))
     T("capture.non_top_refused", B.call("tdflow_capture_top", {"path": "/project1/fx"}).get("code") in ("INVALID_ARGS", "DENIED"))
     T("network.out_of_scope_denied", B.call("tdflow_describe_network", {"path": "/project1"}).get("code") == "DENIED")
+
+
+def cp_top_reads(data, pid, *, label="unlocked"):
+    reader = MCP(TOKENS["C"])
+    path = data["path"]
+    result = reader.call("tdflow_describe_network", {"path": path})
+    T(f"v11.{label}_network_metadata_read", ok(result))
+    image = reader.call("tdflow_capture_top", {"path": path + "/unlocked_output"})
+    T(f"v11.{label}_top_capture", (ok(image) and image.get("width", 0) > 0 and image.get("bytes", 0) > 0)
+      if label == "locked" else image.get("code") == "TOP_LOCK_REQUIRED", r=image)
 
 
 def rcode(r):
@@ -1041,6 +1051,10 @@ HANDLERS = {"caps_native": cp_caps_native, "setup_ready": cp_setup_ready, "pair_
             "human_edited": cp_human_edited, "suspended": cp_suspended, "resumed": cp_resumed, "minimized": cp_minimized,
             "queue_block": cp_queue_block, "queue_checked": cp_queue_checked, "audit_down": cp_audit_down,
             "audit_up": cp_audit_up, "scan": cp_scan, "revoked": cp_revoked, "disabled": cp_disabled,
+            "unlocked_top_reads": cp_top_reads,
+            "locked_top_reads": lambda d, p: cp_top_reads(d, p, label="locked"),
+            "bypassed_top_reads": lambda d, p: cp_top_reads(d, p, label="bypassed"),
+            "ancestor_bypassed_top_reads": lambda d, p: cp_top_reads(d, p, label="ancestor_bypassed"),
             "restart_enabled": cp_restart_enabled}
 
 

@@ -70,7 +70,8 @@ every permission itself; nothing here grants access.
   `tdflow_experiment_discard` it. With `inert: true` the copy is a snapshot that does not cook; promoting it
   brings back its operators and parameters (executable operators stay switched off until they are switched
   on with approval, and wiring is reported in `connections_lost`).
-- `tdflow_capture_top` returns a TOP's image so you can look at the result (one per second).
+- `tdflow_capture_top` returns an owner-locked TOP's image (one per second). For `TOP_LOCK_REQUIRED`, ask the
+  owner to lock the output TOP in TouchDesigner and switch off bypass on it and its containing components.
 - When several agents work in one project, `tdflow_lease_scope` reserves a scope for you for a while; others
   get `LEASED` there. Release it when you are done. If you get `LEASED`, wait or ask the user; do not work
   around it.
