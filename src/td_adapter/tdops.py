@@ -335,7 +335,8 @@ class TDAdapter(Adapter):
         try:
             if o.OPType not in ("baseCOMP", "containerCOMP"):
                 raise ToolFailure("INVALID_ARGS", "Use custom definition editing on a Base or Container COMP.")
-            before, after = custompars.plan(o, args)
+            before, after, affected = custompars.plan(o, args)
+            targets.extend(self._facts(o, "update", change="custom_parameters", param=name) for name in affected)
             before_sha, after_sha = _state_sha(before), _state_sha(after)
             text = json.dumps(before, ensure_ascii=True)
             if len(text) > 32000:
@@ -855,7 +856,9 @@ class TDAdapter(Adapter):
         self._apply_custom(o, page, before, after, label)
         return {"path": o.path, "page": page, "parameters": after["order"],
                 "_audit": {"kind": "custom_parameters", "path": o.path, "op_id": int(o.id), "page": page,
-                           "names": list(before["parameters"]), "before_sha": snap[3], "after_sha": snap[4],
+                           "names": list(before["parameters"]),
+                           "affected_parameters": [t.param for t in res.targets if t.param],
+                           "before_sha": snap[3], "after_sha": snap[4],
                            "runtime": self._custom_runtime, "snapshot": ctx["snapshot_id"], "stack": self._stack(),
                            "reversible": "snapshot"}}
 

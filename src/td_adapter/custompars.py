@@ -70,16 +70,18 @@ def plan(op, args):
         _invalid("Choose a distinct custom page name.")
     before = snapshot(op, page_name, names)
     before_order = before["order"] or []
-    if len(before_order) + len(names) > 80:
+    final_order = before_order + [name for name in names if before["parameters"][name] is None]
+    if len(final_order) > 80:
         _invalid("The custom page is too large for a bounded edit.")
     rows = {entry["name"]: _definition(entry, before["parameters"][entry["name"]]) for entry in definitions}
-    final_order = before_order + [name for name in names if before["parameters"][name] is None]
     desired = args.get("order", final_order)
     if sorted(desired) != sorted(final_order) or not desired:
         _invalid("Order must list every parameter on the resulting page exactly once.")
     if "order" in args and existing_page is not None and any(len(p.parGroup) != 1 for p in existing_page.pars):
         _invalid("Explicit ordering is supported only on pages of scalar parameters.")
-    return before, {"order": desired, "parameters": rows}
+    # TouchDesigner sorts the whole page. Appending controls in their natural order needs no sort.
+    affected = desired if desired != final_order else names
+    return before, {"order": desired, "parameters": rows}, affected
 
 
 def _definition(entry, old):

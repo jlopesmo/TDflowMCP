@@ -243,6 +243,74 @@ def rollback_test():
     s.check("failed_transaction_restored", result.get("code") == "EXECUTION_FAILED" and result.get("restored") is True)
 
 
+def prepare_grant_tests(data):
+    s = Scenario("control_grants")
+    client = mcp.MCP(mcp.TOKENS["E"])
+    args = {"path": data["path"], "page": "Controls",
+            "definitions": [{"name": "Locked", "type": "float", "label": "Approved change"}]}
+    s.check("editable_before_restriction", mcp.ok(s.approve(client, CUSTOM, **args)))
+    args["definitions"] = [{"name": "Locked", "type": "float", "label": "Pending change"}]
+    request = s.call(client, CUSTOM, **args)
+    s.check("owner_approved_before_restriction", request.get("code") == "APPROVAL_REQUIRED"
+            and mcp.approve_request(request["approval_id"])["status"] == 200)
+    PENDING["restricted_replay"] = args
+
+
+def restricted_grant_tests(data):
+    s = REPORT["control_grants"]
+    client = mcp.MCP(mcp.TOKENS["E"])
+    path = data["path"]
+    reply = s.call(client, CUSTOM, **PENDING["restricted_replay"])
+    s.check("policy_change_denies_approved_replay", reply.get("rule_id") == "G3" and not reply.get("approval_id"))
+    undo = s.call(client, "tdflow_undo")
+    s.check("undo_respects_current_denylist", undo.get("rule_id") == "G3")
+    reorder = s.call(client, CUSTOM, path=path, page="Controls", order=["Open", "Locked"])
+    s.check("reorder_requires_all_control_permissions", reorder.get("rule_id") == "G3")
+    mixed = s.call(client, CUSTOM, path=path, page="Controls", definitions=[
+        {"name": "Open", "type": "float", "label": "Mixed"}, {"name": "Locked", "type": "float", "label": "Mixed"}])
+    s.check("mixed_edit_denied_before_approval", mixed.get("rule_id") == "G3" and not mixed.get("approval_id"))
+    return {}
+
+
+def allowed_grant_tests(data):
+    s = REPORT["control_grants"]
+    client = mcp.MCP(mcp.TOKENS["E"])
+    path = data["path"]
+    result = s.approve(client, CUSTOM, path=path, page="Controls", order=["Locked", "Open"],
+                       definitions=[{"name": "Open", "type": "float", "label": "Allowed change"}])
+    s.check("allowed_control_with_unchanged_order", mcp.ok(result))
+
+
+def allowed_grant_undo(data):
+    s = REPORT["control_grants"]
+    client = mcp.MCP(mcp.TOKENS["E"])
+    result = s.call(client, "tdflow_undo")
+    s.check("allowed_control_undo", mcp.ok(result) and result.get("verified") is True)
+
+
+def page_limit_tests(data):
+    s = Scenario("page_limit")
+    client = mcp.MCP(mcp.TOKENS["E"])
+    args = {"path": data["path"], "page": "Controls"}
+    slots = [f"Slot{i}" for i in range(1, 81)]
+    result = s.approve(client, CUSTOM, **args, definitions=[
+        {"name": "Slot1", "type": "float", "default": 2}, {"name": "Slot80", "type": "float"}])
+    s.check("add_eightieth_and_edit_existing", result.get("parameters") == slots)
+    result = s.approve(client, CUSTOM, **args, definitions=[{"name": "Slot80", "type": "float", "label": "Last slot"}])
+    s.check("edit_on_full_page", result.get("parameters") == slots)
+    result = s.call(client, CUSTOM, **args, definitions=[{"name": "Slot81", "type": "float"}])
+    s.check("reject_eighty_first_before_approval", result.get("code") == "INVALID_ARGS" and not result.get("approval_id"))
+    order = list(reversed(slots))
+    result = s.approve(client, CUSTOM, **args, order=order)
+    s.check("reorder_at_capacity", result.get("parameters") == order)
+
+
+def page_limit_undo():
+    s = REPORT["page_limit"]
+    result = s.call(mcp.MCP(mcp.TOKENS["E"]), "tdflow_undo")
+    s.check("undo_reorder_at_capacity", mcp.ok(result) and result.get("verified") is True)
+
+
 def revocation_test():
     s = REPORT["security"]
     operator = mcp.MCP(mcp.TOKENS["E"])
@@ -276,6 +344,12 @@ def main():
                 "component_definition_tests": lambda _d, _p: definition_tests(),
                 "component_definition_stale": lambda _d, _p: stale_tests(),
                 "component_definition_rollback": lambda _d, _p: rollback_test(),
+                "component_grant_prepare": lambda d, _p: prepare_grant_tests(d),
+                "component_grant_denials": lambda d, _p: restricted_grant_tests(d),
+                "component_grant_allow": lambda d, _p: allowed_grant_tests(d),
+                "component_grant_undo": lambda d, _p: allowed_grant_undo(d),
+                "component_page_limit": lambda d, _p: page_limit_tests(d),
+                "component_page_undo": lambda _d, _p: page_limit_undo(),
                 "component_definition_revocation": lambda _d, _p: revocation_test()}
     tox = args.tox.resolve(strict=True)
     result = gate.launch("component_workflow", str(tox), str(run), str(project),

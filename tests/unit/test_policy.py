@@ -130,6 +130,19 @@ class ExecuteClassificationTests(unittest.TestCase):
         ts = [Target("update", f"/project1/a{i}", change="param", param="x") for i in range(51)]
         self.assertEqual(P.evaluate(a, ts).rule_id, "L1")
 
+    def test_custom_page_counts_once_but_checks_every_control(self):
+        path = "/project1/fx/controls"
+        updates = [Target("update", path, change="custom_parameters", param=f"Slot{i}") for i in range(80)]
+        targets = [Target("read", path), Target("execute", path), *updates]
+        policy = Policy("/project1")
+        policy.approvals = True
+        allowed = agent("operator")
+        restricted = Agent("agt_2", "Restricted", "operator", True, (
+            Grant("/project1/fx/**", frozenset({"read", "update", "execute"}), param_denylist=("Slot79",)),))
+        self.assertEqual(policy.evaluate(allowed, targets).code, "APPROVAL_REQUIRED")
+        self.assertTrue(policy.evaluate(allowed, targets, approved=True).allow)
+        self.assertEqual(policy.evaluate(restricted, targets, approved=True).rule_id, "G3")
+
 
 class FilterTests(unittest.TestCase):
     def test_recursive_reads_filter(self):

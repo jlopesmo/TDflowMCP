@@ -126,7 +126,7 @@ A grant is `{subject: agent|role, scope, actions, effect: allow|deny, constraint
 | Set a parameter **constant** value | `update` (+ `param_denylist`) |
 | Replace an expression, bind or export with a constant | `update` and `execute`, because audited undo can restore the dynamic mode |
 | Set a parameter **expression**, **bind** or **export**, or change its mode to one of those | `update` **and** `execute` on the target (expressions evaluate Python) |
-| Add or edit bounded scalar custom definitions | `read`, `update` and `execute` on the Base or Container COMP, plus exact approval. Existing project callbacks can observe definitions and values. |
+| Add or edit bounded scalar custom definitions | `read`, `update` and `execute` on the Base or Container COMP, per-control update checks and exact approval. Existing project callbacks can observe definitions and values. |
 | Write text into a DAT that TD executes: Execute/Script/callback DATs, any DAT referenced by a `callbacks`/`script`/extension parameter, or Text DATs used as modules | `update` **and** `execute` |
 | Create a plain operator | `create` on `parent/*` (+ `allowed_op_types`) |
 | Create an executable or network operator (Execute/Script/Web Client/TCP/UDP/WebSocket DATs, Script CHOP/SOP/TOP, Python-extension COMPs) | `create` **and** `execute`. These types are default-denied by `allowed_op_types` |
@@ -170,6 +170,7 @@ The tool registry refuses a tool whose resolver doesn't declare its classificati
 - Execute DAT trigger approvals bind the exact source, parameter settings, input identities and bypass state. The native viewer and browser show the complete callback source and settings without evaluating dynamic values. The private preview digest is matched at decision and bound into the approved facts. It is cleared from the approval row when the request closes. Callback source and activation are approved in separate calls. If the callback preview is refused, the owner can switch off Active on the Execute DAT in TouchDesigner.
 - An approval is usable with the requesting credential. Token revocation cancels its open requests in the same private database transaction. The engine reloads the in-memory token and checks policy and suspension again immediately before dispatch, after resolving and hashing the target state.
 - Custom definitions bind the COMP identity, current named control definitions, page order and runtime to the approval. Snapshots are durable before dispatch and reject credential-shaped text. Recovery checks the target, current state, runtime and native undo stack before restoring definitions and order. This restores the interface state. Existing project callbacks can have effects beyond that state. If recovery cannot be verified, the engine suspends further agent calls.
+- The grant parameter denylist applies to every named custom definition and every control on a page when a call sorts it. Appending controls in their natural order checks the named definitions. The per-control checks count as one bounded page update in the operation limit. Approval binds those targets. Undo rechecks the recorded control names against current update grants and refuses a custom edit with a missing authorization record.
 
 ## 5. Code execution honesty
 

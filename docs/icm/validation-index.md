@@ -427,3 +427,11 @@ Steps are listed in the order they were executed. A step that is not listed was 
 - **Native Claude Code:** **90/90 + 83/83** on the CLI 2.1.289 and the VS Code extension engine 2.1.332. A live builder created an operator within scope and the server denied the request outside it. Restart, revocation, repair and disconnect passed.
 - **Native Codex:** **55/55 + 68/68** on CLI 0.160.0 and the VS Code extension engine 0.171.0-alpha.13.2. The suite verified coexistence with Claude Code, reconnect after restart, revocation, repair, disconnect and preservation of the real Codex configuration.
 - **Native visual review:** **16/16** checks with no runtime errors. The client chooser, Codex consent and browser sign-in captures showed readable instructions and intact controls.
+
+### v1.2.0 release PR corrections
+
+- The Windows candidate built in TouchDesigner 2025.32440 with no embedded hash mismatches. Its source digest is `bf296f32cb0a3fa7956cc3d67df958da7c9918420be05ee299f3b285c8689405` and its `.tox` SHA-256 is `a1071e7ff74a668b5aa0d7dd6a53fa959b827ef93fd42ddca3d3afa8dced196d`.
+- Component authoring passed **24/24 in TouchDesigner + 137/137 harness checks**. A constrained grant in the disposable identity blocked an approved replay, mixed edits, page sorting and undo while allowing a definition edit and verified undo for an unrestricted control. The 79-control fixture accepted a mixed edit and addition at 80, allowed edit and reorder at 80, rejected an 81st control before approval and restored the order through undo. All four original scenarios passed again.
+- The focused policy, engine, approval and grant suite ran **58 tests** and returned `OK` with one skip.
+- The complete standalone and bundled Python suites both ran **567 tests** and returned `OK`, with four and three skips respectively. The documentation checker and secret scanner reported zero findings.
+- Packaged MCP passed **103/103 in TouchDesigner + 288/288 harness checks**. The first run compared embedded source to the pre-fix archive and reported two source mismatches. Refreshing the isolated archive with the corrected source cleared both checks. The full audit gate passed **49/49 + 105/105**, including crash, restart, the historical performance comparison and the handoff benchmark.

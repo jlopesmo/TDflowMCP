@@ -25,6 +25,7 @@ from __future__ import annotations
 import secrets
 import threading
 import time
+from dataclasses import replace
 from typing import Callable, Dict, List, Optional, Sequence
 
 from tdflowmcp import SKILL_VERSION, TOOL_SURFACE_VERSION, __version__, schema
@@ -774,8 +775,17 @@ class Engine:
         detail = _json(rec.get("detail"))
         if detail.get("reversible", "no") == "no":
             return self._deny(base, "NOT_REVERSIBLE", "U1", "that change is not reversible", None)
-        targets = [Target(action=INVERSE[a], path=p) for a, p in _json(rec.get("targets"), [])]
-        targets = [t for t in targets if t.action != "read"]
+        if detail.get("kind") == "custom_parameters":
+            names = detail.get("affected_parameters")
+            path = detail.get("path")
+            if (not isinstance(path, str) or not isinstance(names, list) or len(names) > 80
+                    or any(not isinstance(name, str) or not name for name in names)):
+                return self._deny(base, "UNDO_FAILED", "U1", "The custom control authorization record is unavailable.", None)
+            target = Target("update", path, change="custom_parameters")
+            targets = [target, *(replace(target, param=name) for name in names)]
+        else:
+            targets = [Target(action=INVERSE[a], path=p) for a, p in _json(rec.get("targets"), [])]
+            targets = [t for t in targets if t.action != "read"]
         verdict = self.policy.evaluate(agent, targets or [Target("update", self.policy.root + "/__none__")])
         base.update(targets=[[t.action, t.path] for t in targets], policy_version=verdict.policy_version)
         if not verdict.allow:
@@ -800,7 +810,7 @@ class Engine:
                 live_targets = []
                 for target in targets:
                     protected, ancestor = path_facts(target.path)
-                    live_targets.append(Target(target.action, target.path, protected=protected, ancestor_of=ancestor))
+                    live_targets.append(replace(target, protected=protected, ancestor_of=ancestor))
             held = self._leased(agent, targets)
             if held:                                # review 17: an undo is a change like any other
                 raise ToolFailure("LEASED", self._lease_msg(agent, held) + "; nothing was undone")

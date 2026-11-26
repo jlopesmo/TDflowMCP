@@ -110,12 +110,52 @@ def run(comp, ext, T, frames, until, checkpoint, R):
         finally:
             adapter.apply = apply
         T("definitions.rollback_removed_injected_page", all(p.name != "Rollback" for p in definition_probe.customPages))
+        yield from control_review_tests(network, ext, T, checkpoint)
         yield checkpoint("component_definition_revocation", {})
         T("definitions.revoked_owner_approval_left_no_page", all(p.name != "Revoked" for p in definition_probe.customPages))
         yield from script_probe(network, T, frames)
     R["component_version"] = str(comp.par.Version.eval())
     comp.par.Enablemcp = False
     yield frames(5)
+
+
+def control_review_tests(network, ext, T, checkpoint):
+    from dataclasses import replace
+
+    probe = network.create(td.baseCOMP, "grant_controls")
+    page = probe.appendCustomPage("Controls")
+    page.appendFloat("Locked")
+    page.appendFloat("Open")
+    data = {"path": probe.path}
+    yield checkpoint("component_grant_prepare", data)
+    identity = ext.identity
+    agent = next(a for a in identity.agents.values() if a.display_name.startswith("Agent E"))
+    # The setup UI has scope presets. Install a constrained Grant on this disposable identity only.
+    identity.agents[agent.id] = replace(agent, grants=tuple(
+        replace(grant, param_denylist=("Locked",)) for grant in agent.grants))
+    try:
+        yield checkpoint("component_grant_denials", data)
+        T("definitions.denials_preserve_metadata_and_order",
+          probe.par.Locked.label == "Approved change" and probe.par.Open.label == "Open"
+          and [par.name for par in page.pars] == ["Locked", "Open"])
+        yield checkpoint("component_grant_allow", data)
+        T("definitions.allowed_edit_applied", probe.par.Open.label == "Allowed change")
+        yield checkpoint("component_grant_undo", data)
+        T("definitions.allowed_undo_restored", probe.par.Open.label == "Open" and probe.par.Locked.label == "Approved change")
+    finally:
+        identity.agents[agent.id] = agent
+
+    probe = network.create(td.baseCOMP, "full_page")
+    page = probe.appendCustomPage("Controls")
+    for i in range(1, 80):
+        page.appendFloat(f"Slot{i}")
+    yield checkpoint("component_page_limit", {"path": probe.path})
+    expected = [f"Slot{i}" for i in range(1, 81)]
+    T("definitions.capacity_and_reorder_verified",
+      [par.name for par in page.pars] == expected[::-1] and probe.par.Slot1.default == 2
+      and probe.par.Slot80.label == "Last slot")
+    yield checkpoint("component_page_undo", {})
+    T("definitions.undo_restores_full_page_order", [par.name for par in page.pars] == expected)
 
 
 def script_probe(network, T, frames):

@@ -237,8 +237,11 @@ class Policy:
             return Verdict(False, "DENIED", "A0", "agent unknown or disabled", None, ver)
         if not targets:
             return Verdict(False, "INVALID_TARGET", "T0", "no targets", None, ver)
-        mutations = [t for t in targets if t.action in MUTATING]
-        if len(mutations) > self.max_ops:
+        # Custom controls are checked individually but written as one bounded page mutation.
+        custom_updates = {t.path for t in targets if t.action == "update" and t.change == "custom_parameters"}
+        mutations = sum(t.action in MUTATING and not (t.action == "update" and t.change == "custom_parameters")
+                        for t in targets) + len(custom_updates)
+        if mutations > self.max_ops:
             return Verdict(False, "DENIED", "L1", f"more than {self.max_ops} operations in one call", None, ver)
         for t in targets:
             if t.action not in ACTIONS:
