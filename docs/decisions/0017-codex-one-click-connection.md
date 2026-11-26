@@ -2,7 +2,7 @@
 
 **Status:** Accepted (owner D28, [GitHub Issue #3](https://github.com/jlopesmo/TDflowMCP/issues/3#issuecomment-7175371704), 2026-11-25) as delivered for the tested Windows and Codex interfaces, with the limitations and security controls documented below.
 
-History: the owner first approved it subject to the validation gates below (D27, 2026-11-25); they passed. It extends [ADR-0015](0015-consent-based-client-connection.md) to a second client and corrects its statement that Codex has no helper mechanism. Target: 1.0.1 (release in progress).
+History: the owner first approved it subject to the validation gates below (D27, 2026-11-25); they passed. It extends [ADR-0015](0015-consent-based-client-connection.md) to a second client and corrects its statement that Codex has no helper mechanism. Released in [1.0.1](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.0.1).
 
 ## Context
 ADR-0015 gave Claude Code a consent-based, one-click connection and left Codex, Cursor and VS Code Copilot on a manual fallback, because their documented credential options were an environment variable present at start, or OAuth. The owner asked (D27, Issue #3) for the same experience with Codex: **Coding Agent: Codex → Connect Agent → Approve → new Codex chat → connected**, without copying a token, editing TOML or setting an environment variable.

@@ -57,7 +57,12 @@ No other compatibility is claimed. The minimum Codex version for the header help
 
   If step 3 shows `tdflow` as failed: check that TouchDesigner is open (not minimized) and Enable MCP is on, then View Connection Details (Advanced page).
 - [x] **Owner decision (D28):** release 1.0.1.
-- [ ] **Release steps:** version `1.0.1` tested and committed; CI; PR #4 merged into `main`; annotated tag `v1.0.1`; the package from the tag and its suites; the GitHub Release with its four assets; the download check from GitHub-hosted runners; the README link; Issue #3 closed. Each is recorded in the validation index once observed.
+- [x] Version `1.0.1` tested and committed as `1d62848`; CI runs #65 (push) and #66 (pull request) passed on Windows and Ubuntu.
+- [x] PR #4 merged into `main` as `6494c66` (its tree equals `1d62848`); CI runs #67 (`main`) and #68 (`dev`) passed.
+- [x] Annotated tag `v1.0.1` on `6494c66`. The package built from the tag in a clean worktree on TouchDesigner 2025.32440: `TDflowMCP.tox` SHA-256 `873d9f7522bffcb9d86618ccea4dfeb90d9b820063738f975944a1775c832532`, version `1.0.1`, marked as a release; every suite, the visual review and the browser checks pass on it. It is not the candidate binary (`95e53f84…`).
+- [x] GitHub Release [v1.0.1](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.0.1) published with `TDflowMCP.tox`, `TDflowMCP.json`, `SHA256SUMS` and `INSTALL.md`; GitHub's digests equal the local hashes.
+- [x] **Download check from outside the build network:** [verify-release run #1](https://github.com/jlopesmo/TDflowMCP/actions/runs/45726797505) on `ubuntu-latest` and `windows-latest` downloaded the four assets anonymously and passed, anchored to the recorded `SHA256SUMS` hash, the `.tox` hash and the tag's commit.
+- [x] README download link and ICM receipts; Issue #3 closed after the above (validation index).
 
 ## Known limits added by this candidate
 - Automatic Codex setup is for Windows only.
