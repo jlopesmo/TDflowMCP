@@ -47,7 +47,10 @@ def run(comp, ext, T, frames, until, checkpoint, R):
     visual = fx.create(td.baseCOMP, "visual")
     left = constant(visual, "left", .25)
     right = constant(visual, "right", .75)
-    for top in (left, right):
+    black = constant(visual, "black", 0)
+    black.par.colorg = 0
+    black.par.colorb = 0
+    for top in (left, right, black):
         top.viewer = False
         top.cook(force=True)
         top.lock = True
@@ -92,7 +95,7 @@ def run(comp, ext, T, frames, until, checkpoint, R):
 
     yield from gate.open_and_pair(comp, ext, T, frames, until, checkpoint)
     yield from gate.enable(comp, until, "diagnostic_workflow_enable")
-    fields = (source, output, cheap, expensive, observed, left, right, unlocked, oversized, original, final, untouched)
+    fields = (source, output, cheap, expensive, observed, left, right, black, unlocked, oversized, original, final, untouched)
     seen = counts(fields)
     calls = expensive.fetch("calls", 0)
     flags = yield checkpoint("diagnostic_inspection", {})

@@ -191,6 +191,8 @@ When the agent adds the first Out TOP in a Base COMP, use that native connector 
 
 Name the component or output and describe what you expected. Ask the agent for the evidence, a minimal repair, and a check of the result. Reported errors and missing required inputs are observations. Readable upstream leads guide investigation. The last CPU cook times rank sampled work in milliseconds and can be old.
 
+After a repair, the agent can verify wiring immediately. If the cook count has stayed the same, the reported error may still reflect the previous cook. Verify the output after it cooks normally, or check it yourself in TouchDesigner.
+
 To compare outputs, lock both TOPs in TouchDesigner and leave bypass off on the TOPs and enclosing components. Matching dimensions allow aligned RGB comparison within the sample limit. A dark result or color difference can guide where to look upstream. Review any requested change through the normal approval flow and ask the agent to inspect the output again.
 
 ## Where data is stored

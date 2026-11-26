@@ -82,6 +82,10 @@ def visual_evidence(candidate):
     cached, _ = call("C", compare, left=other, right=other)
     gate.T("C.locked_callback_upstream_sampled", cached.get("status") == "compared"
            and cached["changed_pixel_fraction"] == 0)
+    time.sleep(1.05)
+    dark, _ = call("C", compare, left=c + "/black", right=c + "/left")
+    gate.T("C.near_black_fraction", dark.get("status") == "compared"
+           and dark["left"]["near_black_fraction"] == 1 and dark["right"]["near_black_fraction"] == 0)
     return {key: result.get(key) for key in ("left", "right", "sample_ms", "mean_absolute_rgb_delta",
                                               "changed_pixel_fraction")}
 
@@ -129,16 +133,30 @@ def unsupported_runtime():
            and "left" not in refused and all(part["type"] != "image" for part in content))
 
 
-def live_assessment(work, candidate):
-    """Use a real read-only agent session before the fixture applies the controlled repairs."""
+def run_live(work, token, prompt, methods):
     exe = shutil.which("claude")
     if not exe:
-        gate.T("live_diagnostics.claude_available", False)
-        return
+        return False, [], "", 0
     config = work / "diagnostic-mcp.json"
     config.write_text(json.dumps({"mcpServers": {"tdflow": {
         "type": "http", "url": mcp.O + "/mcp", "headers": {"Authorization": "Bearer ${TDFLOW_TOKEN}"}
     }}}), encoding="utf-8")
+    allowed = ["mcp__tdflow__" + name for name in methods]
+    start = time.perf_counter()
+    rc, stdout, _ = onboard.run_claude(
+        exe, ["-p", prompt, "--mcp-config", str(config), "--strict-mcp-config", "--allowedTools", *allowed,
+              *onboard.ISOLATION, "--output-format", "stream-json", "--verbose"], str(work),
+        dict(os.environ, TDFLOW_TOKEN=token), 210)
+    events = [json.loads(line) for line in stdout.splitlines() if line.startswith("{")]
+    uses = [part for event in events if event.get("type") == "assistant"
+            for part in (event.get("message") or {}).get("content", []) if part.get("type") == "tool_use"]
+    result = next((event for event in reversed(events) if event.get("type") == "result"), {})
+    ok = rc == 0 and not result.get("is_error") and onboard.isolated_ok(onboard.init_tools(stdout))
+    return ok, uses, str(result.get("result", ""))[:2400].replace(token, "[redacted]"), round(time.perf_counter() - start, 1)
+
+
+def live_assessment(work, candidate):
+    """Use a real observer session before the fixture applies the controlled repairs."""
     methods = [DESCRIBE, "tdflow_get_operator", "tdflow_get_errors", "tdflow_get_parameters", "tdflow_capture_top"]
     if candidate:
         methods.append("tdflow_compare_tops")
@@ -151,26 +169,38 @@ def live_assessment(work, candidate):
               "Keep explanations factual and avoid unsupported causes. "
               + ("Use diagnostics=true and the TOP comparison tool where applicable." if candidate else
                  "Use network summaries and captures. Consecutive captures must be at least one second apart."))
-    allowed = ["mcp__tdflow__" + name for name in methods]
-    start = time.perf_counter()
-    rc, stdout, _ = onboard.run_claude(
-        exe, ["-p", prompt, "--mcp-config", str(config), "--strict-mcp-config", "--allowedTools", *allowed,
-              *onboard.ISOLATION, "--output-format", "stream-json", "--verbose"], str(work),
-        dict(os.environ, TDFLOW_TOKEN=mcp.TOKENS["C"]), 210)
-    events = [json.loads(line) for line in stdout.splitlines() if line.startswith("{")]
-    uses = [part for event in events if event.get("type") == "assistant"
-            for part in (event.get("message") or {}).get("content", []) if part.get("type") == "tool_use"]
-    result = next((event for event in reversed(events) if event.get("type") == "result"), {})
+    ok, uses, summary, seconds = run_live(work, mcp.TOKENS["C"], prompt, methods)
     scopes = {value.split("/")[3] for part in uses for value in (part.get("input") or {}).values()
               if isinstance(value, str) and value.startswith(FX + "/") and len(value.split("/")) > 3}
-    gate.T("live_diagnostics.isolated_and_complete", rc == 0 and not result.get("is_error")
-           and onboard.isolated_ok(onboard.init_tools(stdout)) and scopes >= {"broken", "cost", "visual", "restore"})
-    summary = str(result.get("result", ""))[:2400].replace(mcp.TOKENS["C"], "[redacted]")
-    EVIDENCE["live"] = {"seconds": round(time.perf_counter() - start, 1),
+    gate.T("live_diagnostics.isolated_and_complete", ok and scopes >= {"broken", "cost", "visual", "restore"})
+    EVIDENCE["live"] = {"seconds": seconds,
                         "tool_calls": [part.get("name") for part in uses], "summary": summary}
 
 
-def repairs():
+def live_repair(work, path):
+    response = mcp.admin("POST", "/setup/api/tokens", {
+        "display_name": "Diagnostic repair fixture", "role": "builder", "scope": path + "/**",
+        "actions": ["read", "update"]})
+    token = (mcp.base.jbody(response) or {}).get("token")
+    gate.T("D.live_repair_credential", response["status"] == 200 and bool(token))
+    if not token:
+        return
+    prompt = (f"Diagnose the disconnected Level TOP final in the disposable network {path} using "
+              "tdflow_describe_network (diagnostics=true). You are authorized to restore its original input "
+              "by connecting original to final, exactly one wire. Make no other edits. Reinspect that "
+              "network with the same tool after connecting. Report the verified edge and whether any reported error remains.")
+    ok, uses, summary, seconds = run_live(work, token, prompt, [DESCRIBE, "tdflow_connect"])
+    methods = [part.get("name") for part in uses if str(part.get("name")).startswith("mcp__")]
+    connect = "mcp__tdflow__tdflow_connect"
+    connection = [part.get("input", {}) for part in uses if part.get("name") == connect]
+    describe = "mcp__tdflow__" + DESCRIBE
+    gate.T("D.live_diagnose_repair_verify", ok and len(connection) == 1
+           and connection[0].get("src") == path + "/original" and connection[0].get("dst") == path + "/final"
+           and describe in methods[:methods.index(connect)] and describe in methods[methods.index(connect) + 1:])
+    EVIDENCE["live_repair"] = {"seconds": seconds, "tool_calls": methods, "summary": summary}
+
+
+def repairs(project, use_live_repair):
     a = FX + "/broken"
     args = {"path": a + "/output", "expressions": {"opacity": "1.0"}}
     approval, _ = call("A", "tdflow_set_parameters", **args)
@@ -180,7 +210,10 @@ def repairs():
         call("A", "tdflow_set_parameters", **args)
     call("A", "tdflow_connect", src=a + "/source", dst=a + "/output")
     d = FX + "/restore"
-    call("D", "tdflow_connect", src=d + "/original", dst=d + "/final")
+    if use_live_repair:
+        live_repair(project, d)
+    else:
+        call("D", "tdflow_connect", src=d + "/original", dst=d + "/final")
 
 
 def verification():
@@ -198,7 +231,10 @@ def main():
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--candidate", action="store_true")
     parser.add_argument("--live-agent", action="store_true")
+    parser.add_argument("--live-repair", action="store_true")
     args = parser.parse_args()
+    if args.live_repair and not args.candidate:
+        parser.error("--live-repair requires --candidate")
     if any(gate.oslisteners.other_listeners(port, 0) for port in gate.base.PORTS):
         raise SystemExit("A TouchDesigner test port is already in use.")
     root = Path(gate.ROOT)
@@ -211,11 +247,12 @@ def main():
                 "diagnostic_inspection": lambda _d, _p: inspection(args.candidate),
                 "diagnostic_unsupported_runtime": lambda _d, _p: unsupported_runtime(),
                 "diagnostic_live": lambda _d, _p: live_assessment(project, args.candidate) if args.live_agent else None,
-                "diagnostic_repairs": lambda _d, _p: repairs(),
+                "diagnostic_repairs": lambda _d, _p: repairs(project, args.live_repair),
                 "diagnostic_verification": lambda _d, _p: verification()}
     tox = args.tox.resolve(strict=True)
     result = gate.launch("diagnostic_workflow", str(tox), str(run), str(project),
-                         {"TDFLOW_PRIVATE_ROOT": str(work / "private")}, handlers, deadline_s=600 if args.live_agent else 300)
+                         {"TDFLOW_PRIVATE_ROOT": str(work / "private")}, handlers,
+                         deadline_s=600 if args.live_agent or args.live_repair else 300)
     checks = result.get("tests", []) + gate.H["tests"]
     receipt = {"tox_sha256": hashlib.sha256(tox.read_bytes()).hexdigest(),
                "version": result.get("component_version"), "calls": CALLS, "evidence": EVIDENCE,
