@@ -259,7 +259,7 @@ The two sections above are earlier checkpoints of the same day; this one superse
 - **Built from the tag** in a clean worktree on TouchDesigner 2025.32440: `TDflowMCP.tox` SHA-256 `466a1b5e577c695e5c924e031116173b68af4f8172799317e9c9d103931d5358`, source digest `348683a0…` (the tested candidate's). Every suite, the visual review and the browser checks pass on this packaged file.
 - **Published:** GitHub Release [v1.0.0](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.0.0) with `TDflowMCP.tox`, `TDflowMCP.json`, `SHA256SUMS` and `INSTALL.md`. The page is public, and GitHub's own digests of the four assets equal the local hashes.
 - **Default branch:** `main` (observed). `main` is protected against force pushes and deletion.
-- **Not observed yet:** a byte download of the published `.tox` with its checksum compared. It could not be done from this network (the gateway intercepts the asset host with an untrusted certificate, and certificate checking was not bypassed). The owner will do it from another network; **Issue #2 stays open until then**.
+- **Public download verified outside the build network:** [verify-release run #2](https://github.com/jlopesmo/TDflowMCP/actions/runs/45738968626) downloaded the original four assets anonymously on Ubuntu and Windows with certificate checking. Both runners matched the recorded SHA-256 values and the annotated tag's source commit.
 - **Not claimed:** compatibility beyond Windows with TouchDesigner 2025.32440; an open-source license.
 
 ## 1.0.1 release candidate: one-click Codex (owner D27)
@@ -298,10 +298,10 @@ Evidence is in the [validation index](validation-index.md#2026-11-25-v101-releas
 - **Published:** GitHub Release [v1.0.1](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.0.1) with `TDflowMCP.tox`, `TDflowMCP.json`, `SHA256SUMS` and `INSTALL.md`, marked latest. GitHub's own digests of the four assets equal the local hashes.
 - **Public download verified from outside the build network:** [verify-release run #1](https://github.com/jlopesmo/TDflowMCP/actions/runs/45726797505): on `ubuntu-latest` and `windows-latest`, an anonymous download of the four assets passed against the recorded hashes and the tag's commit.
 - **Repository:** the default branch is `main`, protected against force pushes and deletion (observed before the merge; not changed).
-- **Issue #3:** closed after the verification above. Issue #2 (the same download check for v1.0.0) is still open: see [roadmap B7](roadmap.md#open-blockers-and-owner-actions).
+- **Issue #3:** closed after the verification above. [Issue #2](https://github.com/jlopesmo/TDflowMCP/issues/2) tracks the v1.0.0 receipts and the remaining closure gate in [roadmap B7](roadmap.md#open-blockers-and-owner-actions).
 
 ## Versioned downloads — 2026-11-25
 
 - **Handoff audit:** `main` (the default branch) and `dev` matched at `1db52415943666419b0c68658dcdfe5d805e28f2`. Both tags still pointed to their recorded release commits. GitHub's public API showed both releases published, v1.0.1 as Latest and the four original assets on each. The v1.0.1 download workflow's Windows and Ubuntu jobs were confirmed successful.
 - **Owner-approved packaging:** tagged packages include the primary `TDflowMCP-vX.Y.Z.tox` and an identical `TDflowMCP.tox`. Local tests checked both filenames, the manifest and checksums, ZIP contents and verification using fixture bytes. [Decision](../decisions/0007-source-first-build.md#decision) and [validation](validation-index.md#2026-11-25-versioned-download-maintenance).
-- **Existing releases:** local copies of each tagged binary passed byte-equality and receipt checks. Publication and independent verification of the aliases are pending. The public v1.0.0 download still fails from the build network with certificate checking enabled. Issue #2 remains open.
+- **Existing releases:** v1.0.0 and v1.0.1 each have the versioned `.tox` and `SHA256SUMS-versioned`. GitHub's public API reports both binary digests equal to the recorded original for each tag, and all original asset IDs are present. Independent download verification of the aliases is pending the update to `verify-release` on `main`. [Validation](validation-index.md#2026-11-25-versioned-download-maintenance)
