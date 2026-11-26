@@ -38,3 +38,7 @@ Phase 1C acceptance: Claude Code connects using only the generated text, and a S
 ## v1.1 implementation note
 
 Skill 1.7 and Copy Agent Prompt guide agents through Python DAT previews and staged callback authoring using the existing tools. The Skill directs agents to leave TOP lock flags to the owner. Capability and scope checks continue to come from the server. See the [v1.1 record](../milestones/v1.1-developer-capabilities.md) for validation.
+
+## v1.2 implementation note
+
+Skill 1.8 and Copy Agent Prompt guide operators through local discovery, approval of control definitions, and separate approval of the expressions that connect those controls to the network. See the [v1.2 milestone](../milestones/v1.2-component-authoring.md).

@@ -38,7 +38,7 @@ EXECUTABLE_TYPES = frozenset({
 SAFE_CREATE_TYPES = frozenset({
     # TOPs
     "noiseTOP", "levelTOP", "nullTOP", "constantTOP", "rampTOP", "rectangleTOP", "circleTOP", "compositeTOP",
-    "overTOP", "underTOP", "addTOP", "multiplyTOP", "blurTOP", "transformTOP", "hsvadjustTOP", "crossTOP",
+    "overTOP", "underTOP", "addTOP", "multiplyTOP", "blurTOP", "transformTOP", "hsvadjustTOP", "crossTOP", "outTOP",
     "switchTOP", "flipTOP", "cropTOP", "resolutionTOP", "edgeTOP", "lumablurTOP", "thresholdTOP", "monochromeTOP",
     # CHOPs
     "constantCHOP", "noiseCHOP", "lfoCHOP", "mathCHOP", "nullCHOP", "filterCHOP", "lagCHOP", "mergeCHOP",
@@ -68,7 +68,7 @@ PARAM_DENYLIST = ("extension*", "promoteextension*", "extname*", "reinitextensio
                   "savebackup", "reloadcustom", "reloadbuiltin", "file", "folder", "plugin*") + tuple(
     f"ext{i}*" for i in range(10))                 # TD's internal names behind extension1.. (ext0object, ext0name…)
 PROTECTED_ROOTS = ("/sys", "/local", "/ui")
-ANCESTOR_FORBIDDEN_CHANGES = frozenset({"delete", "rename", "flags", "extension"})
+ANCESTOR_FORBIDDEN_CHANGES = frozenset({"delete", "rename", "flags", "extension", "custom_parameters", "component_output"})
 MAX_DELETE_WITHOUT_APPROVAL = 50
 MAX_OPS_PER_CALL = 50
 # Capabilities: dedicated, owner-issued permissions that are not operator scopes (ADR-0013, owner D18). An
@@ -216,6 +216,8 @@ class Policy:
         if t.action == "create":
             approvable = t.op_type in APPROVABLE_CREATE_TYPES and "execute" in role_actions
             if t.op_type not in SAFE_CREATE_TYPES and not approvable:   # allowlist; network/file/script never qualify
+                if t.op_type in ("scriptCHOP", "scriptSOP", "scriptTOP"):
+                    return False, "G2", "Script operator lifecycle authoring is unavailable. Consider an approved expression or Execute DAT."
                 if t.op_type in APPROVABLE_CREATE_TYPES:                  # dogfood 2026-11-23: say what would work
                     return False, "G2", (f"operator type {t.op_type} runs code: only an agent with the operator role "
                                          "can create it, with the user's approval, and it is created switched off")

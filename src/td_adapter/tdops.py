@@ -18,17 +18,21 @@ import json
 import os
 import posixpath
 import re
+import secrets
 import sys
 import time
 
 import td
 
+from tdflowmcp import approvals as APR
 from tdflowmcp import insights as INS
 from tdflowmcp import layout as LAYOUT
 from tdflowmcp import memory as MEM
 from tdflowmcp.engine import Adapter, Resolution, ToolFailure
-from tdflowmcp.policy import ACTIVATION_PARAMS, APPROVABLE_CREATE_TYPES, EXECUTABLE_TYPES, PARAM_DENYLIST, Target
+from tdflowmcp.policy import ACTIVATION_PARAMS, APPROVABLE_CREATE_TYPES, EXECUTABLE_TYPES, PARAM_DENYLIST, SAFE_CREATE_TYPES, Target
 from tdflowmcp.policy import _name_denied
+from tdflowmcp.store import _TOKENISH
+from tdflowmcp_td import custompars
 
 DATA_TAG = "tdflowdata"
 DAT_SOURCE_TYPES = frozenset({"tableDAT", "textDAT"}) | APPROVABLE_CREATE_TYPES
@@ -158,6 +162,7 @@ def _jsonable(v):
 class TDAdapter(Adapter):
     def __init__(self, comp, root_fn, store_fn):
         self.comp = comp
+        self._custom_runtime = secrets.token_hex(16)
         self.root_fn = root_fn                   # current Projectroot (main thread)
         self.store_fn = store_fn                 # current Store (for DAT snapshots)
         self.protected = {}                      # op path -> "instance" | "tdflowproject"
@@ -227,6 +232,8 @@ class TDAdapter(Adapter):
             return Resolution([self._facts(o, "read")], {"op": o})
         if k == "set_params":
             return self._resolve_params(args)
+        if k == "custom_params":
+            return self._resolve_custom_params(args)
         if k == "create":
             return self._resolve_create(args)
         if k == "copy":
@@ -255,7 +262,13 @@ class TDAdapter(Adapter):
         if k == "delete":
             o = self._op(args["path"])
             n = 1 + (len(o.findChildren()) if o.isCOMP else 0)
-            return Resolution([self._facts(o, "delete", change="delete", count=n)], {"op": o, "count": n})
+            targets = [self._facts(o, "delete", change="delete", count=n)]
+            context = {"op": o, "count": n}
+            if o.OPType == "outTOP":
+                parent = o.parent()
+                targets.append(self._facts(parent, "update", change="component_output"))
+                context["validation_failure"] = self._output_in_use(parent)
+            return Resolution(targets, context)
         if k == "wire":
             src, dst = self._op(args["src"]), self._op(args["dst"])
             si, di = int(args.get("src_index", 0)), int(args.get("dst_index", 0))
@@ -264,10 +277,15 @@ class TDAdapter(Adapter):
             if src.family != dst.family:
                 raise ToolFailure("INVALID_ARGS", "src and dst must be the same operator family")
             ts = [self._facts(dst, "update", change="wire"), self._facts(src, "read")]
+            context = {"src": src, "dst": dst, "si": si, "di": di, "output_parent": None}
+            if dst.OPType == "outTOP":
+                parent = dst.parent()
+                ts.append(self._facts(parent, "update", change="component_output"))
+                context.update(output_parent=parent.path, validation_failure=self._output_in_use(parent))
             if dst.family == "DAT" or dst.OPType in EXECUTABLE_TYPES:
                 # Data wired into a DAT can be evaluated as Python downstream (review 6, H1): execute.
                 ts.append(self._facts(dst, "execute", change="wire"))
-            return Resolution(ts, {"src": src, "dst": dst, "si": si, "di": di})
+            return Resolution(ts, context)
         if k == "dat_text":
             o = self._op(args["path"], "DAT")
             if not o.isDAT:
@@ -303,6 +321,32 @@ class TDAdapter(Adapter):
                 context["approval_facts"].append(["callback_state_sha256", _state_sha(self._callback_state(o))])
             return Resolution(ts, context)
         raise ToolFailure("INVALID_ARGS", "unsupported tool")
+
+    @staticmethod
+    def _output_in_use(parent):
+        if any(conn.connections for conn in parent.outputConnectors):
+            return ToolFailure("COMP_OUTPUT_IN_USE", "The owner must disconnect the enclosing component's output before changing it.")
+        return None
+
+    def _resolve_custom_params(self, args):
+        o = self._op(args["path"], "component")
+        targets = [self._facts(o, a, change="custom_parameters") for a in ("read", "update", "execute")]
+        context = {"op": o}
+        try:
+            if o.OPType not in ("baseCOMP", "containerCOMP"):
+                raise ToolFailure("INVALID_ARGS", "Use custom definition editing on a Base or Container COMP.")
+            before, after = custompars.plan(o, args)
+            before_sha, after_sha = _state_sha(before), _state_sha(after)
+            text = json.dumps(before, ensure_ascii=True)
+            if len(text) > 32000:
+                raise ToolFailure("INVALID_ARGS", "The current definitions are too large to snapshot safely.")
+            if any(_TOKENISH.search(value) for value in APR._strings((before, after))):
+                raise ToolFailure("APPROVAL_REFUSED", "The definitions contain credential-shaped text. Review them in TouchDesigner.")
+            context.update(before=before, after=after, snapshot=(o.path, int(o.id), text, before_sha, after_sha),
+                           approval_facts=[["custom_definition_state", before_sha], ["op_id", int(o.id)]])
+        except ToolFailure as failure:
+            context["validation_failure"] = failure
+        return Resolution(targets, context)
 
     def _resolve_params(self, args):
         o = self._op(args["path"])
@@ -408,10 +452,14 @@ class TDAdapter(Adapter):
             raise ToolFailure("INVALID_ARGS", f"{parent.path}/{args['name']} already exists")
         path = parent.path.rstrip("/") + "/" + args["name"]
         t = [self._facts(None, "create", path=path, op_type=args["type"])]
+        context = {"parent": parent, "cls": cls, "path": path, "approval_facts": [["parent_op_id", int(parent.id)]]}
+        if args["type"] == "outTOP":
+            if parent.OPType != "baseCOMP" or parent.outputConnectors:
+                context["validation_failure"] = ToolFailure("INVALID_ARGS", "A managed Out TOP can be the first output of a Base COMP.")
+            t.append(self._facts(parent, "update", change="component_output"))
         if args["type"] in EXECUTABLE_TYPES:
             t.append(self._facts(None, "execute", path=path, op_type=args["type"]))
-        return Resolution(t, {"parent": parent, "cls": cls, "path": path,
-                              "approval_facts": [["parent_op_id", int(parent.id)]]})
+        return Resolution(t, context)
 
     # ---- execute -------------------------------------------------------------------------------
     def _stack(self):
@@ -480,6 +528,30 @@ class TDAdapter(Adapter):
         return {"path": o.path, "operators": rows, "total": len(shown),
                 "next_offset": off + lim if off + lim < len(shown) else None, "filtered": len(kids) - len(shown)}
 
+    def _t_list_operator_types(self, args, res, label, readable):
+        purpose = {"baseCOMP": "Group a reusable operator network", "constantTOP": "Generate a solid color texture",
+                   "noiseTOP": "Generate procedural noise textures", "levelTOP": "Adjust image brightness and opacity",
+                   "outTOP": "Expose the first texture output from a Base COMP",
+                   "nullTOP": "Name a texture output inside a network", "multiplyTOP": "Multiply image and color values",
+                   "noiseCHOP": "Generate procedural channels", "textDAT": "Hold authored Python or text",
+                   "parameterexecuteDAT": "Respond to parameter changes with an approved callback",
+                   "executeDAT": "Run an approved frame or project callback"}
+        query = args.get("query", "").casefold().split()
+        wanted_family = args.get("family")
+        rows = []
+        for name in sorted(SAFE_CREATE_TYPES | APPROVABLE_CREATE_TYPES):
+            family = re.search(r"[A-Z]+$", name).group()
+            summary = purpose.get(name, "")
+            if ((wanted_family and wanted_family != family) or not isinstance(getattr(td, name, None), type)
+                    or not all(term in (name + " " + summary).casefold() for term in query)):
+                continue
+            rows.append({"type": name, "family": family, "purpose": summary,
+                         "creation": "approval_required" if name in APPROVABLE_CREATE_TYPES else "scoped"})
+        off, limit = args.get("offset", 0), args.get("limit", 30)
+        return {"path": res.context["op"].path, "td_build": str(td.app.build), "types": rows[off:off + limit],
+                "total": len(rows), "next_offset": off + limit if off + limit < len(rows) else None,
+                "note": "Catalog types are present in this runtime. Creation checks your role, scope and destination."}
+
     def _conn_paths(self, ops, readable):
         facts = [self._facts(x, "read") for x in ops if x is not None]
         vis = {t.path for t in readable(facts)}
@@ -528,6 +600,10 @@ class TDAdapter(Adapter):
             r["default"] = _jsonable(g("default"))
             if g("isMenu", False) and not g("menuSource", ""):
                 r["menu"] = list(g("menuNames", []) or [])[:50]
+                if r["custom"]:
+                    r["menu_labels"] = list(g("menuLabels", []) or [])[:50]
+            if r["custom"] and r["style"] in ("Float", "Int"):
+                r["slider_range"] = [g("normMin"), g("normMax")]
             rows.append(r)
         off, lim = int(args.get("offset", 0)), int(args.get("limit", 100))
         return {"path": o.path, "parameters": rows[off:off + lim], "total": len(rows),
@@ -738,7 +814,50 @@ class TDAdapter(Adapter):
                           "reversible": "td_undo" if stack else "no"}}
         if staged:
             out["staged_inactive"] = True                                  # checked inside do(), rolled back if not
+        if args["type"] == "outTOP":
+            out["_audit"]["output_parent"] = parent.path
         return out
+
+    def _apply_custom(self, o, page, before, after, label):
+        names = list(before["parameters"])
+        undo = td.ui.undo
+        undo.startBlock(label)
+        try:
+            try:
+                custompars.apply(o, page, after)
+                if custompars.snapshot(o, page, names) != after:
+                    raise ValueError("definition differs from plan")
+            except Exception:
+                restored = False
+                try:
+                    custompars.apply(o, page, before)
+                    restored = custompars.snapshot(o, page, names) == before
+                except Exception:
+                    pass
+                if restored:
+                    raise ToolFailure("EXECUTION_FAILED", "TouchDesigner refused the definition. The prior state was restored.",
+                                      restored=True, _audit={"custom_definition_restored": True}) from None
+                raise ToolFailure("OUTCOME_UNKNOWN", "Definition recovery could not be verified. Check the component in TouchDesigner.",
+                                  restored=False, _audit={"custom_definition_restored": False}) from None
+        finally:
+            try:
+                undo.endBlock()
+            except Exception:
+                raise ToolFailure("OUTCOME_UNKNOWN", "TouchDesigner did not close the definition edit. Check the component.") from None
+
+    def _t_edit_custom_parameters(self, args, res, label, readable):
+        ctx = res.context
+        before, after, o = ctx["before"], ctx["after"], ctx["op"]
+        snap = ctx.get("planned_snapshot")
+        if not ctx.get("snapshot_id") or snap != ctx["snapshot"]:
+            raise ToolFailure("PRECONDITION_CHANGED", "The component changed before its recovery snapshot was recorded.")
+        page = args["page"]
+        self._apply_custom(o, page, before, after, label)
+        return {"path": o.path, "page": page, "parameters": after["order"],
+                "_audit": {"kind": "custom_parameters", "path": o.path, "op_id": int(o.id), "page": page,
+                           "names": list(before["parameters"]), "before_sha": snap[3], "after_sha": snap[4],
+                           "runtime": self._custom_runtime, "snapshot": ctx["snapshot_id"], "stack": self._stack(),
+                           "reversible": "snapshot"}}
 
     # ---- Phase 3: experiments and project save -------------------------------------------------
     def _experiment_origin(self, e):
@@ -900,12 +1019,13 @@ class TDAdapter(Adapter):
     def _t_delete_operator(self, args, res, label, readable):
         o = res.context["op"]
         path, typ = o.path, o.OPType
+        output_parent = o.parent().path if typ == "outTOP" else None
         _, stack = self._mutate(label, o.destroy)
         if td.op(path) is not None:
             raise ToolFailure("EXECUTION_FAILED", "the operator still exists")
         return {"deleted": path, "count": res.context["count"],
                 "_audit": {"kind": "delete", "path": path, "type": typ, "stack": stack,
-                           "reversible": "td_undo" if stack else "no"}}
+                           "output_parent": output_parent, "reversible": "td_undo" if stack else "no"}}
 
     def _wired(self, src, dst, di):
         conns = dst.inputConnectors[di].connections
@@ -920,7 +1040,7 @@ class TDAdapter(Adapter):
             raise ToolFailure("EXECUTION_FAILED", "the wire was not created")
         return {"src": src.path, "dst": dst.path, "src_index": si, "dst_index": di,
                 "_audit": {"kind": "connect", "src": src.path, "dst": dst.path, "di": di, "before": before,
-                           "stack": stack, "reversible": "td_undo" if stack else "no"}}
+                           "stack": stack, "output_parent": c["output_parent"], "reversible": "td_undo" if stack else "no"}}
 
     def _t_disconnect(self, args, res, label, readable):
         c = res.context
@@ -930,7 +1050,7 @@ class TDAdapter(Adapter):
         _, stack = self._mutate(label, lambda: dst.inputConnectors[di].disconnect())
         return {"src": src.path, "dst": dst.path, "dst_index": di,
                 "_audit": {"kind": "disconnect", "src": src.path, "dst": dst.path, "di": di, "stack": stack,
-                           "reversible": "td_undo" if stack else "no"}}
+                           "output_parent": c["output_parent"], "reversible": "td_undo" if stack else "no"}}
 
     def _t_set_dat_text(self, args, res, label, readable):
         o, text = res.context["op"], args["text"]
@@ -958,6 +1078,8 @@ class TDAdapter(Adapter):
         kind = d.get("kind")
         if kind == "dat_text":
             return self._undo_text(d, snapshot)
+        if kind == "custom_parameters":
+            return self._undo_custom(record, snapshot)
         if not d.get("stack") or self._stack() != d.get("stack"):     # None/unrecorded is never 'unchanged'
             raise ToolFailure("UNDO_CONFLICT", "other changes happened since (or TouchDesigner was restarted)")
         if kind == "set_params":
@@ -968,6 +1090,12 @@ class TDAdapter(Adapter):
                         (not _has_dat_source(o) or callback_sha != _state_sha(self._callback_state(o))))
                     or (not record.get("approval_id") and any(p["mode"] != "CONSTANT" for p in d.get("prev", {}).values()))):
                 raise ToolFailure("UNDO_CONFLICT", "The parameter target or its callback changed since the edit.")
+        if d.get("output_parent"):
+            parent = self._op(d["output_parent"], "component")
+            if self.path_facts(parent.path) != ("", ""):
+                raise ToolFailure("UNDO_CONFLICT", "The output's component has become protected.")
+            if self._output_in_use(parent):
+                raise ToolFailure("UNDO_CONFLICT", "The output is in use outside its component.")
         td.ui.undo.undo()
         if kind == "promote":
             # TouchDesigner's undo does not revert tags or storage: mark the restored copy as an experiment again.
@@ -982,6 +1110,28 @@ class TDAdapter(Adapter):
                 except Exception:
                     pass                                  # _verify below reports it as unverified
         return {"undone": True, "verified": self._verify(d)}
+
+    def _undo_custom(self, record, snapshot):
+        d = record["detail"]
+        o = td.op(d["path"])
+        if (not record.get("approval_id") or d.get("runtime") != self._custom_runtime or o is None
+                or int(o.id) != d.get("op_id") or self.path_facts(o.path) != ("", "")
+                or d.get("stack") is None or self._stack() != d["stack"]):
+            raise ToolFailure("UNDO_CONFLICT", "The component or project changed since the custom definition edit.")
+        if not snapshot or snapshot["restored_at"] or snapshot["path"] != o.path or snapshot["op_id"] != int(o.id):
+            raise ToolFailure("UNDO_FAILED", "The custom definition recovery snapshot is unavailable.")
+        try:
+            before = json.loads(snapshot["before_text"])
+            valid = isinstance(before, dict) and _state_sha(before) == snapshot["before_sha"] == d["before_sha"]
+        except (KeyError, TypeError, ValueError):
+            valid = False
+        if not valid:
+            raise ToolFailure("UNDO_FAILED", "The recovery snapshot differs from the audited definition.")
+        current = custompars.snapshot(o, d["page"], d["names"])
+        if not (_state_sha(current) == snapshot["after_sha"] == d["after_sha"]):
+            raise ToolFailure("UNDO_CONFLICT", "The custom definitions changed since the edit.")
+        self._apply_custom(o, d["page"], current, before, str(record["undo_label"]) + ":restore")
+        return {"undone": True, "verified": True}
 
     def _verify(self, d):
         kind, path = d.get("kind"), d.get("path")

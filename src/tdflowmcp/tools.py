@@ -34,7 +34,8 @@ from tdflowmcp import schema
 from tdflowmcp.policy import ACTIONS
 
 RESOLVERS = {"none", "project", "read_path", "read_children", "read_tree", "set_params", "create", "delete",
-             "wire", "dat_text", "undo", "memory", "script", "copy", "promote", "discard", "save", "lease"}
+             "wire", "dat_text", "undo", "memory", "script", "copy", "promote", "discard", "save", "lease",
+             "custom_params"}
 PATH = {"type": "string", "minLength": 1, "maxLength": 512, "pattern": r"^/[A-Za-z0-9_/]*$",
         "description": "Absolute operator path, e.g. /project1/geo1"}
 NAME = {"type": "string", "minLength": 1, "maxLength": 64, "pattern": r"^[A-Za-z_][A-Za-z0-9_]*$"}
@@ -141,6 +142,14 @@ def core_registry() -> Registry:
            ("read",), "read_children", "list_operators", read_only=True, idempotent=True))
     T(Tool("tdflow_get_operator", "Get operator", "Type, family, flags, inputs, outputs and errors of one operator.",
            obj({"path": PATH}, ["path"]), ("read",), "read_path", "get_operator", read_only=True, idempotent=True))
+    T(Tool("tdflow_list_operator_types", "Find operator types", "Search the local, TDflowMCP-supported operator "
+           "catalog by family, exact or partial name, or purpose. Read the actual parameters on an instance with "
+           "tdflow_get_parameters. Creation still checks your permissions and the destination.",
+           obj({"path": PATH, "query": {"type": "string", "maxLength": 80},
+                "family": {"type": "string", "enum": ["TOP", "CHOP", "SOP", "DAT", "MAT", "COMP", "POP"]},
+                "offset": {"type": "integer", "minimum": 0, "maximum": 1000},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 60}}, ["path"]),
+           ("read",), "read_children", "list_operator_types", read_only=True, idempotent=True))
     T(Tool("tdflow_get_parameters", "Get parameters", "Parameter constants, modes, expression source and defaults, "
            "optionally for one parameter page or only the named parameters. Expression, bind and export values "
            "are not evaluated. Use tdflow_get_errors for reported runtime errors.",
@@ -160,6 +169,24 @@ def core_registry() -> Registry:
                 "expressions": {"type": "object", "maxProperties": 50,
                                 "additionalProperties": {"type": "string", "maxLength": 2000}}}, ["path"]),
            ("update", "execute?", "read?"), "set_params", "set_parameters", idempotent=True, reversible="td_undo"))
+    custom_name = {"type": "string", "maxLength": 32, "pattern": r"^[A-Z][a-z0-9]*$"}
+    short_text = {"type": "string", "minLength": 1, "maxLength": 64}
+    choice = obj({"name": {"type": "string", "maxLength": 32, "pattern": r"^[a-z][a-z0-9_]*$"},
+                  "label": short_text}, ["name"])
+    definition = obj({"name": custom_name, "label": short_text,
+                      "type": {"type": "string", "enum": ["float", "int", "toggle", "menu", "string", "pulse"]},
+                      "default": {"type": ["boolean", "string", "number"], "maxLength": 512},
+                      "range": {"type": "array", "minItems": 2, "maxItems": 2,
+                                "items": {"type": "number", "minimum": -1e9, "maximum": 1e9}},
+                      "choices": {"type": "array", "minItems": 1, "maxItems": 16, "items": choice}}, ["name", "type"])
+    T(Tool("tdflow_edit_custom_parameters", "Edit custom controls", "Define or update constant scalar controls "
+           "on one Base or Container COMP parameter page. Provide definitions in display order or a complete "
+           "order for that page. Existing current values are kept. This requires scoped update, execute and exact-call "
+           "approval. Use approved expressions to connect behavior. Pulse controls are defined here and pulsed by the owner.",
+           obj({"path": PATH, "page": {"type": "string", "maxLength": 32, "pattern": r"^[A-Za-z][A-Za-z0-9 ]*$"},
+                "definitions": {"type": "array", "maxItems": 16, "items": definition},
+                "order": {"type": "array", "minItems": 1, "maxItems": 80, "items": custom_name}}, ["path", "page"]),
+           ("read", "update", "execute"), "custom_params", "edit_custom_parameters", reversible="snapshot"))
     T(Tool("tdflow_create_operator", "Create operator", "Create an operator by type and name inside a COMP. "
            "Without x and y it is placed to the right of the existing nodes (the answer gives its position). "
            "The six supported Execute DAT types need scoped execute and approval and start inactive. "

@@ -103,6 +103,9 @@
     "tdflowmcp_td.tdops": {
       "path": "src/td_adapter/tdops.py"
     },
+    "tdflowmcp_td.custompars": {
+      "path": "src/td_adapter/custompars.py"
+    },
     "tdflowmcp.approvals": {
       "path": "src/tdflowmcp/approvals.py"
     },
@@ -753,6 +756,7 @@
     "tdflow_capabilities",
     "tdflow_capture_top",
     "tdflow_connect",
+    "tdflow_edit_custom_parameters",
     "tdflow_create_operator",
     "tdflow_delete_operator",
     "tdflow_describe_network",
@@ -769,6 +773,7 @@
     "tdflow_handoff_resume",
     "tdflow_lease_scope",
     "tdflow_list_operators",
+    "tdflow_list_operator_types",
     "tdflow_project_info",
     "tdflow_session_list",
     "tdflow_save_project",

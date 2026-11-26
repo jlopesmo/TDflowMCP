@@ -193,6 +193,10 @@ def cp_codex_live(data, pid):
         T(f"live.{label}.PYTHON_PREVIEW_REPORTS_SYNTAX", received and preview.get("_isError") is False
           and (preview.get("python_validation") or {}).get("code") == "PYTHON_SYNTAX"
           and preview.get("text") == "hello", r=preview)
+        received, catalog = e.call("tdflow_list_operator_types", {"path": "/project1/fx", "family": "TOP",
+                                                                 "query": "procedural noise"})
+        T(f"live.{label}.FINDS_A_LOCAL_OPERATOR_TYPE", received and catalog.get("_isError") is False
+          and [row["type"] for row in catalog.get("types", [])] == ["noiseTOP"])
         if i == 0:
             ok, made = e.call("tdflow_create_operator", {"parent": "/project1/fx", "type": "constantTOP",
                                                          "name": "codex_probe"})

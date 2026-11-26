@@ -321,3 +321,9 @@ The reviewed `dev` head `516f012ad0e4a2b598b7602c36bc4b5e4f9a7c9f` merged into `
 The public release includes `TDflowMCP-v1.1.0.tox`, the identical `TDflowMCP.tox`, `TDflowMCP.json`, `SHA256SUMS` and `INSTALL.md`. Windows and Ubuntu runners independently downloaded and verified all five assets. The earlier release tags and all 12 prior asset IDs, sizes and GitHub digests matched their pre-release values. [Release](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.1.0) · [Hosted verification](https://github.com/jlopesmo/TDflowMCP/actions/runs/45775031074)
 
 Script CHOP, SOP and TOP lifecycle authoring remains deferred pending an owner-approved staging and callback ownership design. Approved Python runs in TouchDesigner with host access. Compatibility validation covered Windows and TouchDesigner 2025.32440 under the release-specific owner decision.
+
+## v1.2 component authoring
+
+The four-scenario audit ran through the published v1.1.0 package on Windows with TouchDesigner 2025.32440. Existing MCP tools built networks, ran approved Python and repaired a broken output. Custom control definition, native component output exposure and operator-type discovery were the main gaps. [Baseline matrix](../milestones/v1.2-component-authoring.md#verified-v110-baseline) · [Validation](validation-index.md#2026-11-26-v12-component-authoring)
+
+The v1.2.0 integration build passed the four component scenarios and governance checks on the same build. It exposes local operator discovery, bounded custom control definition and recovery, and an Out TOP connector on a Base COMP. The owner connects external consumers in TouchDesigner. The scoped project produced changed pixels through that connector when controls changed, and an edited custom parameter drove approved Python logic. [Candidate evidence](validation-index.md#2026-11-26-v12-component-authoring)

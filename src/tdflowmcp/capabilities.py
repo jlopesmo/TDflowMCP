@@ -67,7 +67,7 @@ CATALOG: Tuple[Cap, ...] = (
         ("tdflow_whoami", "tdflow_capabilities"), kind="identity",
         note="Every enabled agent can ask who it is and what it may do."),
     Cap("inspect", "inspect", "Read the project, operators, parameters, DAT text and errors",
-        ("tdflow_project_info", "tdflow_list_operators", "tdflow_get_operator", "tdflow_get_parameters",
+        ("tdflow_project_info", "tdflow_list_operators", "tdflow_list_operator_types", "tdflow_get_operator", "tdflow_get_parameters",
          "tdflow_describe_network", "tdflow_get_errors", "tdflow_get_dat_text"), ("read",),
         note="Only inside the agent's scopes; anything else is filtered out of the answers."),
     Cap("capture", "inspect", "Look at owner-locked TOP images", ("tdflow_capture_top",), ("read",),
@@ -82,6 +82,9 @@ CATALOG: Tuple[Cap, ...] = (
     Cap("expressions", "edit", "Set expressions and parameters that name operators or files",
         ("tdflow_set_parameters",), ("update", "execute"), approval="always",
         note="Checks expression syntax and simple operator references before requesting approval."),
+    Cap("custom_parameters", "edit", "Define custom controls on a component", ("tdflow_edit_custom_parameters",),
+        ("read", "update", "execute"), approval="always",
+        note="Review each set of definitions before it changes the component interface."),
     Cap("exec_text", "edit", "Write Python Text DAT modules and Execute DAT callbacks", ("tdflow_set_dat_text",),
         ("update", "execute"), approval="always", note="Preview and check Python before you approve. Execute DATs must be inactive to edit source."),
     # ---- creation ---------------------------------------------------------------------------------------------

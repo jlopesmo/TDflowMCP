@@ -126,11 +126,13 @@ A grant is `{subject: agent|role, scope, actions, effect: allow|deny, constraint
 | Set a parameter **constant** value | `update` (+ `param_denylist`) |
 | Replace an expression, bind or export with a constant | `update` and `execute`, because audited undo can restore the dynamic mode |
 | Set a parameter **expression**, **bind** or **export**, or change its mode to one of those | `update` **and** `execute` on the target (expressions evaluate Python) |
+| Add or edit bounded scalar custom definitions | `read`, `update` and `execute` on the Base or Container COMP, plus exact approval. Existing project callbacks can observe definitions and values. |
 | Write text into a DAT that TD executes: Execute/Script/callback DATs, any DAT referenced by a `callbacks`/`script`/extension parameter, or Text DATs used as modules | `update` **and** `execute` |
 | Create a plain operator | `create` on `parent/*` (+ `allowed_op_types`) |
 | Create an executable or network operator (Execute/Script/Web Client/TCP/UDP/WebSocket DATs, Script CHOP/SOP/TOP, Python-extension COMPs) | `create` **and** `execute`. These types are default-denied by `allowed_op_types` |
 | Pulse a parameter | `update`. Pulses that run scripts (e.g. Run/Reload on script ops) also need `execute` |
 | Wire or unwire | `update` on `dst`, `read` on `src` |
+| Create, delete or change a wire into an Out TOP | Normal create, delete or wire checks plus `update` on the enclosing COMP. Refuse edits when its output is externally connected. |
 | Delete | `delete` on `path/**` |
 | Undo an audited action | the inverse actions on the action's targets (create ↔ delete, update ↔ update) |
 | Save the `.toe` | `execute` on the project root and always approval (`tdflow_save_project`, Phase 3) |
@@ -167,6 +169,7 @@ The tool registry refuses a tool whose resolver doesn't declare its classificati
 - TouchDesigner 2025.32440 can cook a Script TOP when a tool reads dimensions or image bytes, including through a downstream TOP. Under the owner-approved v1.1 decision, both paths are restricted to the verified Windows runtime with TouchDesigner 2025.32440. The authorized main-thread step checks for a locked TOP with bypass off on the TOP and its ancestors before it reads the cached output. Other runtimes refuse capture and omit resolution-derived hints. TouchDesigner exposes the lock state, and the owner sets it directly. Existing approval-gated Python has access to the host.
 - Execute DAT trigger approvals bind the exact source, parameter settings, input identities and bypass state. The native viewer and browser show the complete callback source and settings without evaluating dynamic values. The private preview digest is matched at decision and bound into the approved facts. It is cleared from the approval row when the request closes. Callback source and activation are approved in separate calls. If the callback preview is refused, the owner can switch off Active on the Execute DAT in TouchDesigner.
 - An approval is usable with the requesting credential. Token revocation cancels its open requests in the same private database transaction. The engine reloads the in-memory token and checks policy and suspension again immediately before dispatch, after resolving and hashing the target state.
+- Custom definitions bind the COMP identity, current named control definitions, page order and runtime to the approval. Snapshots are durable before dispatch and reject credential-shaped text. Recovery checks the target, current state, runtime and native undo stack before restoring definitions and order. This restores the interface state. Existing project callbacks can have effects beyond that state. If recovery cannot be verified, the engine suspends further agent calls.
 
 ## 5. Code execution honesty
 
