@@ -146,9 +146,11 @@ def core_registry() -> Registry:
            obj({"path": PATH, "connectors": {"type": "boolean"}}, ["path"]),
            ("read",), "read_path", "get_operator", read_only=True, idempotent=True))
     T(Tool("tdflow_list_operator_types", "Find operator types", "Search the local, TDflowMCP-supported operator "
-           "catalog by family, exact or partial name, or purpose. Read the actual parameters on an instance with "
+           "catalog by family, exact or partial name, or purpose. Request guidance for selected parameter names, "
+           "styles and uses on the verified runtime. Read the actual parameters on an instance with "
            "tdflow_get_parameters. Creation still checks your permissions and the destination.",
            obj({"path": PATH, "query": {"type": "string", "maxLength": 80},
+                "guidance": {"type": "boolean"},
                 "family": {"type": "string", "enum": ["TOP", "CHOP", "SOP", "DAT", "MAT", "COMP", "POP"]},
                 "offset": {"type": "integer", "minimum": 0, "maximum": 1000},
                 "limit": {"type": "integer", "minimum": 1, "maximum": 60}}, ["path"]),

@@ -72,6 +72,9 @@
     "tdflowmcp.policy": {
       "path": "src/tdflowmcp/policy.py"
     },
+    "tdflowmcp.opguides": {
+      "path": "src/tdflowmcp/opguides.py"
+    },
     "tdflowmcp.protocol": {
       "path": "src/tdflowmcp/protocol.py"
     },

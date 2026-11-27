@@ -98,7 +98,9 @@ v1.3.0 was published after passive visual checks, independent review, and Window
 
 v1.4.0 completed the owner-connected component verification and scoped checkpoint recovery in [Issue #13](https://github.com/jlopesmo/TDflowMCP/issues/13). The tagged package and all five hosted assets passed verification. [Milestone](../milestones/v1.4-workflow-recovery.md) · [Release receipts](validation-index.md#v140-tagged-release)
 
-[Issue #14](https://github.com/jlopesmo/TDflowMCP/issues/14) follows v1.4. Its Script lifecycle prototype must pass independent review and gain explicit owner approval before any creation or activation policy changes. A/B Candidate Development Mode is outside both milestones.
+## v1.5 procedural authoring
+
+[Issue #14](https://github.com/jlopesmo/TDflowMCP/issues/14) follows v1.4. The disposable prototype did not establish the required Script staging or ownership boundary. The v1.5 path focuses on locally verified operator guidance and existing approved execution tools. Active Script authoring needs independent review and explicit owner approval of a validated design. [Milestone](../milestones/v1.5-procedural-authoring.md) · [Proposed ADR](../decisions/0018-script-operator-lifecycle.md)
 
 ## D28 — Codex acceptance and release of 1.0.1 (owner, GitHub Issue #3, 2026-11-25)
 
