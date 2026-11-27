@@ -102,6 +102,10 @@ v1.4.0 completed the owner-connected component verification and scoped checkpoin
 
 v1.5.0 delivered locally verified operator guidance and a procedural workflow using the existing approved execution tools. Tagged acceptance and independent verification of the five public downloads passed. The disposable prototype did not establish the required Script staging or ownership boundary. Active Script authoring needs independent review and explicit owner approval of a validated design. [Issue #14](https://github.com/jlopesmo/TDflowMCP/issues/14) · [Milestone](../milestones/v1.5-procedural-authoring.md) · [Proposed ADR](../decisions/0018-script-operator-lifecycle.md) · [Release receipts](validation-index.md#v150-tagged-release)
 
+## v1.6 Network Visual Inspection
+
+The owner approved Network Visual Inspection first, followed by separately gated Script lifecycle research after the v1.6 release. The installed-pane spike supports a scope-filtered diagram for the v1.6 implementation. [Issue #19](https://github.com/jlopesmo/TDflowMCP/issues/19) · [Issue #20](https://github.com/jlopesmo/TDflowMCP/issues/20) · [Milestone](../milestones/v1.6-network-vision.md)
+
 ## D28 — Codex acceptance and release of 1.0.1 (owner, GitHub Issue #3, 2026-11-25)
 
 The owner ran the hands-on check on `1.0.1rc1` and reported it passed ([Issue #3](https://github.com/jlopesmo/TDflowMCP/issues/3#issuecomment-7175371704)): OpenAI Codex selected, Connect Agent approved, the Codex chat in VS Code returned `tdflow_whoami`, TouchDesigner showed `Agent Connected — Ready` and `Codex 0.171.0`. Decided:

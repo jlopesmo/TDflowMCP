@@ -6,6 +6,8 @@ The v1.4 recovery checks extend the existing `tests/td/run_td_mcp_tests.py` suit
 
 The v1.5 guidance data lives in `src/tdflowmcp/opguides.py`. The disposable probe `tests/td/run_td_script_lifecycle_probe.py` gathers runtime parameter facts and Script staging observations. The component suite exercises the existing procedural authoring tools and new catalog response. [Milestone](../milestones/v1.5-procedural-authoring.md)
 
+The disposable Network Editor API probe is `tests/td/run_td_network_pane_probe.py`. [Milestone](../milestones/v1.6-network-vision.md)
+
 This map lists the repository's actual contents (Phase 1C). Planned directories are listed in [source-of-truth.md](../architecture/source-of-truth.md#directory-layout). **They do not exist yet.**
 
 | Path | Purpose | Governing doc |
