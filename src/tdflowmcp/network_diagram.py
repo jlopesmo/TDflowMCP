@@ -21,7 +21,7 @@ FAMILY_COLORS = {
 BACKGROUND = (248, 250, 252)
 INK = (23, 37, 56)
 WIRE = (75, 99, 121)
-LEADER = (110, 134, 158)
+LEADER = (149, 165, 181)
 GRID = (231, 236, 242)
 MARKER_WIDTH, MARKER_HEIGHT = 36, 24
 MARKER_OFFSETS = (
@@ -65,17 +65,21 @@ class _Canvas:
             start = 3 * (line * WIDTH + left)
             self.pixels[start:start + len(row)] = row
 
-    def line(self, start, end, rgb):
+    def line(self, start, end, rgb, *, dotted=False):
         x, y = start
         x2, y2 = end
         dx, dy = abs(x2 - x), -abs(y2 - y)
         step_x, step_y = (1 if x < x2 else -1), (1 if y < y2 else -1)
         error = dx + dy
         color = bytes(rgb)
+        steps = 0
         while True:
-            if 0 <= x < WIDTH and 0 <= y < HEIGHT:
+            if 0 <= x < WIDTH and 0 <= y < HEIGHT and (not dotted or steps % 7 < 2):
                 index = 3 * (y * WIDTH + x)
                 self.pixels[index:index + 3] = color
+                if not dotted and y + 1 < HEIGHT:
+                    index += 3 * WIDTH
+                    self.pixels[index:index + 3] = color
             if (x, y) == end:
                 break
             twice = 2 * error
@@ -85,6 +89,7 @@ class _Canvas:
             if twice <= dx:
                 error += dx
                 y += step_y
+            steps += 1
 
     def number(self, x, y, number):
         letters = str(number)
@@ -163,7 +168,7 @@ def _markers(canvas, nodes, points):
             raise RenderLimit("The diagram could not place all node labels.")
         labels.append((x, y, node))
         if (x, y) != point:
-            canvas.line(point, (x, y), LEADER)
+            canvas.line(point, (x, y), LEADER, dotted=True)
             canvas.rect(point[0] - 2, point[1] - 2, 5, 5, INK)
     for x, y, node in labels:
         left, top = x - MARKER_WIDTH // 2, y - MARKER_HEIGHT // 2

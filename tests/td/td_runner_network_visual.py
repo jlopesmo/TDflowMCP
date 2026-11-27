@@ -18,6 +18,7 @@ def _pane_state():
 
 
 def run(comp, ext, T, frames, until, checkpoint, R):
+    R["component_version"] = comp.par.Version.eval()
     fx = td.op("/project1").create(td.baseCOMP, "fx")
     fx.allowCooking = False
     graph = _node(fx, td.baseCOMP, "vision", 0, 0)
@@ -42,9 +43,16 @@ def run(comp, ext, T, frames, until, checkpoint, R):
     callback.par.op, callback.par.pars = source.path, "colorr"
     callback.par.valuechange, callback.par.active = True, True
     target = _node(graph, td.nullTOP, "jj_idle", 220, 160)
+    branches = []
     for i in range(10):
         cls = (td.nullTOP, td.nullCHOP, td.textDAT)[i % 3]
-        _node(graph, cls, f"node_{i:02d}", (i * 118) % 740 - 360, (i * 173) % 410 - 210)
+        if i == 3:
+            cls = td.switchTOP
+        branches.append(_node(graph, cls, f"node_{i:02d}", (i * 118) % 740 - 360, (i * 173) % 410 - 210))
+    for index, upstream in ((0, stage), (1, gain), (3, branches[0]), (4, branches[1]),
+                            (6, source), (7, control), (9, wrong)):
+        branches[index].inputConnectors[0].connect(upstream.outputConnectors[0])
+    branches[3].inputConnectors[1].connect(source.outputConnectors[0])
     hidden = _node(graph, td.constantTOP, "zz_private_fixture", 9000, 9000)
     protected = _node(graph, td.baseCOMP, "zz_protected_fixture", -9000, -9000)
     protected.tags.add("tdflowProject")

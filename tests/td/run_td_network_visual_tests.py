@@ -67,6 +67,10 @@ def inspect(data, work):
            and edge in scoped.get("edges", []) and exact.get("connectors", {}).get("inputs", {}).get("rows") == [
                {"index": 0, "peers": [{"path": path + "/aa_source", "index": 0}], "complete": True}
            ])
+    indexed = {"source": nodes.get("aa_source", {}).get("id"), "target": nodes.get("node_03", {}).get("id"),
+               "output_index": 0, "input_index": 1}
+    edges = scoped.get("edges", [])
+    gate.T("vision.mixed_family_branches_and_secondary_port", len(edges) == 11 and indexed in edges)
     _, limited, refused, _ = image_call(builder, path)
     gate.T("vision.shared_rate_limit", limited.get("code") == "RATE_LIMITED" and not refused)
     _, outside, refused, _ = image_call(reader, "/project1/fx")
@@ -106,10 +110,24 @@ def hidden_changed(data):
     gate.T("vision.revoked_credential_returns_no_image", revoked["status"] == 200 and status == 401 and not refused)
 
 
+def live_clients(data, work, project):
+    import network_vision_clients as clients
+
+    path, png = data["path"], RESULTS["before"][1]
+    if not png:
+        return {"repair_performed": False}
+    time.sleep(1.05)
+    EVIDENCE["codex_delivery"] = clients.codex_delivery(work, project, path)
+    EVIDENCE["claude_vision"] = clients.claude_interpretation(project, path, png)
+    repair = EVIDENCE["claude_repair"] = clients.claude_repair(project, path)
+    return {"repair_performed": repair["verified"]}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tox", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--live-clients", action="store_true")
     args = parser.parse_args()
     if any(gate.oslisteners.other_listeners(port, 0) for port in gate.base.PORTS):
         raise SystemExit("A TouchDesigner test port is already in use.")
@@ -121,10 +139,12 @@ def main():
     handlers = {"setup_ready": mcp.cp_setup_ready, "pair_approved": mcp.cp_pair_approved,
                 "vision_inspect": lambda data, _pid: inspect(data, work),
                 "vision_hidden_changed": lambda data, _pid: hidden_changed(data),
-                "vision_client": lambda _data, _pid: {"repair_performed": False}}
+                "vision_client": lambda data, _pid: live_clients(data, work, project) if args.live_clients
+                else {"repair_performed": False}}
     tox = args.tox.resolve(strict=True)
     result = gate.launch("network_visual", str(tox), str(run), str(project),
-                         {"TDFLOW_PRIVATE_ROOT": str(work / "private")}, handlers, deadline_s=300)
+                         {"TDFLOW_PRIVATE_ROOT": str(work / "private")}, handlers,
+                         deadline_s=780 if args.live_clients else 300)
     checks = result.get("tests", []) + gate.H["tests"]
     receipt = {"tox_sha256": hashlib.sha256(tox.read_bytes()).hexdigest(),
                "version": result.get("component_version"), "td_build": result.get("td_build"),

@@ -905,8 +905,9 @@ class TDAdapter(Adapter):
         overlaps = [ids for ids in locations.values() if len(ids) > 1][:8]
         return {"path": op.path, "representation": "rendered_network_diagram", "nodes": nodes, "edges": edges,
                 "partial": len(nodes) < len(visible) or partial_edges, "overlapping_nodes": overlaps,
-                "note": "IDs label the PNG. It shows authorized direct children and wires between shown nodes. "
-                        "An omitted wire does not establish that a port is unconnected. Confirm state with structured tools."}
+                "note": "Solid arrows show native wires between shown nodes. Dotted lines lead from a displaced "
+                        "label to its actual position. IDs match the structured node rows. An omitted wire does "
+                        "not establish that a port is unconnected. Confirm state with structured tools."}
 
     @staticmethod
     def _diagram_edges(allowed, by_path, deadline, limited):

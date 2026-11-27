@@ -1,4 +1,5 @@
 """MCP protocol conformance (2026-07-28 + legacy), tool registry/schemas, and the call engine."""
+from dataclasses import replace
 import json
 import os
 import shutil
@@ -9,7 +10,7 @@ from unittest.mock import patch
 from tdflowmcp import protocol, schema
 from tdflowmcp.engine import Adapter, Engine, Resolution, ToolFailure
 from tdflowmcp.identity import Identity
-from tdflowmcp.policy import Policy, Target
+from tdflowmcp.policy import Grant, Policy, Target
 from tdflowmcp.protocol import K_CAPS, K_VERSION, MODERN
 from tdflowmcp.store import Store
 from tdflowmcp.tools import Registry, RegistryError, Tool, core_registry
@@ -606,6 +607,22 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(result["structuredContent"]["code"], "DENIED")
         self.assertFalse(any(block["type"] == "image" for block in result["content"]))
         self.assertEqual(self.kinds(), ["intent", "outcome", "deny"])
+
+    def test_network_diagram_does_not_deliver_under_changed_child_grants(self):
+        path = "/project1/fx"
+        self.ad.resolve = lambda _tool, _args: Resolution([Target("read", path)], {"read_identity": 1})
+        self.ad.execute = lambda *_args: {"nodes": [], "edges": []}
+
+        def restrict_and_render(_nodes, _edges):
+            agent = self.idn.agent_for_token(self.tid)
+            deny = Grant(path + "/child", frozenset({"read"}), effect="deny")
+            self.idn.agents[agent.id] = replace(agent, grants=agent.grants + (deny,))
+            return b"image bytes"
+
+        with patch("tdflowmcp.engine.DIAGRAM.render", side_effect=restrict_and_render):
+            result = self.eng.call(self.tid, "tdflow_capture_network", {"path": path})
+        self.assertEqual(result["structuredContent"]["code"], "PRECONDITION_CHANGED")
+        self.assertFalse(any(block["type"] == "image" for block in result["content"]))
 
     def test_network_diagram_fails_closed_if_audit_outcome_is_unavailable(self):
         from tdflowmcp.store import AuditUnavailable
