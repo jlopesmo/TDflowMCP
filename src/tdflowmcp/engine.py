@@ -135,6 +135,7 @@ class Engine:
         self._suspended = suspended
         self.sessions = Sessions()
         self._sess_lock = threading.Lock()
+        self._undo_lock = threading.Lock()        # keep selection, restoration and outcome together on the handler thread
         self.clock = clock
         self.on_audit_failure = on_audit_failure or (lambda: None)
         self.main = main or (lambda fn: fn())
@@ -221,7 +222,12 @@ class Engine:
         if tool.resolver == "none":
             return self._run_identity_tool(tool, agent, args, base, t0)
         if tool.resolver == "undo":
-            return self._undo(tool, agent, base, t0, m)
+            if not self._undo_lock.acquire(blocking=False):
+                return self._deny(base, "UNDO_BUSY", "U0", "Another recovery is still in progress.", None)
+            try:
+                return self._undo(agent, args.get("expected_audit_seq"), base, t0, m)
+            finally:
+                self._undo_lock.release()
         if tool.resolver == "memory":
             return self._memory(tool, agent, args, base, t0, m)
         if tool.resolver == "lease":
@@ -286,11 +292,14 @@ class Engine:
             failure = ToolFailure("INTERNAL_ERROR", "The operation failed inside TouchDesigner.")
         dur = int((self.clock() - t0) * 1000)
         reversible = (detail or {}).get("reversible", tool.reversible) if outcome == "ok" else "no"
+        detail = dict(detail or {}, intent_seq=seq, reversible=reversible)
+        if reversible == "snapshot":
+            detail["undo_runtime"] = self._runtime_id
         # 4. Durable outcome before success is reported.
         try:
             oseq = self.store.append("outcome", decision="ALLOW", outcome=outcome, error_code=code,
                                      duration_ms=dur, undo_label=label if outcome == "ok" and reversible != "no" else None,
-                                     detail=dict(detail or {}, intent_seq=seq, reversible=reversible), **base)
+                                     detail=detail, **base)
         except AuditUnavailable:
             oseq = None
         if outcome == "unknown" or (oseq is None and (mutating or outcome == "ok")):
@@ -347,6 +356,7 @@ class Engine:
                                  "policy_version": verdict.policy_version, "targets": targets}}
             return {"deny": None, "targets": targets, "rule": verdict.rule_id, "policy_version": verdict.policy_version,
                     "snapshot": res.context.get("snapshot"),
+                    "mutation_identity": res.context.get("mutation_identity"),
                     "approval": {"rule": verdict.rule_id, "reason": verdict.reason,
                                  "reasons": self.policy.approval_reasons(res.targets),
                                  "facts": _approval_facts(res, review_sha, self._runtime_id), "review": review_text}}
@@ -354,7 +364,8 @@ class Engine:
             return {"deny": {"code": verdict.code, "rule": verdict.rule_id, "reason": verdict.reason,
                              "target": verdict.target, "policy_version": verdict.policy_version, "targets": targets}}
         return {"deny": None, "targets": targets, "rule": verdict.rule_id, "policy_version": verdict.policy_version,
-                "snapshot": res.context.get("snapshot"), "read_identity": res.context.get("read_identity")}
+                "snapshot": res.context.get("snapshot"), "read_identity": res.context.get("read_identity"),
+                "mutation_identity": res.context.get("mutation_identity")}
 
     def _approval_gate(self, tool: Tool, args: dict, agent: Agent, base: dict, plan: dict,
                        given_id: Optional[str]) -> Optional[dict]:
@@ -430,6 +441,8 @@ class Engine:
                                                       "nothing was executed. Retry.")
         if plan.get("read_identity") != res.context.get("read_identity"):
             raise ToolFailure("PRECONDITION_CHANGED", "An inspection target was replaced. Retry the request.")
+        if plan.get("mutation_identity") != res.context.get("mutation_identity"):
+            raise ToolFailure("PRECONDITION_CHANGED", "The mutation target or its connections changed. Retry the request.")
         if plan.get("approved"):
             review = res.context.get("approval_review")
             try:
@@ -766,42 +779,62 @@ class Engine:
                 return ev
         return None
 
-    def _undo(self, tool: Tool, agent: Agent, base: dict, t0: float, m=None) -> dict:
-        m = m or self.main
+    def _undo(self, agent: Agent, expected_seq: Optional[int], base: dict, t0: float, m) -> dict:
         try:
             rec = self.last_undoable(agent.id)
         except AuditUnavailable:
             return tool_error("AUDIT_UNAVAILABLE", "The audit store is unavailable, so nothing was undone.")
+        if expected_seq is not None and (rec is None or rec["seq"] != expected_seq):
+            return self._deny(base, "UNDO_CONFLICT", "U0", "That audit sequence is no longer your newest reversible change.", None)
         if rec is None:
             return self._deny(base, "NOTHING_TO_UNDO", "U0", "you have no audited change to undo", None)
         detail = _json(rec.get("detail"))
         if detail.get("reversible", "no") == "no":
             return self._deny(base, "NOT_REVERSIBLE", "U1", "that change is not reversible", None)
-        if detail.get("kind") == "custom_parameters":
-            names = detail.get("affected_parameters")
-            path = detail.get("path")
-            if (not isinstance(path, str) or not isinstance(names, list) or len(names) > 80
-                    or any(not isinstance(name, str) or not name for name in names)):
-                return self._deny(base, "UNDO_FAILED", "U1", "The custom control authorization record is unavailable.", None)
-            target = Target("update", path, change="custom_parameters")
-            targets = [target, *(replace(target, param=name) for name in names)]
+        kind = detail.get("kind")
+        uses_snapshot = kind in ("dat_text", "custom_parameters")
+        if uses_snapshot and detail.get("undo_runtime") != self._runtime_id:
+            return self._deny(base, "UNDO_CONFLICT", "U1", "The recovery snapshot belongs to another runtime.", None)
+        if kind == "promote" and detail.get("inert"):
+            effects = detail.get("checkpoint_undo_effects")
+            if (not isinstance(effects, list) or not 1 <= len(effects) <= self.policy.max_ops
+                    or any(not isinstance(effect, list) or len(effect) != 4
+                           or any(not isinstance(field, str) for field in effect)
+                           or effect[0] not in ("update", "delete") or not effect[1].startswith("/")
+                           for effect in effects)):
+                return self._deny(base, "UNDO_FAILED", "U1", "The checkpoint effect record is unavailable.", None)
+            targets = [Target(action=INVERSE[action], path=path, change=change, param=param)
+                       for action, path, change, param in effects]
         else:
-            targets = [Target(action=INVERSE[a], path=p) for a, p in _json(rec.get("targets"), [])]
-            targets = [t for t in targets if t.action != "read"]
+            targets = [Target(action=INVERSE[a], path=p) for a, p in _json(rec.get("targets"), []) if a != "read"]
+        if kind in ("custom_parameters", "set_params"):
+            previous = detail.get("prev")
+            names = detail.get("affected_parameters") if kind == "custom_parameters" else (
+                list(previous) if isinstance(previous, dict) and previous else None)
+            path = detail.get("path")
+            limit = 80 if kind == "custom_parameters" else 100
+            if (not isinstance(path, str) or not isinstance(names, list) or len(names) > limit
+                    or any(not isinstance(name, str) or not name for name in names)):
+                return self._deny(base, "UNDO_FAILED", "U1", "The parameter authorization record is unavailable.", None)
+            target = Target("update", path, change="custom_parameters" if kind == "custom_parameters" else "param")
+            targets = [t for t in targets if not (t.action == "update" and t.path == path)]
+            targets.extend([replace(target, param=name) for name in names] or [target])
         verdict = self.policy.evaluate(agent, targets or [Target("update", self.policy.root + "/__none__")])
-        base.update(targets=[[t.action, t.path] for t in targets], policy_version=verdict.policy_version)
+        base.update(targets=[[t.action, t.path] for t in targets[:50]], policy_version=verdict.policy_version)
         if not verdict.allow:
             return self._deny(base, verdict.code, verdict.rule_id, verdict.reason, verdict.target)
-        try:
-            seq = self.store.append("intent", decision="ALLOW", rule_id="U", detail={"undoes": rec["seq"]}, **base)
-        except AuditUnavailable:
-            return tool_error("AUDIT_UNAVAILABLE", "The audit store is unavailable, so nothing was undone.")
         snap = None
-        if detail.get("kind") in ("dat_text", "custom_parameters"):
+        if uses_snapshot:
             try:
                 snap = self.store.get_snapshot(int(detail["snapshot"]))
             except (AuditUnavailable, KeyError, TypeError, ValueError):
                 return tool_error("AUDIT_UNAVAILABLE", "The snapshot could not be read, so nothing was undone.")
+            if snap is None or snap["restored_at"]:
+                return self._deny(base, "UNDO_FAILED", "U1", "The recovery snapshot is unavailable.", None)
+        try:
+            seq = self.store.append("intent", decision="ALLOW", rule_id="U", detail={"undoes": rec["seq"]}, **base)
+        except AuditUnavailable:
+            return tool_error("AUDIT_UNAVAILABLE", "The audit store is unavailable, so nothing was undone.")
 
         def run_undo():
             if self.suspended():
@@ -829,8 +862,8 @@ class Engine:
             r = m(run_undo)
             if r.get("undone") and r.get("verified"):
                 outcome, code = "ok", None
-            else:                                   # never call an unverified restoration a success (owner rule)
-                outcome, code = "error", r.get("code") or ("UNDO_UNVERIFIED" if r.get("undone") else "UNDO_FAILED")
+            else:                                   # the adapter returned after a restore attempt without proof
+                outcome, code = "unknown", r.get("code") or "UNDO_UNVERIFIED"
         except ToolFailure as f:
             r = {"undone": False, "verified": False}
             outcome, code = ("unknown" if f.code == "OUTCOME_UNKNOWN" else "error"), f.code
@@ -838,12 +871,14 @@ class Engine:
             r, outcome, code = {"undone": False, "verified": False}, "aborted", _main_code(e)
         except MainUnknown as e:
             r, outcome, code = {"undone": False, "verified": False}, "unknown", _main_code(e)
+        except Exception:
+            r, outcome, code = {"undone": False, "verified": False}, "unknown", "OUTCOME_UNKNOWN"
         dur = int((self.clock() - t0) * 1000)
         try:
             if outcome == "ok" and snap is not None:
                 self.store.mark_restored(snap["id"])
             oseq = self.store.append("outcome", decision="ALLOW", outcome=outcome, error_code=code, duration_ms=dur,
-                                     detail={"undoes": rec["seq"] if outcome == "ok" else None,
+                                     detail={"intent_seq": seq, "undoes": rec["seq"] if outcome == "ok" else None,
                                              "attempted": rec["seq"], "verified": bool(r.get("verified"))}, **base)
         except AuditUnavailable:
             oseq = None
@@ -855,7 +890,9 @@ class Engine:
         if outcome != "ok":
             msg = {"UNDO_CONFLICT": "The change could not be undone: it is no longer the newest change (another edit, "
                                     "agent or a TouchDesigner restart happened since).",
-                   "UNDO_UNVERIFIED": "Undo ran, but the restored state could not be verified. Inspect the operator.",
+                   "UNDO_UNVERIFIED": "Undo could not be verified. Agents were suspended. Inspect the operator.",
+                   "UNDO_FAILED": "Recovery failed. Inspect the audit outcome and operator before attempting another change.",
+                   "OUTCOME_UNKNOWN": "TouchDesigner did not confirm recovery. Agents were suspended. Inspect the operator.",
                    "TDFLOW_NOT_COOKING": NOT_COOKING}
             return tool_error(code, msg.get(code, "The change could not be undone."), audit_seq=oseq,
                               undoes=rec["seq"], undone=bool(r.get("undone")), verified=False)

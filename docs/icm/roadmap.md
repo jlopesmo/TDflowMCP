@@ -94,6 +94,12 @@ v1.2.0 was published after both PR findings were resolved, independent security 
 
 v1.3.0 was published after passive visual checks, independent review, and Windows and Ubuntu CI passed. The clean tagged package passed acceptance on Windows with TouchDesigner 2025.32440 under the owner's release-specific exception. Both hosted jobs verified the five public assets. Active profiling and Script CHOP, SOP and TOP lifecycle authoring remain deferred. [Milestone](../milestones/v1.3-visual-diagnostics.md) · [Release receipts](validation-index.md#v130-tagged-release)
 
+## v1.4 connected workflows and recovery
+
+The owner authorized [Issue #13](https://github.com/jlopesmo/TDflowMCP/issues/13). Verify the existing component, experiment and undo workflows first, then complete scoped delivery and recovery and pass the v1.4 release gates. [Milestone](../milestones/v1.4-workflow-recovery.md)
+
+[Issue #14](https://github.com/jlopesmo/TDflowMCP/issues/14) follows v1.4. Its Script lifecycle prototype must pass independent review and gain explicit owner approval before any creation or activation policy changes. A/B Candidate Development Mode is outside both milestones.
+
 ## D28 — Codex acceptance and release of 1.0.1 (owner, GitHub Issue #3, 2026-11-25)
 
 The owner ran the hands-on check on `1.0.1rc1` and reported it passed ([Issue #3](https://github.com/jlopesmo/TDflowMCP/issues/3#issuecomment-7175371704)): OpenAI Codex selected, Connect Agent approved, the Codex chat in VS Code returned `tdflow_whoami`, TouchDesigner showed `Agent Connected — Ready` and `Codex 0.171.0`. Decided:

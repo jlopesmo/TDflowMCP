@@ -105,13 +105,13 @@ CATALOG: Tuple[Cap, ...] = (
         note="Off until you turn on Code Mode (Settings). You approve the exact script text every time."),
     # ---- experiments ------------------------------------------------------------------------------------------
     Cap("exp_create", "experiments", "Copy a component as an experiment", ("tdflow_experiment_create",),
-        ("read", "create"), note="Code inside the copy needs your approval; copied Execute DATs are switched off."),
+        ("read", "create"), note="Code in working copies needs approval. Inert checkpoints require a constant TOP network."),
     Cap("exp_promote", "experiments", "Replace the original with an experiment", ("tdflow_experiment_promote",),
-        ("delete", "update")),
+        ("delete", "update"), note="Checkpoint recovery checks lineage, tree state and each changed parameter or input."),
     Cap("exp_discard", "experiments", "Discard an experiment", ("tdflow_experiment_discard",), ("delete",)),
     # ---- undo -------------------------------------------------------------------------------------------------
     Cap("undo", "undo", "Undo its own last change", ("tdflow_undo",), ("update",),
-        note="Only its own newest change, and only while nothing else changed since."),
+        note="Pass the change's audit sequence to target it exactly. Check that the restoration was verified."),
     # ---- saving -----------------------------------------------------------------------------------------------
     Cap("save", "save", "Save the project file (like Ctrl+S)", ("tdflow_save_project",), ("execute",),
         approval="always", on_root=True,

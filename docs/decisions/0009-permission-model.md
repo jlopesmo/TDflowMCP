@@ -42,3 +42,9 @@ The v1.3 aggregate comparison applies this decision to both targets before any c
 ### v1.2 component authoring
 
 The owner authorized bounded custom control definitions through the existing policy and exact approval model. Defining or editing controls requires `read`, `update` and `execute` on the Base or Container COMP because a built network can react to changes. Hard denies cover protected ancestors. The allowed styles carry constant definitions. Existing expressions, bindings, dynamic menus and control groups are outside this edit path. Connector changes add `update` on the affected enclosing component. The first Out TOP of a Base COMP can expose a native connector. The owner connects that output to external consumers. See the [v1.2 milestone](../milestones/v1.2-component-authoring.md).
+
+The v1.4 implementation applies the existing inverse-action decision to the named parameters in a recorded change and checks them against current grants. An optional audit sequence restricts undo to an exact change under the same policy. [Tool surface](../architecture/tool-surface.md)
+
+Scoped connector reads identify the visible Out TOP and peer indexes under the existing read policy. Checkpoint recovery uses existing experiment grants, requires read on both inspected trees and checks each operator and parameter effect of restoration. It refuses a checkpoint whose lineage or captured state cannot be verified. [v1.4 milestone](../milestones/v1.4-workflow-recovery.md)
+
+**Owner decision, 2026-11-27.** v1.4 uses the owner-operated wiring fallback. The owner attaches the Base COMP output in TouchDesigner. The agent may inspect scoped connector evidence and eligible output. Agent-side external wiring remains gated by a separately verified execution and topology design. [Issue #13](https://github.com/jlopesmo/TDflowMCP/issues/13)

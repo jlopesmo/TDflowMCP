@@ -2,19 +2,19 @@
 name: tdflow-core
 description: Use when working in a TouchDesigner project through the TDflowMCP MCP server (tools named tdflow_*). Covers checking identity and scope first, reporting what you may do (tdflow_capabilities), reading before changing, small audited changes, verified undo, resuming and handing over tasks through project memory, the kill switch, denials and what never to do without the user.
 metadata:
-  tdflow-skill-version: "1.9"
+  tdflow-skill-version: "1.10"
 ---
 
 # Working in TouchDesigner with TDflowMCP
 
-TDflowMCP skill version 1.9 (tool surface 1). This file is guidance. The TDflowMCP server enforces
+TDflowMCP skill version 1.10 (tool surface 1). This file is guidance. The TDflowMCP server enforces
 every permission itself; nothing here grants access.
 
 ## 1. Start every session with `tdflow_whoami`
 - It returns your role, your scopes (which operator paths you may read or change, and which actions),
   the project root, `server_version`, `tool_surface_version` and `expected_skill_version`.
-- If `expected_skill_version` differs from this skill's version (1.9), tell the user: "The TDflowMCP
-  Skills on this computer are version 1.9 but the component expects <version>. Update them from the
+- If `expected_skill_version` differs from this skill's version (1.10), tell the user: "The TDflowMCP
+  Skills on this computer are version 1.10 but the component expects <version>. Update them from the
   component's Setup page." Then continue carefully, trusting the server's answers over this file.
 - Work only inside your scopes. Do not probe paths outside them: denials are recorded in the audit log.
 - For reusable components, use `tdflow_list_operator_types` for suitable local types and `tdflow_get_parameters`
@@ -70,11 +70,16 @@ every permission itself; nothing here grants access.
   access to TouchDesigner and the host. Script CHOP, SOP and TOP creation is unavailable.
   If the callback preview is refused, ask the owner to switch off Active on that DAT in TouchDesigner.
 - Only Table and Text DATs tagged `tdflowdata` by the user support editing without execute and code approval.
-- To try something risky, copy the component first: `tdflow_experiment_create` (path, name) makes a copy
-  next to it. Work on the copy, then `tdflow_experiment_promote` it to replace the original, or
-  `tdflow_experiment_discard` it. With `inert: true` the copy is a snapshot that does not cook; promoting it
-  brings back its operators and parameters (executable operators stay switched off until they are switched
-  on with approval, and wiring is reported in `connections_lost`).
+- To try a change separately, use `tdflow_experiment_create` to copy a component next to the original.
+  Work on the copy, then use `tdflow_experiment_promote` or `tdflow_experiment_discard`.
+  For an isolated constant TOP network, `inert: true` creates a cook-disabled component checkpoint.
+  Restore only a checkpoint that still matches the original lineage in the running project. If the
+  restore is refused, show the conflict and ask the owner to inspect it in TouchDesigner.
+  Check `connections_lost` after promoting a working experiment.
+- To verify owner wiring, call `tdflow_get_operator` with `connectors: true` on the Base COMP and consumer.
+  Check the exposed Out TOP and the peer paths and indexes. A row with `complete: false` has unavailable
+  peer evidence. The owner makes the external connection in TouchDesigner. Reinspect the exact input,
+  then check the control's effect with owner-observed output or eligible locked TOP evidence.
 - `tdflow_capture_top` returns an owner-locked TOP's image (one per second) on Windows with TouchDesigner
   2025.32440. For `TOP_LOCK_REQUIRED`, ask the owner to lock the output TOP in TouchDesigner and switch off
   bypass on it and its containing components. Leave lock flags to the owner, including when you have Python
@@ -109,8 +114,11 @@ every permission itself; nothing here grants access.
   stop did run; check `log`.
 
 ## 3. Undo
-- `tdflow_undo` undoes your own newest change, and only while TouchDesigner's undo history is exactly as
-  it was right after that change. Check `verified` in the answer.
+- Keep the mutation's `audit_seq` and pass it as `expected_audit_seq` to `tdflow_undo`. The server
+  refuses recovery if that change is no longer your newest reversible one. Check `verified` and
+  re-inspect the affected state. Native undo requires an unchanged TouchDesigner undo stack. Durable
+  DAT and control snapshots require the same running component and a matching recorded target.
+- If the server reports `UNDO_BUSY`, wait for the pending recovery to finish and inspect its outcome.
 - `UNDO_CONFLICT` means something else changed since (often the user). Do not try to force it: describe
   the situation and ask the user what they want.
 

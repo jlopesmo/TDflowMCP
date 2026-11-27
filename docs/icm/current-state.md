@@ -349,3 +349,13 @@ The candidate passed the full packaged regression and independent review. In a d
 The owner merged PR #11 as `dace425b07314354468dbac75dab470d2b8f4374`. The merge tree matched the reviewed candidate, Windows and Ubuntu CI passed, and the annotated `v1.3.0` tag points to that commit. The clean tagged package passed the full TouchDesigner acceptance suite on Windows with 2025.32440. [Release PR](https://github.com/jlopesmo/TDflowMCP/pull/11) · [Main CI](https://github.com/jlopesmo/TDflowMCP/actions/runs/45867953194)
 
 The GitHub Release contains the versioned and byte-identical compatibility binaries, build manifest, checksums, and installation guide. GitHub-hosted Windows and Ubuntu jobs anonymously downloaded and verified all five assets. [Public release](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.3.0) · [Release receipts](validation-index.md#v130-tagged-release)
+
+## v1.4 connected workflows and recovery
+
+The first `1.4.0.dev1` batch extends `tdflow_undo` with an optional exact audit sequence. Recovery rechecks current named-parameter grants, records the outcome against the intent, and suspends agents if it cannot verify the result. Durable DAT and control recovery is restricted to the running component that recorded the snapshot. [Development evidence](validation-index.md#v14-recovery-development)
+
+The external Base COMP output connection remains owner-operated. Opt-in connector inspection returned the exposed Out TOP and exact wire indexes. The disposable fixture verified the owner-made wire and control-driven output, observed unchanged cook counters during inspection, and hid the out-of-scope peer. [Development evidence](validation-index.md#v14-connected-workflow-candidate)
+
+Inert experiment recovery verifies the same live origin and copy, a bounded constant TOP tree, and the checkpoint's recorded state. A modified checkpoint, dynamic tree, or replaced origin was refused in the disposable harness. The corrected package verified current named-parameter denials during both restoration and its undo. The allowed operations preserved the unrelated operator and grants. The release gates are tracked in [the v1.4 milestone](../milestones/v1.4-workflow-recovery.md).
+
+The owner approved external wiring by the owner with scoped agent verification and a v1.4.0-only compatibility exception for Windows with TouchDesigner 2025.32440. The source version is `1.4.0`. The release requires the reviewed PR, an accepted clean tagged package, and verified hosted downloads. [Release procedure](../operations/verification-and-release.md)

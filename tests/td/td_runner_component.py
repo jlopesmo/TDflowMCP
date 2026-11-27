@@ -77,7 +77,20 @@ def run(comp, ext, T, frames, until, checkpoint, R):
     T("D.controls", ("Amount" in names) == (not baseline), controls=names)
     T("D.component_output", bool(reusable.op("output") and reusable.outputConnectors) == (not baseline))
     if not baseline:
-        consumer = consume(network, reusable)
+        consumer = network.create(td.nullTOP, reusable.name + "_consumer")
+        observed = reusable.op("output"), consumer
+        for node in observed:
+            node.viewer = False
+        yield frames(3)
+        before_cooks = [node.totalCooks for node in observed]
+        yield checkpoint("component_external_wire", {"source": reusable.path, "consumer": consumer.path})
+        T("D.refused_wire_leaves_input_empty", not consumer.inputConnectors[0].connections)
+        T("D.refused_wire_leaves_cook_counts", before_cooks == [node.totalCooks for node in observed])
+        consumer.inputConnectors[0].connect(reusable.outputConnectors[0])
+        before_cooks = [node.totalCooks for node in observed]
+        if requested.get("verify_connectors"):
+            yield checkpoint("component_external_wire_verified", {"source": reusable.path, "consumer": consumer.path})
+            T("D.connector_reads_are_passive", before_cooks == [node.totalCooks for node in observed])
         consumer.cook(force=True)
         before = float(consumer.numpyArray()[0, 0, 0])
         reusable.par.Amount = .75
@@ -111,6 +124,8 @@ def run(comp, ext, T, frames, until, checkpoint, R):
             adapter.apply = apply
         T("definitions.rollback_removed_injected_page", all(p.name != "Rollback" for p in definition_probe.customPages))
         yield from control_review_tests(network, ext, T, checkpoint)
+        if requested.get("verify_connectors"):
+            yield from checkpoint_guard(network, ext, T, checkpoint)
         yield checkpoint("component_definition_revocation", {})
         T("definitions.revoked_owner_approval_left_no_page", all(p.name != "Revoked" for p in definition_probe.customPages))
         yield from script_probe(network, T, frames)
@@ -156,6 +171,46 @@ def control_review_tests(network, ext, T, checkpoint):
       and probe.par.Slot80.label == "Last slot")
     yield checkpoint("component_page_undo", {})
     T("definitions.undo_restores_full_page_order", [par.name for par in page.pars] == expected)
+
+
+def checkpoint_guard(network, ext, T, checkpoint):
+    from dataclasses import replace
+
+    original = network.create(td.baseCOMP, "checkpoint_owned")
+    source = original.create(td.noiseTOP, "source")
+    unrelated = network.create(td.constantTOP, "checkpoint_neighbor")
+    unrelated.par.colorr = .125
+    data = {"original": original.path, "checkpoint": network.path + "/checkpoint_copy"}
+    yield checkpoint("component_checkpoint_prepare", data)
+    identity = ext.identity
+    agent = next(a for a in identity.agents.values() if a.display_name.startswith("Agent E"))
+    restricted = replace(agent, grants=tuple(
+        replace(grant, param_denylist=("amp",)) for grant in agent.grants))
+    identity.agents[agent.id] = restricted
+    try:
+        yield checkpoint("component_checkpoint_denied", data)
+        T("checkpoint.denial_keeps_original_and_copy",
+          source.par.amp.val == .75 and network.op("checkpoint_copy") is not None)
+    finally:
+        identity.agents[agent.id] = agent
+    receipt = yield checkpoint("component_checkpoint_allowed", data)
+    restored = network.op("checkpoint_owned")
+    T("checkpoint.verified_recovery_preserves_neighbor",
+      restored.op("source").par.amp.val == .5 and network.op("checkpoint_copy") is None
+      and unrelated.par.colorr.val == .125 and identity.agents[agent.id].grants == agent.grants)
+    undo_data = {**data, "audit_seq": receipt.get("audit_seq")}
+    identity.agents[agent.id] = restricted
+    try:
+        yield checkpoint("component_checkpoint_undo_denied", undo_data)
+        T("checkpoint.denied_undo_preserves_restored_network",
+          restored.op("source").par.amp.val == .5 and network.op("checkpoint_copy") is None)
+    finally:
+        identity.agents[agent.id] = agent
+    yield checkpoint("component_checkpoint_undo_allowed", undo_data)
+    T("checkpoint.verified_undo_preserves_neighbor",
+      network.op("checkpoint_owned").op("source").par.amp.val == .75
+      and network.op("checkpoint_copy").allowCooking is False and unrelated.par.colorr.val == .125
+      and identity.agents[agent.id].grants == agent.grants)
 
 
 def script_probe(network, T, frames):

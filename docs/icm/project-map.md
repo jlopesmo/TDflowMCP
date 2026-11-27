@@ -2,6 +2,8 @@
 
 The visual diagnostics workflow fixture is `tests/td/run_td_diagnostic_tests.py` with its in-process driver `tests/td/td_runner_diagnostics.py`. It uses disposable projects and the existing MCP harness. [Milestone](../milestones/v1.3-visual-diagnostics.md)
 
+The v1.4 recovery checks extend the existing `tests/td/run_td_mcp_tests.py` suite. The component suite pairs an external wire refusal with an owner-connected consumer and verifies the custom control's effect. [Milestone](../milestones/v1.4-workflow-recovery.md)
+
 This map lists the repository's actual contents (Phase 1C). Planned directories are listed in [source-of-truth.md](../architecture/source-of-truth.md#directory-layout). **They do not exist yet.**
 
 | Path | Purpose | Governing doc |

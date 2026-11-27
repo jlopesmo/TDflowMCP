@@ -106,6 +106,8 @@ def run(mode, comp, ext, T, frames, until, checkpoint, R):
 def open_and_pair(comp, ext, T, frames, until, checkpoint):
     comp.par.Opensetup.pulse()
     yield until(lambda: comp.par.Status.eval() == "Setup", 15, "open")
+    if hasattr(ext, "worker"):                       # the Phase 1B latency baseline predates the audit worker
+        yield until(lambda: ext.worker is not None and ext.worker.available, 15, "audit_ready_for_pairing")
     g = yield checkpoint("setup_ready", {"pid": os.getpid()})
     code = (g or {}).get("match_code")
     yield until(lambda: code and code in comp.par.Pairingrequest.eval(), 10, "pairing_param")

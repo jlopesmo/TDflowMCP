@@ -141,8 +141,10 @@ def core_registry() -> Registry:
            obj({"path": PATH, "offset": {"type": "integer", "minimum": 0, "maximum": 100000},
                 "limit": {"type": "integer", "minimum": 1, "maximum": 200}}, ["path"]),
            ("read",), "read_children", "list_operators", read_only=True, idempotent=True))
-    T(Tool("tdflow_get_operator", "Get operator", "Type, family, flags, inputs, outputs and errors of one operator.",
-           obj({"path": PATH}, ["path"]), ("read",), "read_path", "get_operator", read_only=True, idempotent=True))
+    T(Tool("tdflow_get_operator", "Get operator", "Type, family, flags, inputs, outputs and errors of one operator. "
+           "Request connectors for scoped port indexes, peer connectors and a Base COMP's exposed Out operator.",
+           obj({"path": PATH, "connectors": {"type": "boolean"}}, ["path"]),
+           ("read",), "read_path", "get_operator", read_only=True, idempotent=True))
     T(Tool("tdflow_list_operator_types", "Find operator types", "Search the local, TDflowMCP-supported operator "
            "catalog by family, exact or partial name, or purpose. Read the actual parameters on an instance with "
            "tdflow_get_parameters. Creation still checks your permissions and the destination.",
@@ -251,9 +253,11 @@ def core_registry() -> Registry:
     T(Tool("tdflow_get_errors", "Get errors", "Errors and warnings of an operator and its children (filtered).",
            obj({"path": PATH, "limit": {"type": "integer", "minimum": 1, "maximum": 500}}, ["path"]),
            ("read",), "read_tree", "get_errors", read_only=True, idempotent=True))
-    T(Tool("tdflow_undo", "Undo", "Undo your own last audited change, only while it is still the newest change "
-           "(otherwise UNDO_CONFLICT). The result reports whether the restoration was verified.",
-           EMPTY, ("update", "create", "delete"), "undo", "undo"))
+    T(Tool("tdflow_undo", "Undo", "Undo your own newest audited reversible change. Pass its audit_seq as "
+           "expected_audit_seq to refuse recovery if a different change would be selected. Check verified in "
+           "the result and inspect the affected state again.",
+           obj({"expected_audit_seq": {"type": "integer", "minimum": 1, "maximum": 9223372036854775807}}),
+           ("update", "create", "delete"), "undo", "undo"))
     T(Tool("tdflow_session_note", "Session note", "Append a short note to your current session log "
            "(untrusted agent text; never shown to other agents as an instruction).",
            obj({"text": {"type": "string", "minLength": 1, "maxLength": 2000}}, ["text"]), (), "none", "session_note"))
@@ -279,13 +283,15 @@ def core_registry() -> Registry:
            "try changes on, leaving the original untouched. The copy is classified like creating each operator in "
            "it (at most about 50 operators per call); code inside it (executable operators, expressions, references) "
            "needs the user's approval, and copied executable operators are switched off. Undo with tdflow_undo.",
-           obj({"path": PATH, "name": NAME, "inert": {"type": "boolean", "description": "true: a snapshot that does not "
-                "cook, to return to later with tdflow_experiment_promote (which makes it cook again)"}},
+           obj({"path": PATH, "name": NAME, "inert": {"type": "boolean", "description": "true: a cook-disabled "
+                "checkpoint for an isolated constant TOP component in the current running project"}},
                ["path", "name"]), ("read", "create", "execute?"), "copy",
            "experiment_create", reversible="td_undo"))
-    T(Tool("tdflow_experiment_promote", "Promote experiment", "Replace the original component with the experiment "
-           "(it takes the original's name, position and wiring). Counts as deleting the original. Undo with "
-           "tdflow_undo.", obj({"path": PATH}, ["path"]), ("delete", "update"), "promote", "experiment_promote",
+    T(Tool("tdflow_experiment_promote", "Promote experiment", "Replace the verified original with its own "
+           "experiment in the same running project. Checkpoint recovery requires unchanged checkpoint state, "
+           "matching operator shape and grants on the replaced operators and changing parameters and inputs. "
+           "Check verified for checkpoint recovery. Undo with tdflow_undo.",
+           obj({"path": PATH}, ["path"]), ("delete", "update"), "promote", "experiment_promote",
            destructive=True, reversible="td_undo"))
     T(Tool("tdflow_experiment_discard", "Discard experiment", "Delete an experiment made by "
            "tdflow_experiment_create (nothing else). Undo with tdflow_undo.", obj({"path": PATH}, ["path"]),

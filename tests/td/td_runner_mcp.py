@@ -91,6 +91,7 @@ def _caps_native(comp, ext, T, frames, until, checkpoint, g):
     yield until(lambda: "Read Only" in p.Agentinfo.eval(), 10, "caps_native_role")
     T("caps.NATIVE_SHOWS_THE_WEB_ROLE_CHANGE", ext.identity.agents[aid].role == "observer"
       and "Read Only" in p.Agentinfo.eval(), info=p.Agentinfo.eval())
+    yield until(lambda: not ext.native.busy, 10, "caps_native_ready")
     p.Agentscope = "/project1/zz_native/**"
     ext.native.scope(True)
     yield until(lambda: not ext.native.busy and any(gr.scope == "/project1/zz_native/**"
@@ -242,6 +243,7 @@ def run(comp, ext, T, frames, until, checkpoint, R, restart=False):
       actionable=acts)
     T("order.refusal_fits_the_window", len(comp.par.Statusdetail.eval()) <= 26)
     T("enable.no_browser_for_enable", calls == [])
+    yield until(lambda: ext.worker is not None and ext.worker.available, 15, "audit_ready_for_pairing")
     g = yield checkpoint("setup_ready", {"pid": os.getpid()})
     code = (g or {}).get("match_code")
     yield until(lambda: code and code in comp.par.Pairingrequest.eval(), 10, "pairing_param")
