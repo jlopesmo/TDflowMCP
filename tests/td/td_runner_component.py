@@ -62,6 +62,8 @@ def run(comp, ext, T, frames, until, checkpoint, R):
         procedural.par.Amount = .25
         result.cook(force=True)
         T("B.control_changes_python_result", abs(float(result.par.opacity.eval()) - .2) < 1e-6 and not result.errors())
+    if requested.get("verify_procedural"):
+        yield from procedural_evidence(network, T, frames, checkpoint)
 
     level.cook(force=True)
     T("C.repair_cooks_without_errors", level.totalCooks > 0 and not level.errors() and level.inputs[0] == source
@@ -171,6 +173,37 @@ def control_review_tests(network, ext, T, checkpoint):
       and probe.par.Slot80.label == "Last slot")
     yield checkpoint("component_page_undo", {})
     T("definitions.undo_restores_full_page_order", [par.name for par in page.pars] == expected)
+
+
+def procedural_evidence(network, T, frames, checkpoint):
+    comp = network.op("channel_workflow")
+    callback, output = comp.op("watch"), comp.op("output")
+    untouched = network.create(td.constantTOP, "procedural_neighbor")
+    untouched.par.colorr = .125
+    output.cook(force=True)
+    before = float(output.numpyArray()[0, 0, 3])
+    initially_seen = int(callback.fetch("observations", 0))
+    T("procedural.initial_channel_and_texture", abs(float(output.par.opacity.eval()) - .5) < 1e-6
+      and abs(before - .5) < .02 and not output.errors(), opacity=before)
+    data = {"path": comp.path}
+    yield checkpoint("procedural_control_change", data)
+    yield frames(5)
+    output.cook(force=True)
+    changed = float(output.numpyArray()[0, 0, 3])
+    observed = int(callback.fetch("observations", 0))
+    T("procedural.channel_changes_texture_and_runs_approved_callback",
+      abs(changed - .75) < .02 and observed == initially_seen + 1 and not output.errors(),
+      opacity=changed, callback_delta=observed - initially_seen)
+    defect = yield checkpoint("procedural_defect", data)
+    output.cook(force=True)
+    reduced = float(output.numpyArray()[0, 0, 3])
+    T("procedural.controlled_defect_changes_texture", abs(reduced - .09375) < .02, opacity=reduced)
+    yield checkpoint("procedural_recover", {**data, "audit_seq": defect.get("audit_seq")})
+    output.cook(force=True)
+    restored = float(output.numpyArray()[0, 0, 3])
+    T("procedural.recovered_texture_and_preserved_neighbor",
+      abs(restored - .75) < .02 and callback.fetch("observations", 0) == observed
+      and untouched.par.colorr.val == .125 and not output.errors(), opacity=restored)
 
 
 def checkpoint_guard(network, ext, T, checkpoint):

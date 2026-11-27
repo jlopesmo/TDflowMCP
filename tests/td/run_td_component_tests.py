@@ -57,7 +57,7 @@ class Scenario:
         self.check("connect_" + destination.rsplit("/", 1)[-1], mcp.ok(result))
 
 
-def scenarios(baseline):
+def scenarios(baseline, verify_guidance=False, verify_procedural=False):
     builder = mcp.MCP(mcp.TOKENS["B"])
     operator = mcp.MCP(mcp.TOKENS["E"])
     status, inventory, _ = builder.rpc("tools/list")
@@ -67,6 +67,8 @@ def scenarios(baseline):
 
     visual = Scenario("A")
     network = visual.create(builder, PARENT, "baseCOMP", "visual")
+    if verify_guidance:
+        guidance_checks(builder, operator, network)
     if not baseline:
         catalog = visual.call(builder, "tdflow_list_operator_types", path=network, family="TOP", query="procedural noise")
         visual.check("discovery", mcp.ok(catalog) and [entry["type"] for entry in catalog["types"]] == ["noiseTOP"])
@@ -135,7 +137,9 @@ def scenarios(baseline):
         reusable.check("bind_reusable_control", mcp.ok(reusable.approve(operator, SET, path=source,
                                                                        expressions={"colorr": "parent().par.Amount"})))
     expose_output(reusable, builder, network, output, baseline)
-    return {"baseline": baseline}
+    if verify_procedural:
+        procedural_authoring(builder, operator, verify_guidance)
+    return {"baseline": baseline, "verify_procedural": verify_procedural}
 
 
 def controls(scenario, operator, path, definitions, baseline):
@@ -155,6 +159,92 @@ def expose_output(scenario, builder, path, source, baseline):
         return
     scenario.check("component_output_created", mcp.ok(result))
     scenario.connect(builder, source, path + "/output")
+
+
+def guidance_checks(builder, operator, path):
+    scenario = Scenario("guidance")
+    name = "tdflow_list_operator_types"
+    catalog = scenario.call(builder, name, path=path, guidance=True, limit=1)
+    coverage = catalog.get("guidance_coverage", {})
+    expected = ["constantTOP", "levelTOP", "mathCHOP", "noiseCHOP", "noiseTOP", "outTOP", "parameterexecuteDAT"]
+    scenario.check("bounded_verified_coverage", coverage.get("matching_types") == expected
+                   and coverage.get("available") is True and coverage.get("verified_build") == "2025.32440"
+                   and len(catalog.get("types", [])) == 1 and catalog.get("next_offset") == 1)
+    math = scenario.call(builder, name, path=path, query="mathCHOP", family="CHOP", guidance=True)
+    rows = math.get("types") or [{}]
+    fields = {p["name"]: p for p in (rows[0].get("guidance") or {}).get("parameters", [])}
+    scenario.check("exact_multiply_name", len(rows) == 1 and rows[0].get("type") == "mathCHOP"
+                   and fields.get("gain", {}).get("label") == "Multiply" and fields.get("gain", {}).get("style") == "Float")
+    plain = scenario.call(builder, name, path=path, query="mathCHOP")
+    scenario.check("prior_catalog_shape", mcp.ok(plain) and "guidance_coverage" not in plain
+                   and "guidance" not in (plain.get("types") or [{}])[0])
+    scoped = scenario.call(builder, name, path="/project1", guidance=True)
+    scenario.check("catalog_requires_read_access", scoped.get("code") == "DENIED")
+    scripts = scenario.call(builder, name, path=path, query="script", guidance=True)
+    script_types = {"scriptCHOP", "scriptSOP", "scriptTOP"}
+    scenario.check("script_operators_excluded", mcp.ok(scripts)
+                   and script_types.isdisjoint(row["type"] for row in scripts.get("types", [])))
+    for op_type in sorted(script_types):
+        refusal = scenario.call(operator, CREATE, parent=path, type=op_type, name="unsupported")
+        scenario.check(op_type + "_creation_remains_refused", refusal.get("rule_id") == "G2")
+
+
+def procedural_authoring(builder, operator, use_guide):
+    scenario = Scenario("procedural")
+    comp = scenario.create(builder, PARENT, "baseCOMP", "channel_workflow")
+    if use_guide:
+        result = scenario.call(builder, "tdflow_list_operator_types", path=comp, query="mathCHOP", guidance=True)
+        parameters = ((result.get("types") or [{}])[0].get("guidance") or {}).get("parameters", [])
+    noise = scenario.create(builder, comp, "noiseCHOP", "drive")
+    scaled = scenario.create(builder, comp, "mathCHOP", "scaled")
+    if not use_guide:
+        parameters = scenario.call(builder, "tdflow_get_parameters", path=scaled, limit=200).get("parameters", [])
+    multiplier = next((par["name"] for par in parameters if par["label"] == "Multiply"), None)
+    scenario.check("multiply_discovery", multiplier == "gain")
+    scenario.check("named_channel", mcp.ok(scenario.call(builder, SET, path=noise,
+                                                        values={"amp": 0, "offset": .25, "channelname": "drive"})))
+    scenario.connect(builder, noise, scaled)
+    scenario.check("multiply_channel", mcp.ok(scenario.call(builder, SET, path=scaled, values={multiplier or "gain": 2})))
+    color = scenario.create(builder, comp, "constantTOP", "color")
+    output = scenario.create(builder, comp, "levelTOP", "output")
+    scenario.connect(builder, color, output)
+    scenario.check("approved_channel_expression", mcp.ok(scenario.approve(operator, SET, path=output, expressions={
+        "opacity": "op('scaled')['drive'].eval()",
+    })))
+    callback = scenario.approve(operator, CREATE, parent=comp, type="parameterexecuteDAT", name="watch")
+    scenario.check("callback_staged", mcp.ok(callback) and callback.get("staged_inactive") is True)
+    callback_path = comp + "/watch"
+    code = ("def onValueChange(par, previous):\n"
+            "    me.store('observations', me.fetch('observations', 0) + 1)\n")
+    preview = scenario.call(operator, "tdflow_get_dat_text", path=callback_path, proposed_text=code)
+    scenario.check("callback_preview", (preview.get("python_validation") or {}).get("ok") is True)
+    scenario.check("callback_source_approved", mcp.ok(scenario.approve(
+        operator, "tdflow_set_dat_text", path=callback_path, text=code, language="python",
+        expected_sha256=preview.get("source_sha256"))))
+    scenario.check("watcher_configuration_approved", mcp.ok(scenario.approve(operator, SET, path=callback_path,
+                   values={"op": noise, "pars": "offset", "builtin": True, "custom": False, "valuechange": True})))
+    scenario.check("callback_activation_separately_approved",
+                   mcp.ok(scenario.approve(operator, SET, path=callback_path, values={"active": True})))
+
+
+def procedural_control_change(data):
+    scenario = REPORT["procedural"]
+    result = scenario.call(mcp.MCP(mcp.TOKENS["B"]), SET, path=data["path"] + "/drive", values={"offset": .375})
+    scenario.check("change_channel_control", mcp.ok(result))
+
+
+def procedural_defect(data):
+    scenario = REPORT["procedural"]
+    result = scenario.call(mcp.MCP(mcp.TOKENS["B"]), SET, path=data["path"] + "/scaled", values={"gain": .25})
+    scenario.check("safe_defect_applied", mcp.ok(result) and bool(result.get("audit_seq")))
+    return {"audit_seq": result.get("audit_seq")}
+
+
+def procedural_recover(data):
+    scenario = REPORT["procedural"]
+    result = scenario.call(mcp.MCP(mcp.TOKENS["B"]), "tdflow_undo", expected_audit_seq=data["audit_seq"])
+    scenario.check("bound_recovery_verified", mcp.ok(result) and result.get("verified") is True
+                   and result.get("undoes") == data["audit_seq"])
 
 
 def diagnostics(data):
@@ -391,7 +481,11 @@ def main():
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--baseline", action="store_true")
     parser.add_argument("--verify-connectors", action="store_true")
+    parser.add_argument("--verify-guidance", action="store_true")
+    parser.add_argument("--verify-procedural", action="store_true")
     args = parser.parse_args()
+    if args.baseline and (args.verify_guidance or args.verify_procedural):
+        parser.error("the original v1.1 baseline lacks the component workflow used by these checks")
     if any(gate.oslisteners.other_listeners(port, 0) for port in gate.base.PORTS):
         raise SystemExit("A TouchDesigner test port is already in use.")
     work = Path(tempfile.mkdtemp(prefix="td-component-", dir=ROOT / ".tmp"))
@@ -401,8 +495,11 @@ def main():
     project.mkdir()
     shutil.copyfile(Path(__file__).with_name("td_runner_component.py"), run / "td_runner_component.py")
     handlers = {"setup_ready": mcp.cp_setup_ready, "pair_approved": mcp.cp_pair_approved,
-                "component_workflows": lambda _d, _p: dict(scenarios(args.baseline),
+                "component_workflows": lambda _d, _p: dict(scenarios(args.baseline, args.verify_guidance, args.verify_procedural),
                                                            verify_connectors=args.verify_connectors),
+                "procedural_control_change": lambda d, _p: procedural_control_change(d),
+                "procedural_defect": lambda d, _p: procedural_defect(d),
+                "procedural_recover": lambda d, _p: procedural_recover(d),
                 "component_external_wire": lambda d, _p: external_output(d, args.verify_connectors),
                 "component_external_wire_verified": lambda d, _p: verify_external_output(d),
                 "component_checkpoint_prepare": lambda d, _p: checkpoint_grants(d, "prepare"),

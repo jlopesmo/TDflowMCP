@@ -29,6 +29,7 @@ from tdflowmcp import approvals as APR
 from tdflowmcp import insights as INS
 from tdflowmcp import layout as LAYOUT
 from tdflowmcp import memory as MEM
+from tdflowmcp import opguides as GUIDES
 from tdflowmcp.engine import Adapter, Resolution, ToolFailure
 from tdflowmcp.policy import ACTIVATION_PARAMS, APPROVABLE_CREATE_TYPES, EXECUTABLE_TYPES, PARAM_DENYLIST, SAFE_CREATE_TYPES, Target
 from tdflowmcp.policy import _name_denied
@@ -595,9 +596,21 @@ class TDAdapter(Adapter):
             rows.append({"type": name, "family": family, "purpose": summary,
                          "creation": "approval_required" if name in APPROVABLE_CREATE_TYPES else "scoped"})
         off, limit = args.get("offset", 0), args.get("limit", 30)
-        return {"path": res.context["op"].path, "td_build": str(td.app.build), "types": rows[off:off + limit],
-                "total": len(rows), "next_offset": off + limit if off + limit < len(rows) else None,
-                "note": "Catalog types are present in this runtime. Creation checks your role, scope and destination."}
+        build = str(td.app.build)
+        page = rows[off:off + limit]
+        result = {"path": res.context["op"].path, "td_build": build, "types": page,
+                  "total": len(rows), "next_offset": off + limit if off + limit < len(rows) else None,
+                  "note": "Catalog types are present in this runtime. Creation checks your role, scope and destination."}
+        if args.get("guidance"):
+            available = sys.platform == "win32" and build == GUIDES.VERIFIED_BUILD
+            covered = sorted(GUIDES.GUIDED_TYPES & {row["type"] for row in rows}) if available else []
+            result["guidance_coverage"] = {"available": available, "verified_platform": "Windows",
+                                           "verified_build": GUIDES.VERIFIED_BUILD, "matching_types": covered,
+                                           "source": "Disposable runtime parameter metadata and curated usage guidance"}
+            for row in page:
+                if row["type"] in covered:
+                    row["guidance"] = GUIDES.guidance_for(row["type"])
+        return result
 
     def _conn_paths(self, ops, readable):
         facts = [self._facts(x, "read") for x in ops if x is not None]

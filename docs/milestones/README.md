@@ -9,5 +9,6 @@
 | TDflowMCP v1.2 | v1.2.0 published and public downloads verified | [Component authoring](v1.2-component-authoring.md) |
 | TDflowMCP v1.3 | v1.3.0 published and public downloads verified | [Visual diagnostics](v1.3-visual-diagnostics.md) |
 | TDflowMCP v1.4 | v1.4.0 published and public downloads verified | [Connected workflows and recovery](v1.4-workflow-recovery.md) |
+| TDflowMCP v1.5 | Development authorized, Script lifecycle gate under review, offline guidance underway | [Procedural authoring](v1.5-procedural-authoring.md) |
 
 Detailed milestone files for Phase 2 onward will be written once Phase 1B passes, so the plans reflect spike and enforcement evidence.

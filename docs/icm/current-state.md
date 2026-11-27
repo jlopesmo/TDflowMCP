@@ -363,3 +363,11 @@ The owner approved external wiring by the owner with scoped agent verification a
 ### v1.4.0 release
 
 Release PR #15 merged as `2a7634d924e1040d21d55eb429acd6043ed7cfc3` after CI and independent review. The annotated `v1.4.0` tag points to that commit. The clean tagged package passed the full Windows and TouchDesigner 2025.32440 acceptance suite. GitHub-hosted Windows and Ubuntu runners then verified all five public downloads. [Release PR](https://github.com/jlopesmo/TDflowMCP/pull/15) · [Public release](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.4.0) · [Release receipts](validation-index.md#v140-tagged-release)
+
+## v1.5 procedural authoring
+
+The `1.5.0.dev1` candidate adds optional, offline operator guidance to the scoped operator catalog. It covers seven supported types on Windows with TouchDesigner 2025.32440. In the disposable workflow it identified the Math CHOP multiplier before node creation. The candidate verified CHOP-driven TOP opacity, the staged Parameter Execute DAT callback, exact audit recovery and preservation of an unrelated operator. [Development evidence](validation-index.md#v15-procedural-authoring-development)
+
+Active Script CHOP, SOP and TOP authoring is deferred. Their Setup Parameters pulses advanced cook counters with parent cooking disabled, and the docked factory DAT could remain docked after an owner selected a different callback DAT. The candidate refused creation for all three types through the real MCP endpoint. [ADR-0018](../decisions/0018-script-operator-lifecycle.md)
+
+The development binary passed the full packaged Windows and TouchDesigner 2025.32440 regression, including real Claude Code and Codex sessions with disposable client homes. PR #17 carries the `1.5.0` release candidate. Exact-head verification and owner release gates apply before promotion. The public download remains v1.4.0 while those gates are open. [Release PR](https://github.com/jlopesmo/TDflowMCP/pull/17) · [Validation](validation-index.md#v15-procedural-authoring-development)

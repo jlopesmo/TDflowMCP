@@ -5,7 +5,7 @@ through MCP. It works within the permissions you grant and keeps a tamper-eviden
 computer (127.0.0.1). It never installs software, and it changes your agent's configuration only after you approve
 the exact change in TouchDesigner.
 
-**Version 1.4.0, provided for evaluation.** The verified runtime is **Windows** with TouchDesigner **2025.32440**.
+**Version 1.5.0, provided for evaluation.** The verified runtime is **Windows** with TouchDesigner **2025.32440**.
 Newer TouchDesigner builds and macOS are not verified. Try it first in a copy of a project, or in one you can afford
 to experiment with. The repository has no open-source license yet: you may download and evaluate the component, but
 that does not grant rights to redistribute, modify or commercially reuse it.
@@ -28,8 +28,8 @@ Choose the `TDflowMCP-vX.Y.Z.tox` asset when available. Compare its SHA-256 with
 `SHA256SUMS-versioned` for v1.0.0 and v1.0.1 aliases. `TDflowMCP.json` records the same hash for both filenames.
 The compatibility download `TDflowMCP.tox` is listed in `SHA256SUMS`.
 
-- PowerShell, using the versioned filename. `Get-FileHash .\TDflowMCP-v1.4.0.tox -Algorithm SHA256`
-- macOS / Linux, to check the file. `shasum -a 256 TDflowMCP-v1.4.0.tox`
+- PowerShell, using the versioned filename. `Get-FileHash .\TDflowMCP-v1.5.0.tox -Algorithm SHA256`
+- macOS / Linux, to check the file. `shasum -a 256 TDflowMCP-v1.5.0.tox`
 
 ## 2. Add the component
 1. Save your project first (TDflowMCP keeps its data next to the saved `.toe`).
