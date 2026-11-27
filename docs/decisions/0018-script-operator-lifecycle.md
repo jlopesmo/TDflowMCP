@@ -29,3 +29,5 @@ Approved expressions and Execute DATs remain the supported procedural execution 
 3. Report independent security findings and obtain owner acceptance of the validated implementation boundary before enabling Script operator creation or activation.
 
 The first probe results are recorded in the [v1.5 milestone](../milestones/v1.5-procedural-authoring.md).
+
+The v1.5.0 tagged binary refused creation of Script CHOP, SOP and TOP through MCP in disposable TouchDesigner projects. The operator guidance and the approved procedural workflow passed on Windows with TouchDesigner 2025.32440. [Tagged verification](../icm/validation-index.md#v150-tagged-release)

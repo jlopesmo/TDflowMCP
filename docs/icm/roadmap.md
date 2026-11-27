@@ -100,7 +100,7 @@ v1.4.0 completed the owner-connected component verification and scoped checkpoin
 
 ## v1.5 procedural authoring
 
-[Issue #14](https://github.com/jlopesmo/TDflowMCP/issues/14) follows v1.4. The disposable prototype did not establish the required Script staging or ownership boundary. The v1.5 path focuses on locally verified operator guidance and existing approved execution tools. Active Script authoring needs independent review and explicit owner approval of a validated design. [Milestone](../milestones/v1.5-procedural-authoring.md) · [Proposed ADR](../decisions/0018-script-operator-lifecycle.md)
+v1.5.0 delivered locally verified operator guidance and a procedural workflow using the existing approved execution tools. Tagged acceptance and independent verification of the five public downloads passed. The disposable prototype did not establish the required Script staging or ownership boundary. Active Script authoring needs independent review and explicit owner approval of a validated design. [Issue #14](https://github.com/jlopesmo/TDflowMCP/issues/14) · [Milestone](../milestones/v1.5-procedural-authoring.md) · [Proposed ADR](../decisions/0018-script-operator-lifecycle.md) · [Release receipts](validation-index.md#v150-tagged-release)
 
 ## D28 — Codex acceptance and release of 1.0.1 (owner, GitHub Issue #3, 2026-11-25)
 
