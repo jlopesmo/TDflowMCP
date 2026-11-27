@@ -45,4 +45,4 @@ The owner authorized bounded custom control definitions through the existing pol
 
 The v1.4 implementation applies the existing inverse-action decision to the named parameters in a recorded change and checks them against current grants. An optional audit sequence restricts undo to an exact change under the same policy. [Tool surface](../architecture/tool-surface.md)
 
-Scoped connector reads identify the visible Out TOP and peer indexes under the existing read policy. Checkpoint recovery uses existing experiment grants and adds read checks on both inspected trees. It refuses a checkpoint whose lineage or captured state cannot be verified. [v1.4 milestone](../milestones/v1.4-workflow-recovery.md)
+Scoped connector reads identify the visible Out TOP and peer indexes under the existing read policy. Checkpoint recovery uses existing experiment grants, requires read on both inspected trees and checks each operator and parameter effect of restoration. It refuses a checkpoint whose lineage or captured state cannot be verified. [v1.4 milestone](../milestones/v1.4-workflow-recovery.md)

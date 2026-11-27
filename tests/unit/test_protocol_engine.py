@@ -432,6 +432,20 @@ class EngineTests(unittest.TestCase):
         restored = self.eng.call(self.tid, "tdflow_undo", {"expected_audit_seq": seq})["structuredContent"]
         self.assertTrue(restored["verified"])
 
+    def test_undo_replaces_generic_parameter_targets_at_policy_limit(self):
+        path = "/project1/fx/a"
+        values = {f"x{i}": 1 for i in range(50)}
+        self.ad.resolve = lambda tool, args: Resolution([
+            Target("update", path, change="param", param=name) for name in args["values"]
+        ])
+        self.ad.execute = lambda *args: {"_audit": {"kind": "set_params", "path": path,
+                                                 "prev": {name: {"mode": "CONSTANT"} for name in values}}}
+        changed = self.eng.call(self.tid, "tdflow_set_parameters", {"path": path, "values": values})
+        self.assertFalse(changed["isError"])
+        result = self.eng.call(self.tid, "tdflow_undo",
+                               {"expected_audit_seq": changed["structuredContent"]["audit_seq"]})
+        self.assertTrue(result["structuredContent"]["verified"])
+
     def test_unverified_undo_is_an_error(self):
         self.eng.call(self.tid, "tdflow_set_parameters", {"path": "/project1/fx/a", "values": {"x": 1}})
         self.ad.undo = lambda rec, snap=None: {"undone": True, "verified": False}

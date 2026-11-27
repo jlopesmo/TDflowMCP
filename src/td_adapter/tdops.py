@@ -281,14 +281,27 @@ class TDAdapter(Adapter):
                 ts.extend(self._facts(op, "read") for root in (e, origin)
                           for op in [root, *root.children[:MAX_CHECKPOINT_TOPS]])
                 stored = e.fetch(CHECKPOINT_STATE, None, search=False)
-                current = self._checkpoint_digest(origin)
-                if e.allowCooking or not stored or self._checkpoint_digest(e) != stored or current is None:
+                current, staged = self._checkpoint_state(origin), self._checkpoint_state(e)
+                if (e.allowCooking or not stored or current is None or staged is None
+                        or _state_sha(staged) != stored or [row[:2] for row in current] != [row[:2] for row in staged]):
                     ctx["validation_failure"] = ToolFailure(
-                        "CHECKPOINT_UNSAFE", "Restore requires an inert copy and an isolated, constant TOP network. "
+                        "CHECKPOINT_UNSAFE", "Restore requires an unchanged inert copy and matching constant TOP tree. "
                         "Inspect the component and recover it in TouchDesigner.")
                 else:
-                    ctx["mutation_identity"] = [identity, current, stored]
-                    ctx["approval_facts"].append(["checkpoint_state", current, stored])
+                    current_digest = _state_sha(current)
+                    ctx["mutation_identity"] = [identity, current_digest, stored]
+                    ctx["approval_facts"].append(["checkpoint_state", current_digest, stored])
+                    # Promoting replaces each node, even when only one parameter or wire differs.
+                    for before, after in zip(current, staged):
+                        relative, _, old_params, old_links = before
+                        op = origin.op(relative[1:]) if relative else origin
+                        if relative:
+                            ts.append(self._facts(op, "delete", change="checkpoint_restore"))
+                        for name in sorted(old_params.keys() | after[2].keys()):
+                            if name not in old_params or name not in after[2] or old_params[name] != after[2][name]:
+                                ts.append(self._facts(op, "update", change="param", param=name))
+                        if old_links != after[3]:
+                            ts.append(self._facts(op, "update", change="wire"))
             return Resolution(ts, ctx)
         if k == "save":
             return Resolution([self._facts(None, "execute", path=self.root_fn(), change="save")], {})
@@ -993,7 +1006,7 @@ class TDAdapter(Adapter):
         return origin
 
     @staticmethod
-    def _checkpoint_digest(root):
+    def _checkpoint_state(root):
         if (root.OPType not in ("baseCOMP", "containerCOMP") or root.bypass
                 or len(root.children) > MAX_CHECKPOINT_TOPS):
             return None
@@ -1008,10 +1021,12 @@ class TDAdapter(Adapter):
         for op in (root, *children):
             constants = {}
             for par in op.pars():
-                if not par.isCustom and par.isDefault:
+                if par.isCustom:
+                    return None
+                if par.isDefault:
                     continue
                 if (str(par.mode).split(".")[-1] != "CONSTANT" or par.style in REFERENCE_STYLES
-                        or _denied_par(par.name)):
+                        or _denied_par(par.name) or (getattr(par, "isMenu", False) and getattr(par, "menuSource", ""))):
                     return None
                 constants[par.name] = _jsonable(par.val)
             links = []
@@ -1021,7 +1036,7 @@ class TDAdapter(Adapter):
                         return None
                     links.append([int(port.index), peer.owner.name, int(peer.index)])
             facts.append([op.path[len(root.path):], op.OPType, constants, links])
-        return _state_sha(facts)
+        return facts
 
     def _resolve_copy(self, args):
         """Copying is classified like reading every operator in the source and creating every operator in the copy
@@ -1085,10 +1100,11 @@ class TDAdapter(Adapter):
                "approval_facts": [["experiment_source", str(int(src.id)), str(int(parent.id))]],
                "mutation_identity": [int(src.id), int(parent.id)]}
         if args.get("inert"):
-            digest = self._checkpoint_digest(src)
-            if digest is None:
+            state = self._checkpoint_state(src)
+            if state is None:
                 ctx["validation_failure"] = ToolFailure(
                     "CHECKPOINT_UNSAFE", "An inert checkpoint requires an isolated, constant TOP network.")
+            digest = _state_sha(state) if state is not None else None
             ctx["mutation_identity"].append(digest)
             ctx["checkpoint_digest"] = digest
         return Resolution(ts, ctx)
@@ -1117,8 +1133,8 @@ class TDAdapter(Adapter):
             if args.get("inert"):                    # a snapshot: kept, not cooked, until it is promoted
                 n.allowCooking = False
                 n.store(INERT_KEY, True)
-                digest = self._checkpoint_digest(n)
-                if n.allowCooking or digest is None or digest != res.context["checkpoint_digest"]:
+                digest = _state_sha(self._checkpoint_state(n))
+                if n.allowCooking or digest != res.context["checkpoint_digest"]:
                     raise ToolFailure("OUTCOME_UNKNOWN", "Could not verify the checkpoint copy and cooking state.")
                 n.store(CHECKPOINT_STATE, digest)
             try:
@@ -1166,7 +1182,7 @@ class TDAdapter(Adapter):
                     except Exception:
                         lost += 1
             if inert:
-                if lost or self._checkpoint_digest(e) != checkpoint_digest:
+                if lost or _state_sha(self._checkpoint_state(e)) != checkpoint_digest:
                     raise ToolFailure("OUTCOME_UNKNOWN", "The checkpoint replacement could not be verified.")
                 e.allowCooking = True                # a restored snapshot cooks again
                 if not e.allowCooking:
@@ -1328,7 +1344,7 @@ class TDAdapter(Adapter):
                 return o is not None and o.OPType == d.get("type") and e is not None and \
                     e.OPType == d.get("experiment_type") and EXPERIMENT_TAG in e.tags and \
                     (not d.get("inert") or (not e.allowCooking and d.get("checkpoint_digest") is not None
-                                             and self._checkpoint_digest(e) == d["checkpoint_digest"]))
+                                             and _state_sha(self._checkpoint_state(e)) == d["checkpoint_digest"]))
             if kind == "delete":
                 o = td.op(path)
                 return o is not None and o.OPType == d.get("type")

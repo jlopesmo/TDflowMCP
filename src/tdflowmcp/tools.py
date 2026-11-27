@@ -283,13 +283,15 @@ def core_registry() -> Registry:
            "try changes on, leaving the original untouched. The copy is classified like creating each operator in "
            "it (at most about 50 operators per call); code inside it (executable operators, expressions, references) "
            "needs the user's approval, and copied executable operators are switched off. Undo with tdflow_undo.",
-           obj({"path": PATH, "name": NAME, "inert": {"type": "boolean", "description": "true: a snapshot that does not "
-                "cook, to return to later with tdflow_experiment_promote (which makes it cook again)"}},
+           obj({"path": PATH, "name": NAME, "inert": {"type": "boolean", "description": "true: a cook-disabled "
+                "checkpoint for an isolated constant TOP component in the current running project"}},
                ["path", "name"]), ("read", "create", "execute?"), "copy",
            "experiment_create", reversible="td_undo"))
-    T(Tool("tdflow_experiment_promote", "Promote experiment", "Replace the original component with the experiment "
-           "(it takes the original's name, position and wiring). Counts as deleting the original. Undo with "
-           "tdflow_undo.", obj({"path": PATH}, ["path"]), ("delete", "update"), "promote", "experiment_promote",
+    T(Tool("tdflow_experiment_promote", "Promote experiment", "Replace the verified original with its own "
+           "experiment in the same running project. Checkpoint recovery requires unchanged checkpoint state, "
+           "matching operator shape and grants on the replaced operators and changing parameters and inputs. "
+           "Check verified for checkpoint recovery. Undo with tdflow_undo.",
+           obj({"path": PATH}, ["path"]), ("delete", "update"), "promote", "experiment_promote",
            destructive=True, reversible="td_undo"))
     T(Tool("tdflow_experiment_discard", "Discard experiment", "Delete an experiment made by "
            "tdflow_experiment_create (nothing else). Undo with tdflow_undo.", obj({"path": PATH}, ["path"]),

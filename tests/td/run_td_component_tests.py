@@ -206,6 +206,21 @@ def verify_external_output(data):
                    and json.dumps(data["source"]) not in json.dumps(partial))
 
 
+def checkpoint_grants(data, phase):
+    scenario = REPORT.get("checkpoint") or Scenario("checkpoint")
+    actor = mcp.MCP(mcp.TOKENS["E"])
+    if phase == "prepare":
+        snap = scenario.call(actor, "tdflow_experiment_create", path=data["original"], name="checkpoint_copy", inert=True)
+        edit = scenario.call(actor, SET, path=data["original"] + "/source", values={"amp": .75})
+        scenario.check("prepared_constant_checkpoint", mcp.ok(snap) and mcp.ok(edit))
+        return
+    result = scenario.call(actor, "tdflow_experiment_promote", path=data["checkpoint"])
+    if phase == "denied":
+        scenario.check("restore_respects_parameter_denylist", result.get("rule_id") == "G3")
+    else:
+        scenario.check("restore_after_grant_allows_parameter", mcp.ok(result) and result.get("verified") is True)
+
+
 def definition_tests():
     s = Scenario("security")
     builder, operator = (mcp.MCP(mcp.TOKENS[key]) for key in ("B", "E"))
@@ -382,6 +397,9 @@ def main():
                                                            verify_connectors=args.verify_connectors),
                 "component_external_wire": lambda d, _p: external_output(d, args.verify_connectors),
                 "component_external_wire_verified": lambda d, _p: verify_external_output(d),
+                "component_checkpoint_prepare": lambda d, _p: checkpoint_grants(d, "prepare"),
+                "component_checkpoint_denied": lambda d, _p: checkpoint_grants(d, "denied"),
+                "component_checkpoint_allowed": lambda d, _p: checkpoint_grants(d, "allowed"),
                 "component_diagnostics": lambda data, _p: diagnostics(data),
                 "component_definition_tests": lambda _d, _p: definition_tests(),
                 "component_definition_stale": lambda _d, _p: stale_tests(),

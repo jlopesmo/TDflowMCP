@@ -50,7 +50,7 @@ For the v1.3 diagnostic workflow, `tdflow_describe_network` accepts optional `di
 | Tool | Classification | Purpose |
 |---|---|---|
 | `tdflow_experiment_create` | read on every source operator; create per copied operator; **+ execute** for executable types, expressions, binds, exports and reference parameters carried into the copy (approval binds a hash of that code); G3 for set denylisted parameters | Copy a COMP next to itself to try changes. A cook-disabled `inert: true` checkpoint requires an isolated, bounded constant TOP network. |
-| `tdflow_experiment_promote` | delete of the original (A2 above 50 operators) + update of the experiment + wiring per downstream operator. Read both trees for inert checkpoint recovery. | Replace the original only with matching lineage in the running project. For checkpoint recovery, compare the cook-disabled copy and prior state before restoring. Changed or unsafe copies are refused. |
+| `tdflow_experiment_promote` | delete of the original (A2 above 50 operators) + update of the experiment + wiring per downstream operator. For inert recovery add read on both trees, delete on each replaced node, and update on changed parameters and inputs. | Replace the original only with matching lineage in the running project. Verified checkpoint recovery requires an unchanged cook-disabled copy and matching operator shape. |
 | `tdflow_experiment_discard` | delete of the experiment | Delete an experiment (only experiments); undoable |
 | `tdflow_save_project` | execute on the project root; always approval | Save the project like TouchDesigner's own save; not reversible |
 

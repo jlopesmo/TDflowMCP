@@ -806,7 +806,8 @@ class Engine:
                     or any(not isinstance(name, str) or not name for name in names)):
                 return self._deny(base, "UNDO_FAILED", "U1", "The parameter authorization record is unavailable.", None)
             target = Target("update", path, change="custom_parameters" if kind == "custom_parameters" else "param")
-            targets.extend(replace(target, param=name) for name in names)
+            targets = [t for t in targets if not (t.action == "update" and t.path == path)]
+            targets.extend([replace(target, param=name) for name in names] or [target])
         verdict = self.policy.evaluate(agent, targets or [Target("update", self.policy.root + "/__none__")])
         base.update(targets=[[t.action, t.path] for t in targets[:50]], policy_version=verdict.policy_version)
         if not verdict.allow:
