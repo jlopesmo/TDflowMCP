@@ -1,6 +1,6 @@
 # ADR-0018 — Script operator lifecycle
 
-**Status:** Proposed. [Issue #14](https://github.com/jlopesmo/TDflowMCP/issues/14) authorizes an inert prototype and requires owner approval before changing the execution policy.
+**Status:** Proposed. [Issue #14](https://github.com/jlopesmo/TDflowMCP/issues/14) and [Issue #20](https://github.com/jlopesmo/TDflowMCP/issues/20) authorize disposable research. A changed production execution policy requires explicit owner acceptance of a proven design.
 
 ## Context
 
@@ -31,3 +31,9 @@ Approved expressions and Execute DATs remain the supported procedural execution 
 The first probe results are recorded in the [v1.5 milestone](../milestones/v1.5-procedural-authoring.md).
 
 The v1.5.0 tagged binary refused creation of Script CHOP, SOP and TOP through MCP in disposable TouchDesigner projects. The operator guidance and the approved procedural workflow passed on Windows with TouchDesigner 2025.32440. [Tagged verification](../icm/validation-index.md#v150-tagged-release)
+
+## v1.7 research amendment
+
+An off-by-default Advanced Script Authoring capability would separate inert source authoring from execution. It would use distinct owner-issued, per-agent, project- and path-scoped, expiring permissions and approval for each exact action. The draft preview is text and structured evidence. A production activation surface would require a separately verified boundary and owner decision. Existing Script creation denies, protected resources, mandatory audit and suspension remain in effect.
+
+The disposable transfer and restart probe observed zero callbacks for a controlled cold fixture. Exact dry-run approvals failed after import or restart and after changes to inputs, callback identity or source. Explicit fixture activation ran in the destination TouchDesigner process, and a graph rollback could not erase the faulting callback's observed effect. Active Script authoring stays deferred. [Threat model, state transitions and owner options](../milestones/v1.7-script-access.md) · [Observed verification](../icm/validation-index.md#v17-script-access-research)
