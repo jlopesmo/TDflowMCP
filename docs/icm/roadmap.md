@@ -104,7 +104,7 @@ v1.5.0 delivered locally verified operator guidance and a procedural workflow us
 
 ## v1.6 Network Visual Inspection
 
-The owner approved Network Visual Inspection first, followed by separately gated Script lifecycle research after the v1.6 release. The scoped diagram and live vision fixture passed on the development binary. Full candidate acceptance and release verification are the remaining gates after the owner approved the release-specific compatibility exception and conditional merges. [Issue #19](https://github.com/jlopesmo/TDflowMCP/issues/19) · [Issue #20](https://github.com/jlopesmo/TDflowMCP/issues/20) · [Milestone](../milestones/v1.6-network-vision.md)
+v1.6.0 delivered scoped network diagrams and passed tagged acceptance, including real Claude Code image interpretation and independently verified public downloads. Separately gated Script lifecycle research follows under Issue #20. [Issue #19](https://github.com/jlopesmo/TDflowMCP/issues/19) · [Issue #20](https://github.com/jlopesmo/TDflowMCP/issues/20) · [Milestone](../milestones/v1.6-network-vision.md) · [Release receipts](validation-index.md#v160-tagged-release)
 
 ## D28 — Codex acceptance and release of 1.0.1 (owner, GitHub Issue #3, 2026-11-25)
 
