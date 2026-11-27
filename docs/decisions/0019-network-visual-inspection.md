@@ -23,3 +23,5 @@ The diagram represents a point-in-time observation. Use structured verification 
 ## Validation gates
 
 Verify equivalent image bytes and structured facts when only unreadable nodes or wires change within the resource limits. Check scope, protected nodes, stale identities, revocation, audit failure, rate and size limits, passive cook and callback counters, and the fit of an intentionally disorganized network. Exercise real MCP clients and separately record whether a real model used the image. [Milestone](../milestones/v1.6-network-vision.md)
+
+The v1.6.0 tagged package passed the scoped schematic path, including unchanged hidden data, exact port evidence, passive cook and callback counters, and separate real-client delivery and model interpretation checks. [Tagged verification](../icm/validation-index.md#v160-tagged-release)

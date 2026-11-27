@@ -2,23 +2,23 @@
 
 A source-first, AI-powered TouchDesigner development environment: an MCP server packaged as a reusable `.tox`, with server-side permissions, agent identity, audit logging, approvals, a local browser dashboard, safe experimentation and optional Code Mode orchestration.
 
-> **TDflowMCP 1.5.0 was released for evaluation on 2026-11-27. [Download TDflowMCP-v1.5.0.tox](https://github.com/jlopesmo/TDflowMCP/releases/download/v1.5.0/TDflowMCP-v1.5.0.tox).**
-> - v1.5 adds offline guidance for seven operator types. Call `tdflow_list_operator_types` with `guidance: true` to get verified parameter names, labels, and uses. The packaged workflow verified an animated Noise TOP, CHOP-driven opacity, an approved Parameter Execute DAT callback, and exact audit-sequence undo. Script CHOP, SOP, and TOP lifecycle authoring remains deferred.
+> **TDflowMCP 1.6.0 was released for evaluation on 2026-11-27. [Download TDflowMCP-v1.6.0.tox](https://github.com/jlopesmo/TDflowMCP/releases/download/v1.6.0/TDflowMCP-v1.6.0.tox).**
+> - v1.6 adds `tdflow_capture_network`. It renders a schematic PNG from authorized operators, positions, and wires, with structured facts for checking exact connectors. Claude Code interpreted the image and used native connector reads to verify a scoped wiring correction. Both installed Codex engines received the PNG and facts. Script CHOP, SOP, and TOP lifecycle authoring remains deferred.
 > - The verified release configuration is **Windows with TouchDesigner 2025.32440**. Capture and comparison require the owner to lock the TOPs and keep bypass off on them and their enclosing components. Approved Python runs in TouchDesigner with access to the host.
 > - Claude Code and Codex on Windows support consent-based Connect Agent without copying credentials. Codex was tested with the Codex CLI 0.160.0 and the Codex VS Code extension 26.1120; the Codex desktop app is not verified. Other documented clients use a manual setup fallback.
 > - MCP binds to `127.0.0.1` only, enforces agent scopes and approvals, and requires an intact durable security audit.
-> - The `.tox` is built from the `v1.5.0` tag. [v1.5 development and release record](docs/milestones/v1.5-procedural-authoring.md)
-> - Earlier releases remain available. [v1.4.0](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.4.0) · [v1.3.0](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.3.0) · [v1.2.0](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.2.0) · [v1.1.0](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.1.0) · [v1.0.1](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.0.1) · [v1.0.0](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.0.0)
+> - The `.tox` is built from the `v1.6.0` tag. [v1.6 development and release record](docs/milestones/v1.6-network-vision.md)
+> - Earlier releases remain available. [v1.5.0](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.5.0) · [v1.4.0](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.4.0) · [v1.3.0](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.3.0) · [v1.2.0](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.2.0) · [v1.1.0](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.1.0) · [v1.0.1](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.0.1) · [v1.0.0](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.0.0)
 
 ## Download and first run
 
-1. Download the versioned component. [TDflowMCP-v1.5.0.tox](https://github.com/jlopesmo/TDflowMCP/releases/download/v1.5.0/TDflowMCP-v1.5.0.tox) · [Byte-identical compatibility download](https://github.com/jlopesmo/TDflowMCP/releases/download/v1.5.0/TDflowMCP.tox)
-2. Run `Get-FileHash .\TDflowMCP-v1.5.0.tox -Algorithm SHA256` in PowerShell and compare the result with the value below. [Published checksums](https://github.com/jlopesmo/TDflowMCP/releases/download/v1.5.0/SHA256SUMS)
+1. Download the versioned component. [TDflowMCP-v1.6.0.tox](https://github.com/jlopesmo/TDflowMCP/releases/download/v1.6.0/TDflowMCP-v1.6.0.tox) · [Byte-identical compatibility download](https://github.com/jlopesmo/TDflowMCP/releases/download/v1.6.0/TDflowMCP.tox)
+2. Run `Get-FileHash .\TDflowMCP-v1.6.0.tox -Algorithm SHA256` in PowerShell and compare the result with the value below. [Published checksums](https://github.com/jlopesmo/TDflowMCP/releases/download/v1.6.0/SHA256SUMS)
 
-   `7ef298e8f0090f1e3afe0cd027faacc47f539ec054deccb47753b34007270eb2`
+   `84572eb751160cb5798969f186570f4be8051c7a7b7509004376d79e57ebfa30`
 3. Save your TouchDesigner project, then drag the verified `.tox` into it. Use Windows with TouchDesigner 2025.32440, and try it first in a copy of a project.
 
-GitHub-hosted Windows and Ubuntu runners verified both binary downloads, the manifest, the checksums and the installation guide. [Download verification](https://github.com/jlopesmo/TDflowMCP/actions/runs/46045426327) · [Release notes and installation guide](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.5.0)
+GitHub-hosted Windows and Ubuntu runners verified both binary downloads, the manifest, the checksums and the installation guide. [Download verification](https://github.com/jlopesmo/TDflowMCP/actions/runs/46061350848) · [Release notes and installation guide](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.6.0)
 
 Then, in TouchDesigner:
 
