@@ -168,6 +168,13 @@ def diagnostics(data):
     repair.check("owner_locked_snapshot_visible", mcp.ok(locked) and locked.get("bytes", 0) > 0)
 
 
+def external_output(data):
+    scenario = REPORT["D"]
+    result = scenario.call(mcp.MCP(mcp.TOKENS["B"]), "tdflow_connect",
+                           src=data["source"], dst=data["consumer"])
+    scenario.check("native_comp_to_top_refused", result.get("code") == "INVALID_ARGS")
+
+
 def definition_tests():
     s = Scenario("security")
     builder, operator = (mcp.MCP(mcp.TOKENS[key]) for key in ("B", "E"))
@@ -340,6 +347,7 @@ def main():
     shutil.copyfile(Path(__file__).with_name("td_runner_component.py"), run / "td_runner_component.py")
     handlers = {"setup_ready": mcp.cp_setup_ready, "pair_approved": mcp.cp_pair_approved,
                 "component_workflows": lambda _d, _p: scenarios(args.baseline),
+                "component_external_wire": lambda d, _p: external_output(d),
                 "component_diagnostics": lambda data, _p: diagnostics(data),
                 "component_definition_tests": lambda _d, _p: definition_tests(),
                 "component_definition_stale": lambda _d, _p: stale_tests(),

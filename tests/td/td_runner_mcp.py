@@ -242,6 +242,7 @@ def run(comp, ext, T, frames, until, checkpoint, R, restart=False):
       actionable=acts)
     T("order.refusal_fits_the_window", len(comp.par.Statusdetail.eval()) <= 26)
     T("enable.no_browser_for_enable", calls == [])
+    yield until(lambda: ext.worker is not None and ext.worker.available, 15, "audit_ready_for_pairing")
     g = yield checkpoint("setup_ready", {"pid": os.getpid()})
     code = (g or {}).get("match_code")
     yield until(lambda: code and code in comp.par.Pairingrequest.eval(), 10, "pairing_param")

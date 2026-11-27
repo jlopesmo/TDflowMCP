@@ -251,9 +251,11 @@ def core_registry() -> Registry:
     T(Tool("tdflow_get_errors", "Get errors", "Errors and warnings of an operator and its children (filtered).",
            obj({"path": PATH, "limit": {"type": "integer", "minimum": 1, "maximum": 500}}, ["path"]),
            ("read",), "read_tree", "get_errors", read_only=True, idempotent=True))
-    T(Tool("tdflow_undo", "Undo", "Undo your own last audited change, only while it is still the newest change "
-           "(otherwise UNDO_CONFLICT). The result reports whether the restoration was verified.",
-           EMPTY, ("update", "create", "delete"), "undo", "undo"))
+    T(Tool("tdflow_undo", "Undo", "Undo your own newest audited reversible change. Pass its audit_seq as "
+           "expected_audit_seq to refuse recovery if a different change would be selected. Check verified in "
+           "the result and inspect the affected state again.",
+           obj({"expected_audit_seq": {"type": "integer", "minimum": 1, "maximum": 9223372036854775807}}),
+           ("update", "create", "delete"), "undo", "undo"))
     T(Tool("tdflow_session_note", "Session note", "Append a short note to your current session log "
            "(untrusted agent text; never shown to other agents as an instruction).",
            obj({"text": {"type": "string", "minLength": 1, "maxLength": 2000}}, ["text"]), (), "none", "session_note"))

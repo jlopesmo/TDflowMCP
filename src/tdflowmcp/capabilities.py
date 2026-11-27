@@ -111,7 +111,7 @@ CATALOG: Tuple[Cap, ...] = (
     Cap("exp_discard", "experiments", "Discard an experiment", ("tdflow_experiment_discard",), ("delete",)),
     # ---- undo -------------------------------------------------------------------------------------------------
     Cap("undo", "undo", "Undo its own last change", ("tdflow_undo",), ("update",),
-        note="Only its own newest change, and only while nothing else changed since."),
+        note="Pass the change's audit sequence to target it exactly. Check that the restoration was verified."),
     # ---- saving -----------------------------------------------------------------------------------------------
     Cap("save", "save", "Save the project file (like Ctrl+S)", ("tdflow_save_project",), ("execute",),
         approval="always", on_root=True,

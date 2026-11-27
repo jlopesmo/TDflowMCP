@@ -42,3 +42,5 @@ The v1.3 aggregate comparison applies this decision to both targets before any c
 ### v1.2 component authoring
 
 The owner authorized bounded custom control definitions through the existing policy and exact approval model. Defining or editing controls requires `read`, `update` and `execute` on the Base or Container COMP because a built network can react to changes. Hard denies cover protected ancestors. The allowed styles carry constant definitions. Existing expressions, bindings, dynamic menus and control groups are outside this edit path. Connector changes add `update` on the affected enclosing component. The first Out TOP of a Base COMP can expose a native connector. The owner connects that output to external consumers. See the [v1.2 milestone](../milestones/v1.2-component-authoring.md).
+
+The v1.4 implementation applies the existing inverse-action decision to the named parameters in a recorded change and checks them against current grants. An optional audit sequence restricts undo to an exact change under the same policy. [Tool surface](../architecture/tool-surface.md)

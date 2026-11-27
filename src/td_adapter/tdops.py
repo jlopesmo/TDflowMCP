@@ -1232,7 +1232,7 @@ class TDAdapter(Adapter):
     def _undo_text(self, d, snap):
         o = td.op(d["path"])
         expected = d.get("after_sha") or (snap or {}).get("after_sha")   # hash of the text actually written
-        if snap is None or snap["restored_at"] or o is None or not _has_dat_source(o):
+        if snap is None or snap["restored_at"] or snap["path"] != d["path"] or o is None or not _has_dat_source(o):
             raise ToolFailure("UNDO_CONFLICT", "the DAT text changed since (or was already restored)")
         # Review 14: restore only into the same operator. A DAT replaced at that path (say by an Execute DAT
         # holding the same text) must not receive the old text without its own approval.

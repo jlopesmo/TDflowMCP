@@ -2,19 +2,19 @@
 name: tdflow-core
 description: Use when working in a TouchDesigner project through the TDflowMCP MCP server (tools named tdflow_*). Covers checking identity and scope first, reporting what you may do (tdflow_capabilities), reading before changing, small audited changes, verified undo, resuming and handing over tasks through project memory, the kill switch, denials and what never to do without the user.
 metadata:
-  tdflow-skill-version: "1.9"
+  tdflow-skill-version: "1.10"
 ---
 
 # Working in TouchDesigner with TDflowMCP
 
-TDflowMCP skill version 1.9 (tool surface 1). This file is guidance. The TDflowMCP server enforces
+TDflowMCP skill version 1.10 (tool surface 1). This file is guidance. The TDflowMCP server enforces
 every permission itself; nothing here grants access.
 
 ## 1. Start every session with `tdflow_whoami`
 - It returns your role, your scopes (which operator paths you may read or change, and which actions),
   the project root, `server_version`, `tool_surface_version` and `expected_skill_version`.
-- If `expected_skill_version` differs from this skill's version (1.9), tell the user: "The TDflowMCP
-  Skills on this computer are version 1.9 but the component expects <version>. Update them from the
+- If `expected_skill_version` differs from this skill's version (1.10), tell the user: "The TDflowMCP
+  Skills on this computer are version 1.10 but the component expects <version>. Update them from the
   component's Setup page." Then continue carefully, trusting the server's answers over this file.
 - Work only inside your scopes. Do not probe paths outside them: denials are recorded in the audit log.
 - For reusable components, use `tdflow_list_operator_types` for suitable local types and `tdflow_get_parameters`
@@ -109,8 +109,11 @@ every permission itself; nothing here grants access.
   stop did run; check `log`.
 
 ## 3. Undo
-- `tdflow_undo` undoes your own newest change, and only while TouchDesigner's undo history is exactly as
-  it was right after that change. Check `verified` in the answer.
+- Keep the mutation's `audit_seq` and pass it as `expected_audit_seq` to `tdflow_undo`. The server
+  refuses recovery if that change is no longer your newest reversible one. Check `verified` and
+  re-inspect the affected state. Native undo requires an unchanged TouchDesigner undo stack. Durable
+  DAT and control snapshots require the same running component and a matching recorded target.
+- If the server reports `UNDO_BUSY`, wait for the pending recovery to finish and inspect its outcome.
 - `UNDO_CONFLICT` means something else changed since (often the user). Do not try to force it: describe
   the situation and ask the user what they want.
 

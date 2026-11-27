@@ -72,6 +72,8 @@ Hard rules:
 
 Skill 1.9 introduces evidence-first diagnostic guidance. Copy Agent Prompt asks agents to show evidence and verify fixes. The tool-surface major version stays `1`.
 
+Skill 1.10 guides agents to retain a change's audit sequence, bind undo to that exact change, and inspect the result. [v1.4 milestone](../milestones/v1.4-workflow-recovery.md)
+
 - `tdflow_whoami` returns `server_version`, `tool_surface_version`, `expected_skill_version`.
 - **Skill 1.1 (Phase 2A):** adds the project-memory workflow (resume before changing, checkpoint, handoff with checkable claims, the memory error codes). The tool surface stays `1` because the change is additive.
 - **Skill 1.2 (Phase 2A increment 3):** adds default placement of created operators, the optional handoff `status`, `fingerprint.parameter_changes` on resume, and repository-mode memory (`memory.authority`, the repository-memory permission, `MEMORY_LINK_MISMATCH`). Additive again, so the tool surface stays `1`.

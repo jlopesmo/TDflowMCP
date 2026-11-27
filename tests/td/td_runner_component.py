@@ -77,7 +77,16 @@ def run(comp, ext, T, frames, until, checkpoint, R):
     T("D.controls", ("Amount" in names) == (not baseline), controls=names)
     T("D.component_output", bool(reusable.op("output") and reusable.outputConnectors) == (not baseline))
     if not baseline:
-        consumer = consume(network, reusable)
+        consumer = network.create(td.nullTOP, reusable.name + "_consumer")
+        observed = reusable.op("output"), consumer
+        for node in observed:
+            node.viewer = False
+        yield frames(3)
+        before_cooks = [node.totalCooks for node in observed]
+        yield checkpoint("component_external_wire", {"source": reusable.path, "consumer": consumer.path})
+        T("D.refused_wire_leaves_input_empty", not consumer.inputConnectors[0].connections)
+        T("D.refused_wire_leaves_cook_counts", before_cooks == [node.totalCooks for node in observed])
+        consumer.inputConnectors[0].connect(reusable.outputConnectors[0])
         consumer.cook(force=True)
         before = float(consumer.numpyArray()[0, 0, 0])
         reusable.par.Amount = .75

@@ -354,12 +354,77 @@ class EngineTests(unittest.TestCase):
         r = self.eng.call(self.tid, "tdflow_undo", {})
         self.assertEqual(r["structuredContent"]["code"], "UNDO_CONFLICT")
 
+    def test_undo_only_matches_the_expected_audited_change(self):
+        edit = {"path": "/project1/fx/a", "values": {"x": 1}}
+        first = self.eng.call(self.tid, "tdflow_set_parameters", edit)["structuredContent"]["audit_seq"]
+        second = self.eng.call(self.tid, "tdflow_set_parameters", edit)["structuredContent"]["audit_seq"]
+        stale = self.eng.call(self.tid, "tdflow_undo", {"expected_audit_seq": first})["structuredContent"]
+        self.assertEqual(stale["code"], "UNDO_CONFLICT")
+        self.assertEqual(self.ad.undone, [])
+        restored = self.eng.call(self.tid, "tdflow_undo", {"expected_audit_seq": second})["structuredContent"]
+        self.assertTrue(restored["verified"])
+        self.assertEqual(restored["undoes"], second)
+        receipt, intent = self.store.events(limit=2)
+        self.assertEqual(json.loads(receipt["detail"])["intent_seq"], intent["seq"])
+        self.assertEqual(json.loads(intent["detail"])["undoes"], second)
+        replay = self.eng.call(self.tid, "tdflow_undo", {"expected_audit_seq": second})["structuredContent"]
+        self.assertEqual(replay["code"], "UNDO_CONFLICT")
+        self.assertEqual(self.ad.undone, [second])
+        self.assertTrue(self.store.verify()["ok"])
+
+    def test_undo_keeps_selection_locked_until_outcome(self):
+        change = self.eng.call(self.tid, "tdflow_set_parameters", {"path": "/project1/fx/a", "values": {"x": 1}})
+        seq = change["structuredContent"]["audit_seq"]
+        real_append = self.store.append
+        competing = []
+
+        def append(kind, **fields):
+            if kind == "outcome" and fields.get("tool") == "tdflow_undo":
+                competing.append(self.eng.call(self.tid, "tdflow_undo", {"expected_audit_seq": seq}))
+            return real_append(kind, **fields)
+
+        self.store.append = append
+        resumed = self.eng.call(self.tid, "tdflow_undo", {"expected_audit_seq": seq})["structuredContent"]
+        self.assertTrue(resumed["verified"])
+        self.assertEqual(competing[0]["structuredContent"]["code"], "UNDO_BUSY")
+        self.assertEqual(self.ad.undone, [seq])
+
+    def test_undo_snapshot_refuses_another_runtime(self):
+        snap_path = "/project1/fx/notes"
+        self.ad.execute = lambda *args: {"_audit": {"kind": "dat_text", "path": snap_path}}
+        seq = self.eng.call(self.tid, "tdflow_set_dat_text", {"path": snap_path, "text": "one"})
+        restarted = Engine(self.store, self.idn, Policy("/project1"), core_registry(), self.ad, ALL,
+                           lambda: False)
+        result = restarted.call(self.tid, "tdflow_undo",
+                                {"expected_audit_seq": seq["structuredContent"]["audit_seq"]})["structuredContent"]
+        self.assertEqual(result["code"], "UNDO_CONFLICT")
+        self.assertEqual(self.ad.undone, [])
+
+    def test_undo_reauthorizes_parameter_update_after_grant_change(self):
+        from dataclasses import replace
+
+        path = "/project1/fx/a"
+        self.ad.execute = lambda *args: {"_audit": {"kind": "set_params", "path": path,
+                                                 "prev": {"x": {"mode": "CONSTANT", "value": 0}}}}
+        change = self.eng.call(self.tid, "tdflow_set_parameters", {"path": path, "values": {"x": 1}})
+        seq = change["structuredContent"]["audit_seq"]
+        current = replace(self.agent, grants=tuple(replace(g, param_denylist=("x",)) for g in self.agent.grants))
+        self.idn.agents[self.agent.id] = current
+        denied = self.eng.call(self.tid, "tdflow_undo", {"expected_audit_seq": seq})["structuredContent"]
+        self.assertEqual(denied["rule_id"], "G3")
+        self.assertEqual(self.ad.undone, [])
+        self.idn.agents[self.agent.id] = self.agent
+        restored = self.eng.call(self.tid, "tdflow_undo", {"expected_audit_seq": seq})["structuredContent"]
+        self.assertTrue(restored["verified"])
+
     def test_unverified_undo_is_an_error(self):
         self.eng.call(self.tid, "tdflow_set_parameters", {"path": "/project1/fx/a", "values": {"x": 1}})
         self.ad.undo = lambda rec, snap=None: {"undone": True, "verified": False}
         r = self.eng.call(self.tid, "tdflow_undo", {})
         self.assertEqual(r["structuredContent"]["code"], "UNDO_UNVERIFIED")
         self.assertTrue(r["isError"])
+        self.assertTrue(self.eng.suspended())
+        self.assertEqual(self.store.events(limit=1)[0]["outcome"], "unknown")
 
     def test_adapter_can_mark_change_not_reversible(self):
         self.ad.execute = lambda tool, args, res, label, readable: {"done": 1, "_audit": {"reversible": "no"}}

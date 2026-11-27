@@ -50,7 +50,9 @@ class ExprAdapter(Adapter):
 
     def execute(self, tool, args, res, undo_label, readable):
         self.executed.append((tool.name, json.dumps(args, sort_keys=True)))
-        return {"done": tool.name, "_audit": {"kind": "set_params"}}
+        names = {**args.get("values", {}), **args.get("expressions", {})}
+        return {"done": tool.name, "_audit": {"kind": "set_params", "path": args.get("path"),
+                                           "prev": {name: {"mode": "CONSTANT"} for name in names}}}
 
     def undo(self, record, snapshot=None):
         return {"undone": True, "verified": True}

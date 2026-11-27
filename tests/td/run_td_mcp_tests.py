@@ -291,11 +291,17 @@ def cp_enabled(data, pid):
     # Verified undo for every reversible kind (agent B)
     s = B.call("tdflow_set_parameters", {"path": "/project1/fx/level1", "values": {"opacity": 0.7}})
     T("undo.other_agent_conflict", A.call("tdflow_undo").get("code") == "UNDO_CONFLICT")   # B's change is on top
-    u = B.call("tdflow_undo")
+    seq = s.get("audit_seq")
+    stale = B.call("tdflow_undo", {"expected_audit_seq": (seq or 2) - 1})
+    T("undo.stale_audit_sequence_refused", stale.get("code") == "UNDO_CONFLICT")
+    u = B.call("tdflow_undo", {"expected_audit_seq": seq})
+    T("undo.bound_to_audit_sequence", u.get("undoes") == seq and bool(seq))
     back = B.call("tdflow_get_parameters", {"path": "/project1/fx/level1", "limit": 200})
     op_val = next((p["value"] for p in back.get("parameters", []) if p["name"] == "opacity"), None)
     T("undo.set_parameters", ok(s) and ok(u) and u["verified"] and op_val == 0.5, undo=u, value=op_val)
     c = B.call("tdflow_create_operator", {"parent": "/project1/fx", "type": "noiseTOP", "name": "n2"})
+    T("undo.retry_leaves_newer_change", B.call("tdflow_undo", {"expected_audit_seq": seq}).get("code") == "UNDO_CONFLICT"
+      and B.call("tdflow_get_operator", {"path": "/project1/fx/n2"}).get("type") == "noiseTOP")
     u = B.call("tdflow_undo")
     T("undo.create", ok(c) and ok(u) and u["verified"] and
       B.call("tdflow_get_operator", {"path": "/project1/fx/n2"}).get("code") == "NOT_FOUND", undo=u)
@@ -317,9 +323,10 @@ def cp_enabled(data, pid):
       B.call("tdflow_get_operator", {"path": "/project1/fx/n3"}).get("type") == "nullTOP", undo=u)
     t1 = B.call("tdflow_set_dat_text", {"path": "/project1/fx/notes", "text": "changed"})
     mid = B.call("tdflow_get_dat_text", {"path": "/project1/fx/notes"}).get("text")
-    u = B.call("tdflow_undo")
+    u = B.call("tdflow_undo", {"expected_audit_seq": t1.get("audit_seq")})
     T("undo.dat_text_snapshot", ok(t1) and t1["reversible"] and mid == "changed" and ok(u) and u["verified"] and
-      B.call("tdflow_get_dat_text", {"path": "/project1/fx/notes"}).get("text") == "hello", undo=u)
+      u.get("undoes") == t1.get("audit_seq")
+      and B.call("tdflow_get_dat_text", {"path": "/project1/fx/notes"}).get("text") == "hello", undo=u)
     t2 = B.call("tdflow_set_dat_text", {"path": "/project1/fx/table2", "text": "x\ty"})
     T("tool.tagged_table_dat_text", ok(t2) and t2["reversible"])
     T("undo.nothing_to_undo", C.call("tdflow_undo").get("code") == "NOTHING_TO_UNDO")
