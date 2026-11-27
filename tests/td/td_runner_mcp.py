@@ -91,6 +91,7 @@ def _caps_native(comp, ext, T, frames, until, checkpoint, g):
     yield until(lambda: "Read Only" in p.Agentinfo.eval(), 10, "caps_native_role")
     T("caps.NATIVE_SHOWS_THE_WEB_ROLE_CHANGE", ext.identity.agents[aid].role == "observer"
       and "Read Only" in p.Agentinfo.eval(), info=p.Agentinfo.eval())
+    yield until(lambda: not ext.native.busy, 10, "caps_native_ready")
     p.Agentscope = "/project1/zz_native/**"
     ext.native.scope(True)
     yield until(lambda: not ext.native.busy and any(gr.scope == "/project1/zz_native/**"

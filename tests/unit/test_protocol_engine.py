@@ -354,6 +354,21 @@ class EngineTests(unittest.TestCase):
         r = self.eng.call(self.tid, "tdflow_undo", {})
         self.assertEqual(r["structuredContent"]["code"], "UNDO_CONFLICT")
 
+    def test_mutation_identity_must_match_after_audit_intent(self):
+        identifiers = iter((1, 2))
+        original = self.ad.resolve
+
+        def resolve(tool, args):
+            result = original(tool, args)
+            result.context["mutation_identity"] = next(identifiers)
+            return result
+
+        self.ad.resolve = resolve
+        response = self.eng.call(self.tid, "tdflow_set_parameters", {"path": "/project1/fx/a", "values": {"x": 1}})
+        self.assertEqual(response["structuredContent"]["code"], "PRECONDITION_CHANGED")
+        self.assertEqual(self.ad.executed, [])
+        self.assertEqual(self.kinds(), ["intent", "outcome"])
+
     def test_undo_only_matches_the_expected_audited_change(self):
         edit = {"path": "/project1/fx/a", "values": {"x": 1}}
         first = self.eng.call(self.tid, "tdflow_set_parameters", edit)["structuredContent"]["audit_seq"]

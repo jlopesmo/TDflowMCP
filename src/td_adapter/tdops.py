@@ -39,7 +39,9 @@ DATA_TAG = "tdflowdata"
 DAT_SOURCE_TYPES = frozenset({"tableDAT", "textDAT"}) | APPROVABLE_CREATE_TYPES
 EXPERIMENT_TAG = "tdflowexperiment"     # set by TDflowMCP only (agents cannot set tags, H7)
 EXPERIMENT_KEY = "tdflow_experiment_of"
+EXPERIMENT_LINEAGE = "tdflow_experiment_lineage"
 INERT_KEY = "tdflow_snapshot"
+CHECKPOINT_STATE = "tdflow_checkpoint_sha256"
 RESERVED_TAGS = {"TDflowMCP", "tdflowProject"}
 MAX_CAPTURE_PIXELS = 1920 * 1080
 MAX_CAPTURE_BYTES = 8 * 1024 * 1024
@@ -54,6 +56,9 @@ MAX_TEXT = 200000
 LITERAL_OP_PATH = re.compile(r"/?(?:[A-Za-z0-9_]+|\.{1,2})(?:/(?:[A-Za-z0-9_]+|\.{1,2}))*\Z")
 MAX_WALK = 1000                    # operators visited per memory fingerprint (main-thread bound; review 10)
 MAX_LIST = 200
+MAX_CONNECTOR_ROWS = 24
+CHECKPOINT_TOPS = frozenset({"constantTOP", "levelTOP", "noiseTOP", "nullTOP", "outTOP"})
+MAX_CHECKPOINT_TOPS = 24
 README_EMBEDDED = ("Project memory for this TouchDesigner project (TDflowMCP, embedded authority).\n"
                    "Agents add task checkpoints and handoffs here through TDflowMCP's memory tools only.\n"
                    "Each record is one Text DAT; its hash is in the TDflowMCP audit log. If you edit, delete or\n"
@@ -235,7 +240,10 @@ class TDAdapter(Adapter):
                 if not _has_dat_source(o):
                     raise ToolFailure("DAT_SOURCE_UNAVAILABLE", "Read the authored Text DAT or Execute DAT source. "
                                       "Computed, wired and file-linked DATs can trigger external reads or code.")
-            return Resolution([self._facts(o, "read")], {"op": o})
+            context = {"op": o}
+            if tool.name == "tdflow_get_operator" and args.get("connectors"):
+                context["read_identity"] = int(o.id)
+            return Resolution([self._facts(o, "read")], context)
         if k == "set_params":
             return self._resolve_params(args)
         if k == "custom_params":
@@ -262,7 +270,26 @@ class TDAdapter(Adapter):
                 ts.append(self._facts(owner, "update", change="wire"))
                 if owner.family == "DAT" or owner.OPType in EXECUTABLE_TYPES:
                     ts.append(self._facts(owner, "execute", change="wire"))
-            return Resolution(ts, {"op": e, "origin": origin, "count": m, "ins": ins, "outs": outs})
+            involved = [e, origin, origin.parent()]
+            involved.extend(owner for groups in (ins, outs) for group in groups for owner, _ in group)
+            topology = [[[(int(owner.id), port) for owner, port in group] for group in groups]
+                        for groups in (ins, outs)]
+            identity = _state_sha([[int(op.id) for op in involved], topology])
+            ctx = {"op": e, "origin": origin, "count": m, "ins": ins, "outs": outs,
+                   "mutation_identity": identity, "approval_facts": [["experiment_topology", identity]]}
+            if e.fetch(INERT_KEY, False, search=False):
+                ts.extend(self._facts(op, "read") for root in (e, origin)
+                          for op in [root, *root.children[:MAX_CHECKPOINT_TOPS]])
+                stored = e.fetch(CHECKPOINT_STATE, None, search=False)
+                current = self._checkpoint_digest(origin)
+                if e.allowCooking or not stored or self._checkpoint_digest(e) != stored or current is None:
+                    ctx["validation_failure"] = ToolFailure(
+                        "CHECKPOINT_UNSAFE", "Restore requires an inert copy and an isolated, constant TOP network. "
+                        "Inspect the component and recover it in TouchDesigner.")
+                else:
+                    ctx["mutation_identity"] = [identity, current, stored]
+                    ctx["approval_facts"].append(["checkpoint_state", current, stored])
+            return Resolution(ts, ctx)
         if k == "save":
             return Resolution([self._facts(None, "execute", path=self.root_fn(), change="save")], {})
         if k == "delete":
@@ -573,12 +600,37 @@ class TDAdapter(Adapter):
                     flags[f] = bool(getattr(o, f))
                 except Exception:
                     pass
-        return {"path": o.path, "name": o.name, "type": o.OPType, "family": o.family, "flags": flags,
-                "inputs": self._conn_paths(list(o.inputs), readable),
-                "outputs": self._conn_paths(list(o.outputs), readable),
-                "errors": (o.errors() or "")[:4000], "warnings": (o.warnings() or "")[:4000],
-                "comment": (o.comment or "")[:1000], "num_children": len(o.children) if o.isCOMP else 0,
-                "x": _pos(o, "nodeX"), "y": _pos(o, "nodeY"), "cook_count": _cooks(o)}
+        result = {"path": o.path, "name": o.name, "type": o.OPType, "family": o.family, "flags": flags,
+                  "inputs": self._conn_paths(list(o.inputs), readable),
+                  "outputs": self._conn_paths(list(o.outputs), readable),
+                  "errors": (o.errors() or "")[:4000], "warnings": (o.warnings() or "")[:4000],
+                  "comment": (o.comment or "")[:1000], "num_children": len(o.children) if o.isCOMP else 0,
+                  "x": _pos(o, "nodeX"), "y": _pos(o, "nodeY"), "cook_count": _cooks(o)}
+        if args.get("connectors"):
+            result["connectors"] = {
+                "inputs": self._connector_rows(o.inputConnectors, readable),
+                "outputs": self._connector_rows(o.outputConnectors, readable, exposed=o.isCOMP),
+            }
+        return result
+
+    def _connector_rows(self, connectors, readable, *, exposed=False):
+        """Read connector metadata without evaluating parameters or requesting any operator output."""
+        rows = []
+        for connector in connectors[:MAX_CONNECTOR_ROWS]:
+            links = connector.connections
+            shown = links[:MAX_CONNECTOR_ROWS]
+            out_op = connector.outOP if exposed else None
+            targets = [self._facts(link.owner, "read") for link in shown]
+            if out_op is not None:
+                targets.append(self._facts(out_op, "read"))
+            visible = {target.path for target in readable(targets)}
+            peers = [{"path": link.owner.path, "index": int(link.index)} for link in shown
+                     if link.owner.path in visible]
+            row = {"index": int(connector.index), "peers": peers, "complete": len(peers) == len(links)}
+            if out_op is not None and out_op.path in visible:
+                row["exposed_output"] = {"path": out_op.path, "type": out_op.OPType, "family": out_op.family}
+            rows.append(row)
+        return {"rows": rows, "truncated": len(connectors) > MAX_CONNECTOR_ROWS}
 
     def _t_get_parameters(self, args, res, label, readable):
         o = res.context["op"]
@@ -928,12 +980,48 @@ class TDAdapter(Adapter):
                            "reversible": "snapshot"}}
 
     # ---- Phase 3: experiments and project save -------------------------------------------------
+    def _experiment_identity(self, e, origin):
+        return [self._custom_runtime, int(e.id), int(origin.id), int(origin.parent().id)]
+
     def _experiment_origin(self, e):
         origin = td.op(str(e.fetch(EXPERIMENT_KEY, "", search=False) or ""))
         if origin is None or not origin.isCOMP or origin.parent() is None or e.parent() is None or \
-                origin.path == e.path or origin.parent().path != e.parent().path:
-            raise ToolFailure("INVALID_ARGS", "the experiment's original component no longer exists next to it")
+                origin.path == e.path or origin.parent().path != e.parent().path or \
+                e.fetch(EXPERIMENT_LINEAGE, None, search=False) != self._experiment_identity(e, origin):
+            raise ToolFailure("EXPERIMENT_CONFLICT", "The experiment and original no longer have verified lineage "
+                              "in this running project. Inspect them in TouchDesigner.")
         return origin
+
+    @staticmethod
+    def _checkpoint_digest(root):
+        if (root.OPType not in ("baseCOMP", "containerCOMP") or root.bypass
+                or len(root.children) > MAX_CHECKPOINT_TOPS):
+            return None
+        if any(port.connections for port in (*root.inputConnectors, *root.outputConnectors,
+                                              *root.inputCOMPConnectors, *root.outputCOMPConnectors)):
+            return None
+        children = tuple(sorted(root.children, key=lambda op: op.name))
+        if any(child.OPType not in CHECKPOINT_TOPS or child.bypass or child.lock for child in children):
+            return None
+        ids = {int(op.id) for op in children}
+        facts = []
+        for op in (root, *children):
+            constants = {}
+            for par in op.pars():
+                if not par.isCustom and par.isDefault:
+                    continue
+                if (str(par.mode).split(".")[-1] != "CONSTANT" or par.style in REFERENCE_STYLES
+                        or _denied_par(par.name)):
+                    return None
+                constants[par.name] = _jsonable(par.val)
+            links = []
+            for port in op.inputConnectors:
+                for peer in port.connections:
+                    if int(peer.owner.id) not in ids:
+                        return None
+                    links.append([int(port.index), peer.owner.name, int(peer.index)])
+            facts.append([op.path[len(root.path):], op.OPType, constants, links])
+        return _state_sha(facts)
 
     def _resolve_copy(self, args):
         """Copying is classified like reading every operator in the source and creating every operator in the copy
@@ -992,8 +1080,18 @@ class TDAdapter(Adapter):
                 except Exception:
                     raise ToolFailure("INVALID_ARGS", f"parameter {par.name} of {o.path} cannot be inspected; nothing was "
                                                       "copied")
-        return Resolution(ts, {"op": src, "parent": parent, "path": new,
-                               "content_fact": ["copies_code_sha256", code.hexdigest()]})
+        ctx = {"op": src, "parent": parent, "path": new,
+               "content_fact": ["copies_code_sha256", code.hexdigest()],
+               "approval_facts": [["experiment_source", str(int(src.id)), str(int(parent.id))]],
+               "mutation_identity": [int(src.id), int(parent.id)]}
+        if args.get("inert"):
+            digest = self._checkpoint_digest(src)
+            if digest is None:
+                ctx["validation_failure"] = ToolFailure(
+                    "CHECKPOINT_UNSAFE", "An inert checkpoint requires an isolated, constant TOP network.")
+            ctx["mutation_identity"].append(digest)
+            ctx["checkpoint_digest"] = digest
+        return Resolution(ts, ctx)
 
     def _t_experiment_create(self, args, res, label, readable):
         src, parent, path = res.context["op"], res.context["parent"], res.context["path"]
@@ -1015,22 +1113,28 @@ class TDAdapter(Adapter):
                                 raise ToolFailure("EXECUTION_FAILED", f"{c.path} could not be switched off")
             n.tags.add(EXPERIMENT_TAG)
             n.store(EXPERIMENT_KEY, src.path)
+            n.store(EXPERIMENT_LINEAGE, self._experiment_identity(n, src))
             if args.get("inert"):                    # a snapshot: kept, not cooked, until it is promoted
                 n.allowCooking = False
                 n.store(INERT_KEY, True)
-                if n.allowCooking:
-                    raise ToolFailure("EXECUTION_FAILED", "the snapshot could not be kept from cooking")
+                digest = self._checkpoint_digest(n)
+                if n.allowCooking or digest is None or digest != res.context["checkpoint_digest"]:
+                    raise ToolFailure("OUTCOME_UNKNOWN", "Could not verify the checkpoint copy and cooking state.")
+                n.store(CHECKPOINT_STATE, digest)
             try:
                 n.nodeX, n.nodeY = int(src.nodeX) + int(src.nodeWidth) + 40, int(src.nodeY)
             except Exception:
                 pass
             return n
         n, stack = self._mutate(label, do)
-        return {"path": n.path, "copied_from": src.path, "operators": 1 + len(n.findChildren()),
-                "inert": bool(args.get("inert")),
-                "executable_operators_switched_off": sum(1 for c in n.findChildren() if c.OPType in EXECUTABLE_TYPES),
-                "_audit": {"kind": "create", "path": n.path, "type": n.OPType, "stack": stack,
-                           "reversible": "td_undo" if stack else "no"}}
+        out = {"path": n.path, "copied_from": src.path, "operators": 1 + len(n.findChildren()),
+               "inert": bool(args.get("inert")),
+               "executable_operators_switched_off": sum(1 for c in n.findChildren() if c.OPType in EXECUTABLE_TYPES),
+               "_audit": {"kind": "create", "path": n.path, "type": n.OPType, "stack": stack,
+                          "reversible": "td_undo" if stack else "no"}}
+        if args.get("inert"):
+            out["_audit"]["checkpoint_digest"] = res.context["checkpoint_digest"]
+        return out
 
     def _t_experiment_promote(self, args, res, label, readable):
         """Replace the original with the experiment in one undo block: the experiment takes the original's name,
@@ -1039,6 +1143,7 @@ class TDAdapter(Adapter):
         name, path, typ = origin.name, origin.path, origin.OPType
         ins, outs = res.context["ins"], res.context["outs"]
         inert = bool(e.fetch(INERT_KEY, False, search=False))
+        checkpoint_digest = e.fetch(CHECKPOINT_STATE, None, search=False) if inert else None
 
         def do():
             x, y = int(origin.nodeX), int(origin.nodeY)
@@ -1060,16 +1165,26 @@ class TDAdapter(Adapter):
                         e.outputConnectors[j].connect(owner.inputConnectors[idx])
                     except Exception:
                         lost += 1
-            if e.fetch(INERT_KEY, False, search=False):
+            if inert:
+                if lost or self._checkpoint_digest(e) != checkpoint_digest:
+                    raise ToolFailure("OUTCOME_UNKNOWN", "The checkpoint replacement could not be verified.")
                 e.allowCooking = True                # a restored snapshot cooks again
+                if not e.allowCooking:
+                    raise ToolFailure("OUTCOME_UNKNOWN", "TouchDesigner did not confirm the restored cooking state.")
             e.tags.remove(EXPERIMENT_TAG)            # last: TD's undo does not revert tags or storage (see undo)
             e.unstore(EXPERIMENT_KEY)
+            e.unstore(EXPERIMENT_LINEAGE)
             e.unstore(INERT_KEY)
+            e.unstore(CHECKPOINT_STATE)
             return lost
         lost, stack = self._mutate(label, do)
-        return {"promoted": e.path, "replaced": typ, "connections_lost": lost,
-                "_audit": {"kind": "promote", "path": path, "type": typ, "experiment": args["path"], "inert": inert,
-                           "experiment_type": e.OPType, "stack": stack, "reversible": "td_undo" if stack else "no"}}
+        out = {"promoted": e.path, "replaced": typ, "connections_lost": lost,
+               "_audit": {"kind": "promote", "path": path, "type": typ, "experiment": args["path"], "inert": inert,
+                          "checkpoint_digest": checkpoint_digest,
+                          "experiment_type": e.OPType, "stack": stack, "reversible": "td_undo" if stack else "no"}}
+        if inert:
+            out["verified"] = True
+        return out
 
     def _t_experiment_discard(self, args, res, label, readable):
         return self._t_delete_operator(args, res, label, readable)
@@ -1167,14 +1282,16 @@ class TDAdapter(Adapter):
         td.ui.undo.undo()
         if kind == "promote":
             # TouchDesigner's undo does not revert tags or storage: mark the restored copy as an experiment again.
-            e = td.op(d.get("experiment", ""))
-            if e is not None and e.OPType == d.get("experiment_type") and td.op(d.get("path", "")) is not None:
+            e, origin = td.op(d.get("experiment", "")), td.op(d.get("path", ""))
+            if e is not None and e.OPType == d.get("experiment_type") and origin is not None and origin.parent():
                 try:
                     e.tags.add(EXPERIMENT_TAG)
                     e.store(EXPERIMENT_KEY, d.get("path"))
+                    e.store(EXPERIMENT_LINEAGE, self._experiment_identity(e, origin))
                     if d.get("inert"):
                         e.store(INERT_KEY, True)
                         e.allowCooking = False
+                        e.store(CHECKPOINT_STATE, d.get("checkpoint_digest"))
                 except Exception:
                     pass                                  # _verify below reports it as unverified
         return {"undone": True, "verified": self._verify(d)}
@@ -1210,7 +1327,8 @@ class TDAdapter(Adapter):
                 o, e = td.op(path), td.op(d.get("experiment", ""))
                 return o is not None and o.OPType == d.get("type") and e is not None and \
                     e.OPType == d.get("experiment_type") and EXPERIMENT_TAG in e.tags and \
-                    (not d.get("inert") or not e.allowCooking)
+                    (not d.get("inert") or (not e.allowCooking and d.get("checkpoint_digest") is not None
+                                             and self._checkpoint_digest(e) == d["checkpoint_digest"]))
             if kind == "delete":
                 o = td.op(path)
                 return o is not None and o.OPType == d.get("type")

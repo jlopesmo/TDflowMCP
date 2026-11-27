@@ -354,4 +354,6 @@ The GitHub Release contains the versioned and byte-identical compatibility binar
 
 The first `1.4.0.dev1` batch extends `tdflow_undo` with an optional exact audit sequence. Recovery rechecks current named-parameter grants, records the outcome against the intent, and suspends agents if it cannot verify the result. Durable DAT and control recovery is restricted to the running component that recorded the snapshot. [Development evidence](validation-index.md#v14-recovery-development)
 
-The external Base COMP output connection remains owner-operated. A disposable experiment verified MCP refusal with no wire or extra cooks, then a working output after the owner made the connection. The remaining topology and recovery gates are tracked in [the v1.4 milestone](../milestones/v1.4-workflow-recovery.md).
+The external Base COMP output connection remains owner-operated. Opt-in connector inspection returned the exposed Out TOP and exact wire indexes. The disposable fixture verified the owner-made wire and control-driven output, observed unchanged cook counters during inspection, and hid the out-of-scope peer. [Development evidence](validation-index.md#v14-connected-workflow-candidate)
+
+Inert experiment recovery verifies the same live origin and copy, a bounded constant TOP tree, and the checkpoint's recorded state. A modified checkpoint, dynamic tree, or replaced origin was refused in the disposable harness. The release gates are tracked in [the v1.4 milestone](../milestones/v1.4-workflow-recovery.md).

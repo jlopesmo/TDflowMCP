@@ -45,4 +45,4 @@ Skill 1.8 and Copy Agent Prompt guide operators through local discovery, approva
 
 Skill 1.9 adds the inspect, diagnose, authorized repair and verification workflow, including interpretation of CPU cook samples and cached RGB comparisons. [v1.3 milestone](../milestones/v1.3-visual-diagnostics.md)
 
-Skill 1.10 adds guidance for verified, audit-sequence-bound undo through the existing tool. [v1.4 milestone](../milestones/v1.4-workflow-recovery.md)
+Skill 1.10 adds guidance for audit-sequence-bound undo, owner wiring verification, and scoped inert checkpoint recovery through the existing tools. [v1.4 milestone](../milestones/v1.4-workflow-recovery.md)

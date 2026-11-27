@@ -141,8 +141,10 @@ def core_registry() -> Registry:
            obj({"path": PATH, "offset": {"type": "integer", "minimum": 0, "maximum": 100000},
                 "limit": {"type": "integer", "minimum": 1, "maximum": 200}}, ["path"]),
            ("read",), "read_children", "list_operators", read_only=True, idempotent=True))
-    T(Tool("tdflow_get_operator", "Get operator", "Type, family, flags, inputs, outputs and errors of one operator.",
-           obj({"path": PATH}, ["path"]), ("read",), "read_path", "get_operator", read_only=True, idempotent=True))
+    T(Tool("tdflow_get_operator", "Get operator", "Type, family, flags, inputs, outputs and errors of one operator. "
+           "Request connectors for scoped port indexes, peer connectors and a Base COMP's exposed Out operator.",
+           obj({"path": PATH, "connectors": {"type": "boolean"}}, ["path"]),
+           ("read",), "read_path", "get_operator", read_only=True, idempotent=True))
     T(Tool("tdflow_list_operator_types", "Find operator types", "Search the local, TDflowMCP-supported operator "
            "catalog by family, exact or partial name, or purpose. Read the actual parameters on an instance with "
            "tdflow_get_parameters. Creation still checks your permissions and the destination.",

@@ -87,6 +87,10 @@ def run(comp, ext, T, frames, until, checkpoint, R):
         T("D.refused_wire_leaves_input_empty", not consumer.inputConnectors[0].connections)
         T("D.refused_wire_leaves_cook_counts", before_cooks == [node.totalCooks for node in observed])
         consumer.inputConnectors[0].connect(reusable.outputConnectors[0])
+        before_cooks = [node.totalCooks for node in observed]
+        if requested.get("verify_connectors"):
+            yield checkpoint("component_external_wire_verified", {"source": reusable.path, "consumer": consumer.path})
+            T("D.connector_reads_are_passive", before_cooks == [node.totalCooks for node in observed])
         consumer.cook(force=True)
         before = float(consumer.numpyArray()[0, 0, 0])
         reusable.par.Amount = .75

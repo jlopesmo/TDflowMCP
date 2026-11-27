@@ -168,11 +168,42 @@ def diagnostics(data):
     repair.check("owner_locked_snapshot_visible", mcp.ok(locked) and locked.get("bytes", 0) > 0)
 
 
-def external_output(data):
+def external_output(data, verify_connectors):
     scenario = REPORT["D"]
-    result = scenario.call(mcp.MCP(mcp.TOKENS["B"]), "tdflow_connect",
-                           src=data["source"], dst=data["consumer"])
+    builder = mcp.MCP(mcp.TOKENS["B"])
+    if verify_connectors:
+        src = scenario.call(builder, "tdflow_get_operator", path=data["source"], connectors=True)
+        dst = scenario.call(builder, "tdflow_get_operator", path=data["consumer"], connectors=True)
+        outputs = src.get("connectors", {}).get("outputs", {}).get("rows")
+        inputs = dst.get("connectors", {}).get("inputs", {}).get("rows")
+        scenario.check("exposed_native_top_port", outputs == [{
+            "index": 0, "peers": [], "complete": True,
+            "exposed_output": {"path": data["source"] + "/output", "type": "outTOP", "family": "TOP"},
+        }] and src.get("family") == "COMP")
+        scenario.check("empty_consumer_input", inputs == [{"index": 0, "peers": [], "complete": True}])
+    result = scenario.call(builder, "tdflow_connect", src=data["source"], dst=data["consumer"])
     scenario.check("native_comp_to_top_refused", result.get("code") == "INVALID_ARGS")
+
+
+def verify_external_output(data):
+    scenario = REPORT["D"]
+    builder = mcp.MCP(mcp.TOKENS["B"])
+    read = scenario.call(builder, "tdflow_get_operator", path=data["consumer"], connectors=True)
+    rows = read.get("connectors", {}).get("inputs", {}).get("rows")
+    scenario.check("exact_owner_wire_verified", rows == [{
+        "index": 0, "peers": [{"path": data["source"], "index": 0}], "complete": True,
+    }])
+    create = mcp.admin("POST", "/setup/api/tokens", {
+        "display_name": "Connector reader", "role": "observer", "scope": data["consumer"],
+    })
+    token = (gate.base.jbody(create) or {}).get("token")
+    scenario.check("connector_probe_credential_created", bool(token))
+    reader = mcp.MCP(token)
+    partial = scenario.call(reader, "tdflow_get_operator", path=data["consumer"], connectors=True)
+    rows = partial.get("connectors", {}).get("inputs", {}).get("rows")
+    scenario.check("hidden_connector_peer_omitted",
+                   rows == [{"index": 0, "peers": [], "complete": False}]
+                   and json.dumps(data["source"]) not in json.dumps(partial))
 
 
 def definition_tests():
@@ -336,6 +367,7 @@ def main():
     parser.add_argument("--tox", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--baseline", action="store_true")
+    parser.add_argument("--verify-connectors", action="store_true")
     args = parser.parse_args()
     if any(gate.oslisteners.other_listeners(port, 0) for port in gate.base.PORTS):
         raise SystemExit("A TouchDesigner test port is already in use.")
@@ -346,8 +378,10 @@ def main():
     project.mkdir()
     shutil.copyfile(Path(__file__).with_name("td_runner_component.py"), run / "td_runner_component.py")
     handlers = {"setup_ready": mcp.cp_setup_ready, "pair_approved": mcp.cp_pair_approved,
-                "component_workflows": lambda _d, _p: scenarios(args.baseline),
-                "component_external_wire": lambda d, _p: external_output(d),
+                "component_workflows": lambda _d, _p: dict(scenarios(args.baseline),
+                                                           verify_connectors=args.verify_connectors),
+                "component_external_wire": lambda d, _p: external_output(d, args.verify_connectors),
+                "component_external_wire_verified": lambda d, _p: verify_external_output(d),
                 "component_diagnostics": lambda data, _p: diagnostics(data),
                 "component_definition_tests": lambda _d, _p: definition_tests(),
                 "component_definition_stale": lambda _d, _p: stale_tests(),

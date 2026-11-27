@@ -70,11 +70,16 @@ every permission itself; nothing here grants access.
   access to TouchDesigner and the host. Script CHOP, SOP and TOP creation is unavailable.
   If the callback preview is refused, ask the owner to switch off Active on that DAT in TouchDesigner.
 - Only Table and Text DATs tagged `tdflowdata` by the user support editing without execute and code approval.
-- To try something risky, copy the component first: `tdflow_experiment_create` (path, name) makes a copy
-  next to it. Work on the copy, then `tdflow_experiment_promote` it to replace the original, or
-  `tdflow_experiment_discard` it. With `inert: true` the copy is a snapshot that does not cook; promoting it
-  brings back its operators and parameters (executable operators stay switched off until they are switched
-  on with approval, and wiring is reported in `connections_lost`).
+- To try a change separately, use `tdflow_experiment_create` to copy a component next to the original.
+  Work on the copy, then use `tdflow_experiment_promote` or `tdflow_experiment_discard`.
+  For an isolated constant TOP network, `inert: true` creates a cook-disabled component checkpoint.
+  Restore only a checkpoint that still matches the original lineage in the running project. If the
+  restore is refused, show the conflict and ask the owner to inspect it in TouchDesigner.
+  Check `connections_lost` after promoting a working experiment.
+- To verify owner wiring, call `tdflow_get_operator` with `connectors: true` on the Base COMP and consumer.
+  Check the exposed Out TOP and the peer paths and indexes. A row with `complete: false` has unavailable
+  peer evidence. The owner makes the external connection in TouchDesigner. Reinspect the exact input,
+  then check the control's effect with owner-observed output or eligible locked TOP evidence.
 - `tdflow_capture_top` returns an owner-locked TOP's image (one per second) on Windows with TouchDesigner
   2025.32440. For `TOP_LOCK_REQUIRED`, ask the owner to lock the output TOP in TouchDesigner and switch off
   bypass on it and its containing components. Leave lock flags to the owner, including when you have Python

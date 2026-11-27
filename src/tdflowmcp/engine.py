@@ -356,6 +356,7 @@ class Engine:
                                  "policy_version": verdict.policy_version, "targets": targets}}
             return {"deny": None, "targets": targets, "rule": verdict.rule_id, "policy_version": verdict.policy_version,
                     "snapshot": res.context.get("snapshot"),
+                    "mutation_identity": res.context.get("mutation_identity"),
                     "approval": {"rule": verdict.rule_id, "reason": verdict.reason,
                                  "reasons": self.policy.approval_reasons(res.targets),
                                  "facts": _approval_facts(res, review_sha, self._runtime_id), "review": review_text}}
@@ -363,7 +364,8 @@ class Engine:
             return {"deny": {"code": verdict.code, "rule": verdict.rule_id, "reason": verdict.reason,
                              "target": verdict.target, "policy_version": verdict.policy_version, "targets": targets}}
         return {"deny": None, "targets": targets, "rule": verdict.rule_id, "policy_version": verdict.policy_version,
-                "snapshot": res.context.get("snapshot"), "read_identity": res.context.get("read_identity")}
+                "snapshot": res.context.get("snapshot"), "read_identity": res.context.get("read_identity"),
+                "mutation_identity": res.context.get("mutation_identity")}
 
     def _approval_gate(self, tool: Tool, args: dict, agent: Agent, base: dict, plan: dict,
                        given_id: Optional[str]) -> Optional[dict]:
@@ -439,6 +441,8 @@ class Engine:
                                                       "nothing was executed. Retry.")
         if plan.get("read_identity") != res.context.get("read_identity"):
             raise ToolFailure("PRECONDITION_CHANGED", "An inspection target was replaced. Retry the request.")
+        if plan.get("mutation_identity") != res.context.get("mutation_identity"):
+            raise ToolFailure("PRECONDITION_CHANGED", "The mutation target or its connections changed. Retry the request.")
         if plan.get("approved"):
             review = res.context.get("approval_review")
             try:
