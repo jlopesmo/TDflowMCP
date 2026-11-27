@@ -1,14 +1,16 @@
 """MCP protocol conformance (2026-07-28 + legacy), tool registry/schemas, and the call engine."""
+from dataclasses import replace
 import json
 import os
 import shutil
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from tdflowmcp import protocol, schema
 from tdflowmcp.engine import Adapter, Engine, Resolution, ToolFailure
 from tdflowmcp.identity import Identity
-from tdflowmcp.policy import Policy, Target
+from tdflowmcp.policy import Grant, Policy, Target
 from tdflowmcp.protocol import K_CAPS, K_VERSION, MODERN
 from tdflowmcp.store import Store
 from tdflowmcp.tools import Registry, RegistryError, Tool, core_registry
@@ -150,7 +152,7 @@ class ProtocolTests(unittest.TestCase):
 
 class RegistryTests(unittest.TestCase):
     def test_registered_tools_with_classification(self):
-        self.assertEqual(len(ALL), 33)
+        self.assertEqual(len(ALL), 34)
         reg = core_registry()
         for t in reg.all():
             d = t.describe()
@@ -581,6 +583,64 @@ class EngineTests(unittest.TestCase):
         self.eng.main = dispatch
         self.assertEqual(self.eng.call(self.tid, "tdflow_compare_tops", args)["structuredContent"]["code"], "DENIED")
         self.assertEqual(self.ad.executed, [])
+
+    def test_network_diagram_rejects_a_replaced_component(self):
+        ids = iter((1, 2))
+        path = "/project1/fx"
+        self.ad.resolve = lambda _tool, _args: Resolution([Target("read", path)], {"read_identity": next(ids)})
+        result = self.eng.call(self.tid, "tdflow_capture_network", {"path": path})
+        self.assertEqual(result["structuredContent"]["code"], "PRECONDITION_CHANGED")
+        self.assertEqual(self.ad.executed, [])
+        self.assertFalse(any(block["type"] == "image" for block in result["content"]))
+
+    def test_network_diagram_does_not_deliver_after_revocation_during_render(self):
+        path = "/project1/fx"
+        self.ad.resolve = lambda _tool, _args: Resolution([Target("read", path)], {"read_identity": 1})
+        self.ad.execute = lambda *_args: {"nodes": [], "edges": []}
+
+        def revoke_and_render(_nodes, _edges):
+            self.idn.revoke(self.tid)
+            return b"image bytes"
+
+        with patch("tdflowmcp.engine.DIAGRAM.render", side_effect=revoke_and_render):
+            result = self.eng.call(self.tid, "tdflow_capture_network", {"path": path})
+        self.assertEqual(result["structuredContent"]["code"], "DENIED")
+        self.assertFalse(any(block["type"] == "image" for block in result["content"]))
+        self.assertEqual(self.kinds(), ["intent", "outcome", "deny"])
+
+    def test_network_diagram_does_not_deliver_under_changed_child_grants(self):
+        path = "/project1/fx"
+        self.ad.resolve = lambda _tool, _args: Resolution([Target("read", path)], {"read_identity": 1})
+        self.ad.execute = lambda *_args: {"nodes": [], "edges": []}
+
+        def restrict_and_render(_nodes, _edges):
+            agent = self.idn.agent_for_token(self.tid)
+            deny = Grant(path + "/child", frozenset({"read"}), effect="deny")
+            self.idn.agents[agent.id] = replace(agent, grants=agent.grants + (deny,))
+            return b"image bytes"
+
+        with patch("tdflowmcp.engine.DIAGRAM.render", side_effect=restrict_and_render):
+            result = self.eng.call(self.tid, "tdflow_capture_network", {"path": path})
+        self.assertEqual(result["structuredContent"]["code"], "PRECONDITION_CHANGED")
+        self.assertFalse(any(block["type"] == "image" for block in result["content"]))
+
+    def test_network_diagram_fails_closed_if_audit_outcome_is_unavailable(self):
+        from tdflowmcp.store import AuditUnavailable
+
+        path = "/project1/fx"
+        self.ad.resolve = lambda _tool, _args: Resolution([Target("read", path)], {"read_identity": 1})
+        self.ad.execute = lambda *_args: {"nodes": [], "edges": []}
+        append = self.store.append
+
+        def unavailable(kind, *args, **kwargs):
+            if kind == "outcome":
+                raise AuditUnavailable("test")
+            return append(kind, *args, **kwargs)
+
+        self.store.append = unavailable
+        result = self.eng.call(self.tid, "tdflow_capture_network", {"path": path})
+        self.assertEqual(result["structuredContent"]["code"], "OUTCOME_UNRECORDED")
+        self.assertFalse(any(block["type"] == "image" for block in result["content"]))
 
     def test_main_step_not_run_or_unknown(self):
         from tdflowmcp.engine import MainNotRun, MainUnknown

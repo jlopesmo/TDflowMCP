@@ -6,7 +6,7 @@ and the tool registry. Nothing here touches TouchDesigner; the component's TD ad
 (``src/td_adapter/``) drives it from the main thread.
 """
 
-__version__ = "1.5.0"
-PHASE = "1.5.0"
-SKILL_VERSION = "1.11"          # bundled Skills (src/skills), major = tool surface
+__version__ = "1.6.0"
+PHASE = "1.6.0"
+SKILL_VERSION = "1.12"          # bundled Skills (src/skills), major = tool surface
 TOOL_SURFACE_VERSION = "1"   # 16 Phase 1B tools; additive since: 4 memory (2A), approval status (2B), script (3), network (4), capabilities (D25)

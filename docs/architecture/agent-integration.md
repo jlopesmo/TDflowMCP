@@ -76,6 +76,8 @@ Skill 1.10 guides agents to retain a change's audit sequence, bind undo to that 
 
 Skill 1.11 guides agents to use the verified operator catalog coverage and confirm runtime state on actual instances. [v1.5 milestone](../milestones/v1.5-procedural-authoring.md)
 
+Skill 1.12 explains how to map a network diagram's numbered markers to readable operator facts and verify exact connectors before a supported correction. Agents use the structured facts when the client cannot show the attached image. [v1.6 milestone](../milestones/v1.6-network-vision.md)
+
 - `tdflow_whoami` returns `server_version`, `tool_surface_version`, `expected_skill_version`.
 - **Skill 1.1 (Phase 2A):** adds the project-memory workflow (resume before changing, checkpoint, handoff with checkable claims, the memory error codes). The tool surface stays `1` because the change is additive.
 - **Skill 1.2 (Phase 2A increment 3):** adds default placement of created operators, the optional handoff `status`, `fingerprint.parameter_changes` on resume, and repository-mode memory (`memory.authority`, the repository-memory permission, `MEMORY_LINK_MISMATCH`). Additive again, so the tool surface stays `1`.

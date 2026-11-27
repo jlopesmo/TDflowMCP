@@ -75,6 +75,9 @@
     "tdflowmcp.opguides": {
       "path": "src/tdflowmcp/opguides.py"
     },
+    "tdflowmcp.network_diagram": {
+      "path": "src/tdflowmcp/network_diagram.py"
+    },
     "tdflowmcp.protocol": {
       "path": "src/tdflowmcp/protocol.py"
     },
@@ -757,6 +760,7 @@
   "active_tools": [
     "tdflow_approval_status",
     "tdflow_capabilities",
+    "tdflow_capture_network",
     "tdflow_capture_top",
     "tdflow_compare_tops",
     "tdflow_connect",

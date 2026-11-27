@@ -73,6 +73,9 @@ CATALOG: Tuple[Cap, ...] = (
     Cap("capture", "inspect", "Look at owner-locked TOP images", ("tdflow_capture_top", "tdflow_compare_tops"), ("read",),
         note="Windows with TouchDesigner 2025.32440. The owner locks the TOP with bypass off on it and its "
              "enclosing components. Up to 1920x1080, one image per second."),
+    Cap("network_diagram", "inspect", "View a scoped network diagram", ("tdflow_capture_network",), ("read",),
+        note="Rendered from readable nodes and wires on Windows with TouchDesigner 2025.32440. "
+             "Shows one level of a component. One diagram per second per component."),
     # ---- editing ----------------------------------------------------------------------------------------------
     Cap("set_values", "edit", "Set constant parameter values", ("tdflow_set_parameters",), ("update",),
         note="Parameters that run code or name files are never plain values (see below)."),

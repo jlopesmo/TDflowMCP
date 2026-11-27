@@ -375,3 +375,11 @@ Active Script CHOP, SOP and TOP authoring is deferred. Their Setup Parameters pu
 Release PR #17 merged as `737d5c7fe2541c515c38607362c4244240ff9187` after exact-head CI, full packaged acceptance and independent code and security review. The annotated `v1.5.0` tag points to that commit. The clean tagged package passed the full acceptance suite on Windows with TouchDesigner 2025.32440 under the owner's v1.5.0-only exception. [Release PR](https://github.com/jlopesmo/TDflowMCP/pull/17) · [Owner decision](https://github.com/jlopesmo/TDflowMCP/issues/14#issuecomment-7224593407)
 
 The five release assets are public. GitHub-hosted Windows and Ubuntu runners independently downloaded them and verified the recorded hashes, tag commit and byte equality of both binary files. [Public release](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.5.0) · [Release receipts](validation-index.md#v150-tagged-release)
+
+## v1.6 Network Visual Inspection
+
+The disposable Windows and TouchDesigner 2025.32440 probe found pane owner, bounds and view metadata without a pane image API. The open pane state matched before and after the read-only probe. Issue #19 uses the scope-filtered schematic path. [Development evidence](validation-index.md#v16-network-visual-inspection-development) · [ADR-0019](../decisions/0019-network-visual-inspection.md)
+
+The `1.6.0.dev2` package adds an audited, read-only network diagram. A 20-node scoped fixture received a 960×640 PNG and structured positions and wire indexes. Moving hidden nodes and adding a hidden wire left both outputs identical. Cook, callback and pane state remained stable. Claude Code interpreted an image-only test and used structured connector reads to correct and verify a fixture wire. Both installed Codex engines received PNG and structured facts. Full release verification is pending. [Packaged evidence](validation-index.md#v16-network-visual-inspection-development)
+
+PR #21 carries the `1.6.0` release candidate. The owner approved the release-specific runtime exception and both merges after their checks. [Owner decision](https://github.com/jlopesmo/TDflowMCP/pull/21#issuecomment-7226593404)

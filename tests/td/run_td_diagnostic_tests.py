@@ -133,13 +133,13 @@ def unsupported_runtime():
            and "left" not in refused and all(part["type"] != "image" for part in content))
 
 
-def run_live(work, token, prompt, methods):
+def run_live(work, token, prompt, methods, *, endpoint=None):
     exe = shutil.which("claude")
     if not exe:
         return False, [], "", 0
     config = work / "diagnostic-mcp.json"
     config.write_text(json.dumps({"mcpServers": {"tdflow": {
-        "type": "http", "url": mcp.O + "/mcp", "headers": {"Authorization": "Bearer ${TDFLOW_TOKEN}"}
+        "type": "http", "url": endpoint or mcp.O + "/mcp", "headers": {"Authorization": "Bearer ${TDFLOW_TOKEN}"}
     }}}), encoding="utf-8")
     allowed = ["mcp__tdflow__" + name for name in methods]
     start = time.perf_counter()

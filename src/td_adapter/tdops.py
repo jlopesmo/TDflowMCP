@@ -29,6 +29,7 @@ from tdflowmcp import approvals as APR
 from tdflowmcp import insights as INS
 from tdflowmcp import layout as LAYOUT
 from tdflowmcp import memory as MEM
+from tdflowmcp import network_diagram as DIAGRAM
 from tdflowmcp import opguides as GUIDES
 from tdflowmcp.engine import Adapter, Resolution, ToolFailure
 from tdflowmcp.policy import ACTIVATION_PARAMS, APPROVABLE_CREATE_TYPES, EXECUTABLE_TYPES, PARAM_DENYLIST, SAFE_CREATE_TYPES, Target
@@ -58,6 +59,8 @@ LITERAL_OP_PATH = re.compile(r"/?(?:[A-Za-z0-9_]+|\.{1,2})(?:/(?:[A-Za-z0-9_]+|\
 MAX_WALK = 1000                    # operators visited per memory fingerprint (main-thread bound; review 10)
 MAX_LIST = 200
 MAX_CONNECTOR_ROWS = 24
+MAX_DIAGRAM_CHILDREN = 1024
+MAX_DIAGRAM_CONNECTOR_WORK = 2048
 CHECKPOINT_TOPS = frozenset({"constantTOP", "levelTOP", "noiseTOP", "nullTOP", "outTOP"})
 MAX_CHECKPOINT_TOPS = 24
 README_EMBEDDED = ("Project memory for this TouchDesigner project (TDflowMCP, embedded authority).\n"
@@ -175,6 +178,7 @@ class TDAdapter(Adapter):
         self.store_fn = store_fn                 # current Store (for DAT snapshots)
         self.protected = {}                      # op path -> "instance" | "tdflowproject"
         self._last_capture = 0.0
+        self._last_diagram = float("-inf")
         self.memory_changed = False              # Phase 2A: a record was written (Tell Your Coding Agent refresh)
         self._mem_cache = {}                     # (record name, text sha) -> parsed entry (review 9, F5b)
         self.refresh_protected()
@@ -242,7 +246,7 @@ class TDAdapter(Adapter):
                     raise ToolFailure("DAT_SOURCE_UNAVAILABLE", "Read the authored Text DAT or Execute DAT source. "
                                       "Computed, wired and file-linked DATs can trigger external reads or code.")
             context = {"op": o}
-            if tool.name == "tdflow_get_operator" and args.get("connectors"):
+            if tool.handler == "capture_network" or (tool.name == "tdflow_get_operator" and args.get("connectors")):
                 context["read_identity"] = int(o.id)
             return Resolution([self._facts(o, "read")], context)
         if k == "set_params":
@@ -871,6 +875,62 @@ class TDAdapter(Adapter):
                        "did not cook recently show stale or zero times. Hints are heuristics that point at where to "
                        "look, not findings.")
         return out
+
+    def _t_capture_network(self, args, res, label, readable):
+        """Snapshot native wiring and positions. The handler renders this plain data."""
+        if sys.platform != "win32" or str(td.app.build) != DIAGRAM.VERIFIED_BUILD:
+            raise ToolFailure("NETWORK_VISUAL_UNVERIFIED", "Network diagrams are verified on Windows with TouchDesigner 2025.32440.")
+        now = time.monotonic()
+        if now - self._last_diagram < 1.0:
+            raise ToolFailure("RATE_LIMITED", "Network diagrams are limited to one request per second per component.")
+        self._last_diagram = now
+        deadline = now + 0.05
+        op = res.context["op"]
+        children = op.children
+        limited = "This network exceeds the inspection work limit. Inspect a smaller component."
+        if len(children) > MAX_DIAGRAM_CHILDREN:
+            raise ToolFailure("NETWORK_VISUAL_LIMIT", limited)
+        visible = sorted(readable([self._facts(child, "read") for child in children]), key=lambda t: t.path)
+        allowed = {target.path: index for index, target in enumerate(visible[:DIAGRAM.MAX_NODES], 1)}
+        by_path = {child.path: child for child in children if child.path in allowed}
+        nodes = [{"id": ident, "path": path, "name": by_path[path].name, "type": by_path[path].OPType,
+                  "family": by_path[path].family, "x": _pos(by_path[path], "nodeX"),
+                  "y": _pos(by_path[path], "nodeY")} for path, ident in allowed.items()]
+        if time.monotonic() > deadline:
+            raise ToolFailure("NETWORK_VISUAL_LIMIT", limited)
+        edges, partial_edges = self._diagram_edges(allowed, by_path, deadline, limited)
+        locations = {}
+        for node in nodes:
+            locations.setdefault((node["x"], node["y"]), []).append(node["id"])
+        overlaps = [ids for ids in locations.values() if len(ids) > 1][:8]
+        return {"path": op.path, "representation": "rendered_network_diagram", "nodes": nodes, "edges": edges,
+                "partial": len(nodes) < len(visible) or partial_edges, "overlapping_nodes": overlaps,
+                "note": "Solid arrows show native wires between shown nodes. Dotted lines lead from a displaced "
+                        "label to its actual position. IDs match the structured node rows. An omitted wire does "
+                        "not establish that a port is unconnected. Confirm state with structured tools."}
+
+    @staticmethod
+    def _diagram_edges(allowed, by_path, deadline, limited):
+        edges = []
+        work = MAX_DIAGRAM_CONNECTOR_WORK
+        for path, target in allowed.items():
+            connectors = by_path[path].inputConnectors
+            work -= len(connectors)
+            if work < 0 or time.monotonic() > deadline:
+                raise ToolFailure("NETWORK_VISUAL_LIMIT", limited)
+            for connector in connectors:
+                links = connector.connections
+                work -= len(links)
+                if work < 0 or time.monotonic() > deadline:
+                    raise ToolFailure("NETWORK_VISUAL_LIMIT", limited)
+                for link in links:
+                    source = allowed.get(link.owner.path)
+                    if source is not None:
+                        if len(edges) == DIAGRAM.MAX_EDGES:
+                            return edges, True
+                        edges.append({"source": source, "target": target, "output_index": int(link.index),
+                                      "input_index": int(connector.index)})
+        return edges, False
 
     # -- mutations --
     def _t_set_parameters(self, args, res, label, readable):
