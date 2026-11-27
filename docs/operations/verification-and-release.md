@@ -53,4 +53,6 @@ Both backfills passed on GitHub-hosted Windows and Ubuntu runners. The validatio
 
 **v1.4.0 compatibility exception (owner, 2026-11-27).** The owner approved Windows with TouchDesigner **2025.32440** for v1.4.0 only. Tests on 2025.33230 were not executed. All other release gates apply. [Official downloads](https://derivative.ca/download)
 
+**v1.5.0 compatibility exception (owner, 2026-11-27).** The owner approved runtime verification on Windows with TouchDesigner **2025.32440** for v1.5.0 only. Newer-build testing was not executed. Windows and Ubuntu source CI and hosted download verification still apply. [Owner decision](https://github.com/jlopesmo/TDflowMCP/issues/14#issuecomment-7224593407)
+
 **Never:** release from `dev`, release an untested `.tox`, or claim compatibility with a TD build that was not tested.

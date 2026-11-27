@@ -370,4 +370,8 @@ The `1.5.0.dev1` candidate adds optional, offline operator guidance to the scope
 
 Active Script CHOP, SOP and TOP authoring is deferred. Their Setup Parameters pulses advanced cook counters with parent cooking disabled, and the docked factory DAT could remain docked after an owner selected a different callback DAT. The candidate refused creation for all three types through the real MCP endpoint. [ADR-0018](../decisions/0018-script-operator-lifecycle.md)
 
-The development binary passed the full packaged Windows and TouchDesigner 2025.32440 regression, including real Claude Code and Codex sessions with disposable client homes. PR #17 carries the `1.5.0` release candidate. Exact-head verification and owner release gates apply before promotion. The public download remains v1.4.0 while those gates are open. [Release PR](https://github.com/jlopesmo/TDflowMCP/pull/17) · [Validation](validation-index.md#v15-procedural-authoring-development)
+### v1.5.0 release
+
+Release PR #17 merged as `737d5c7fe2541c515c38607362c4244240ff9187` after exact-head CI, full packaged acceptance and independent code and security review. The annotated `v1.5.0` tag points to that commit. The clean tagged package passed the full acceptance suite on Windows with TouchDesigner 2025.32440 under the owner's v1.5.0-only exception. [Release PR](https://github.com/jlopesmo/TDflowMCP/pull/17) · [Owner decision](https://github.com/jlopesmo/TDflowMCP/issues/14#issuecomment-7224593407)
+
+The five release assets are public. GitHub-hosted Windows and Ubuntu runners independently downloaded them and verified the recorded hashes, tag commit and byte equality of both binary files. [Public release](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.5.0) · [Release receipts](validation-index.md#v150-tagged-release)
