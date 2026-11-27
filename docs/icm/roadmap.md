@@ -96,7 +96,7 @@ v1.3.0 was published after passive visual checks, independent review, and Window
 
 ## v1.4 connected workflows and recovery
 
-The owner authorized [Issue #13](https://github.com/jlopesmo/TDflowMCP/issues/13). Verify the existing component, experiment and undo workflows first, then complete scoped delivery and recovery and pass the v1.4 release gates. [Milestone](../milestones/v1.4-workflow-recovery.md)
+v1.4.0 completed the owner-connected component verification and scoped checkpoint recovery in [Issue #13](https://github.com/jlopesmo/TDflowMCP/issues/13). The tagged package and all five hosted assets passed verification. [Milestone](../milestones/v1.4-workflow-recovery.md) · [Release receipts](validation-index.md#v140-tagged-release)
 
 [Issue #14](https://github.com/jlopesmo/TDflowMCP/issues/14) follows v1.4. Its Script lifecycle prototype must pass independent review and gain explicit owner approval before any creation or activation policy changes. A/B Candidate Development Mode is outside both milestones.
 
