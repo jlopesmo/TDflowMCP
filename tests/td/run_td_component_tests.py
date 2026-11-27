@@ -214,11 +214,19 @@ def checkpoint_grants(data, phase):
         edit = scenario.call(actor, SET, path=data["original"] + "/source", values={"amp": .75})
         scenario.check("prepared_constant_checkpoint", mcp.ok(snap) and mcp.ok(edit))
         return
+    if phase.startswith("undo_"):
+        undo = scenario.call(actor, "tdflow_undo", expected_audit_seq=data["audit_seq"])
+        if phase == "undo_denied":
+            scenario.check("checkpoint_undo_respects_parameter_denylist", undo.get("rule_id") == "G3")
+        else:
+            scenario.check("checkpoint_undo_after_grant_allows_parameter", mcp.ok(undo) and undo.get("verified") is True)
+        return
     result = scenario.call(actor, "tdflow_experiment_promote", path=data["checkpoint"])
     if phase == "denied":
         scenario.check("restore_respects_parameter_denylist", result.get("rule_id") == "G3")
     else:
         scenario.check("restore_after_grant_allows_parameter", mcp.ok(result) and result.get("verified") is True)
+        return {"audit_seq": result.get("audit_seq")}
 
 
 def definition_tests():
@@ -400,6 +408,8 @@ def main():
                 "component_checkpoint_prepare": lambda d, _p: checkpoint_grants(d, "prepare"),
                 "component_checkpoint_denied": lambda d, _p: checkpoint_grants(d, "denied"),
                 "component_checkpoint_allowed": lambda d, _p: checkpoint_grants(d, "allowed"),
+                "component_checkpoint_undo_denied": lambda d, _p: checkpoint_grants(d, "undo_denied"),
+                "component_checkpoint_undo_allowed": lambda d, _p: checkpoint_grants(d, "undo_allowed"),
                 "component_diagnostics": lambda data, _p: diagnostics(data),
                 "component_definition_tests": lambda _d, _p: definition_tests(),
                 "component_definition_stale": lambda _d, _p: stale_tests(),

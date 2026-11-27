@@ -184,19 +184,33 @@ def checkpoint_guard(network, ext, T, checkpoint):
     yield checkpoint("component_checkpoint_prepare", data)
     identity = ext.identity
     agent = next(a for a in identity.agents.values() if a.display_name.startswith("Agent E"))
-    identity.agents[agent.id] = replace(agent, grants=tuple(
+    restricted = replace(agent, grants=tuple(
         replace(grant, param_denylist=("amp",)) for grant in agent.grants))
+    identity.agents[agent.id] = restricted
     try:
         yield checkpoint("component_checkpoint_denied", data)
         T("checkpoint.denial_keeps_original_and_copy",
           source.par.amp.val == .75 and network.op("checkpoint_copy") is not None)
     finally:
         identity.agents[agent.id] = agent
-    yield checkpoint("component_checkpoint_allowed", data)
+    receipt = yield checkpoint("component_checkpoint_allowed", data)
     restored = network.op("checkpoint_owned")
     T("checkpoint.verified_recovery_preserves_neighbor",
       restored.op("source").par.amp.val == .5 and network.op("checkpoint_copy") is None
       and unrelated.par.colorr.val == .125 and identity.agents[agent.id].grants == agent.grants)
+    undo_data = {**data, "audit_seq": receipt.get("audit_seq")}
+    identity.agents[agent.id] = restricted
+    try:
+        yield checkpoint("component_checkpoint_undo_denied", undo_data)
+        T("checkpoint.denied_undo_preserves_restored_network",
+          restored.op("source").par.amp.val == .5 and network.op("checkpoint_copy") is None)
+    finally:
+        identity.agents[agent.id] = agent
+    yield checkpoint("component_checkpoint_undo_allowed", undo_data)
+    T("checkpoint.verified_undo_preserves_neighbor",
+      network.op("checkpoint_owned").op("source").par.amp.val == .75
+      and network.op("checkpoint_copy").allowCooking is False and unrelated.par.colorr.val == .125
+      and identity.agents[agent.id].grants == agent.grants)
 
 
 def script_probe(network, T, frames):

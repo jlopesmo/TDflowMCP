@@ -446,6 +446,40 @@ class EngineTests(unittest.TestCase):
                                {"expected_audit_seq": changed["structuredContent"]["audit_seq"]})
         self.assertTrue(result["structuredContent"]["verified"])
 
+    def test_undo_reauthorizes_full_checkpoint_effects(self):
+        from dataclasses import replace
+
+        origin = "/project1/fx/original"
+        source = origin + "/source"
+        checkpoint = "/project1/fx/checkpoint"
+        reads = [Target("read", f"{checkpoint}/node{i}") for i in range(50)]
+        effects = [Target("delete", origin, change="delete"), Target("update", checkpoint, change="rename"),
+                   Target("update", source, change="param", param="amp")]
+        self.ad.resolve = lambda tool, args: Resolution(reads + effects)
+        self.ad.execute = lambda *args: {"_audit": {"kind": "promote", "inert": True,
+            "checkpoint_undo_effects": [[t.action, t.path, t.change, t.param] for t in effects]}}
+        result = self.eng.call(self.tid, "tdflow_experiment_promote", {"path": checkpoint})
+        self.assertFalse(result["isError"])
+        seq = result["structuredContent"]["audit_seq"]
+        self.idn.agents[self.agent.id] = replace(self.agent, grants=tuple(
+            replace(grant, param_denylist=("amp",)) for grant in self.agent.grants))
+        denied = self.eng.call(self.tid, "tdflow_undo", {"expected_audit_seq": seq})["structuredContent"]
+        self.assertEqual(denied["rule_id"], "G3")
+        self.assertEqual(self.ad.undone, [])
+        self.idn.agents[self.agent.id] = self.agent
+        restored = self.eng.call(self.tid, "tdflow_undo", {"expected_audit_seq": seq})["structuredContent"]
+        self.assertTrue(restored["verified"])
+
+    def test_undo_refuses_checkpoint_without_effect_record(self):
+        checkpoint = "/project1/fx/checkpoint"
+        self.ad.resolve = lambda tool, args: Resolution([Target("update", checkpoint)])
+        self.ad.execute = lambda *args: {"_audit": {"kind": "promote", "inert": True}}
+        result = self.eng.call(self.tid, "tdflow_experiment_promote", {"path": checkpoint})
+        seq = result["structuredContent"]["audit_seq"]
+        response = self.eng.call(self.tid, "tdflow_undo", {"expected_audit_seq": seq})["structuredContent"]
+        self.assertEqual(response["code"], "UNDO_FAILED")
+        self.assertEqual(self.ad.undone, [])
+
     def test_unverified_undo_is_an_error(self):
         self.eng.call(self.tid, "tdflow_set_parameters", {"path": "/project1/fx/a", "values": {"x": 1}})
         self.ad.undo = lambda rec, snap=None: {"undone": True, "verified": False}

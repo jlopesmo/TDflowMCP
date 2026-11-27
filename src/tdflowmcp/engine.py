@@ -795,7 +795,18 @@ class Engine:
         uses_snapshot = kind in ("dat_text", "custom_parameters")
         if uses_snapshot and detail.get("undo_runtime") != self._runtime_id:
             return self._deny(base, "UNDO_CONFLICT", "U1", "The recovery snapshot belongs to another runtime.", None)
-        targets = [Target(action=INVERSE[a], path=p) for a, p in _json(rec.get("targets"), []) if a != "read"]
+        if kind == "promote" and detail.get("inert"):
+            effects = detail.get("checkpoint_undo_effects")
+            if (not isinstance(effects, list) or not 1 <= len(effects) <= self.policy.max_ops
+                    or any(not isinstance(effect, list) or len(effect) != 4
+                           or any(not isinstance(field, str) for field in effect)
+                           or effect[0] not in ("update", "delete") or not effect[1].startswith("/")
+                           for effect in effects)):
+                return self._deny(base, "UNDO_FAILED", "U1", "The checkpoint effect record is unavailable.", None)
+            targets = [Target(action=INVERSE[action], path=path, change=change, param=param)
+                       for action, path, change, param in effects]
+        else:
+            targets = [Target(action=INVERSE[a], path=p) for a, p in _json(rec.get("targets"), []) if a != "read"]
         if kind in ("custom_parameters", "set_params"):
             previous = detail.get("prev")
             names = detail.get("affected_parameters") if kind == "custom_parameters" else (

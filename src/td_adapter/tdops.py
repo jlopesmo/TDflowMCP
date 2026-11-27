@@ -1200,6 +1200,10 @@ class TDAdapter(Adapter):
                           "experiment_type": e.OPType, "stack": stack, "reversible": "td_undo" if stack else "no"}}
         if inert:
             out["verified"] = True
+            out["_audit"]["checkpoint_undo_effects"] = [
+                [target.action, target.path, target.change, target.param]
+                for target in res.targets if target.action != "read"
+            ]
         return out
 
     def _t_experiment_discard(self, args, res, label, readable):
