@@ -358,4 +358,8 @@ The external Base COMP output connection remains owner-operated. Opt-in connecto
 
 Inert experiment recovery verifies the same live origin and copy, a bounded constant TOP tree, and the checkpoint's recorded state. A modified checkpoint, dynamic tree, or replaced origin was refused in the disposable harness. The corrected package verified current named-parameter denials during both restoration and its undo. The allowed operations preserved the unrelated operator and grants. The release gates are tracked in [the v1.4 milestone](../milestones/v1.4-workflow-recovery.md).
 
-The owner approved external wiring by the owner with scoped agent verification and a v1.4.0-only compatibility exception for Windows with TouchDesigner 2025.32440. The source version is `1.4.0`. The release requires the reviewed PR, an accepted clean tagged package, and verified hosted downloads. [Release procedure](../operations/verification-and-release.md)
+The owner approved external wiring by the owner with scoped agent verification and a v1.4.0-only compatibility exception for Windows with TouchDesigner 2025.32440.
+
+### v1.4.0 release
+
+Release PR #15 merged as `2a7634d924e1040d21d55eb429acd6043ed7cfc3` after CI and independent review. The annotated `v1.4.0` tag points to that commit. The clean tagged package passed the full Windows and TouchDesigner 2025.32440 acceptance suite. GitHub-hosted Windows and Ubuntu runners then verified all five public downloads. [Release PR](https://github.com/jlopesmo/TDflowMCP/pull/15) · [Public release](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.4.0) · [Release receipts](validation-index.md#v140-tagged-release)
