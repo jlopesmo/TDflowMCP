@@ -81,21 +81,31 @@ def image_only_endpoint(host):
             thread.join(5)
 
 
+def matches_vision_answer(answer):
+    line = re.search(r"^\s*(?:\*\*)?VISION(?:\*\*)?:\s*([^\n]+)", answer, re.IGNORECASE | re.MULTILINE)
+    if line is None:
+        return False
+    fields = [set(re.findall(r"[a-z]+", part.lower())) for part in line[1].split(",", 3)]
+    if len(fields) != 4 or any(words & {"not", "no", "unavailable"} for words in fields):
+        return False
+    direction, height, first_color, second_color = fields
+    return (direction & {"left", "right"} == {"left"} and height & {"above", "below"} == {"below"}
+            and bool(first_color & {"purple", "lavender"}) and not first_color & {"green", "mint"}
+            and bool(second_color & {"green", "mint"}) and not second_color & {"purple", "lavender"})
+
+
 def claude_interpretation(project, path, png):
     image = ImageOnly(path, png)
     prompt = (f"Call {CAPTURE} exactly once at {path}. Its only result is an attached PNG from a disposable "
               "fixture. Examine the PNG. What direction does the arrow between markers 1 and 2 point, left "
               "or right? Is marker 3 above or below marker 4? What are the fill colors of markers 1 and 5? "
               "Use common color names. If you cannot see the attached image, say NO_IMAGE. Otherwise reply as "
-              "VISION: direction, above/below, first color, second color. In a second sentence suggest one "
+              "VISION: direction, above/below, first color, second color. On a separate line suggest one "
               "layout improvement based solely on the image.")
     with image_only_endpoint(image) as (endpoint, token):
         ok, uses, answer, seconds = diagnostic.run_live(project, token, prompt, [CAPTURE], endpoint=endpoint)
-    normalized = " ".join(re.findall(r"[a-z]+", answer.lower()))
-    parsed = re.search(r"vision left below (?:(?:light|pale) )?(?:purple|lavender) (?:and )?"
-                       r"(?:(?:light|pale) )?(?:green|mint)", normalized)
     tool_calls = [part for part in uses if part.get("name") == "mcp__tdflow__" + CAPTURE]
-    verified = ok and image.calls == 1 and len(tool_calls) == 1 and bool(parsed)
+    verified = ok and image.calls == 1 and len(tool_calls) == 1 and matches_vision_answer(answer)
     gate.T("vision.claude_interprets_image_without_text_facts", verified, answer=answer,
            forwarded_images=image.calls, diagram_calls=len(tool_calls), seconds=seconds)
     return {"client": "Claude Code", "model_observation": answer, "seconds": seconds, "image_only": True,
