@@ -5,7 +5,7 @@ through MCP. It works within the permissions you grant and keeps a tamper-eviden
 computer (127.0.0.1). It never installs software, and it changes your agent's configuration only after you approve
 the exact change in TouchDesigner.
 
-**Version 1.3.0, provided for evaluation.** The verified cached TOP inspection runtime is **Windows** with TouchDesigner **2025.32440**.
+**Version 1.4.0, provided for evaluation.** The verified runtime is **Windows** with TouchDesigner **2025.32440**.
 Newer TouchDesigner builds and macOS are not verified. Try it first in a copy of a project, or in one you can afford
 to experiment with. The repository has no open-source license yet: you may download and evaluate the component, but
 that does not grant rights to redistribute, modify or commercially reuse it.
@@ -28,8 +28,8 @@ Choose the `TDflowMCP-vX.Y.Z.tox` asset when available. Compare its SHA-256 with
 `SHA256SUMS-versioned` for v1.0.0 and v1.0.1 aliases. `TDflowMCP.json` records the same hash for both filenames.
 The compatibility download `TDflowMCP.tox` is listed in `SHA256SUMS`.
 
-- PowerShell, using the versioned filename. `Get-FileHash .\TDflowMCP-v1.3.0.tox -Algorithm SHA256`
-- macOS / Linux, to check the file. `shasum -a 256 TDflowMCP-v1.3.0.tox`
+- PowerShell, using the versioned filename. `Get-FileHash .\TDflowMCP-v1.4.0.tox -Algorithm SHA256`
+- macOS / Linux, to check the file. `shasum -a 256 TDflowMCP-v1.4.0.tox`
 
 ## 2. Add the component
 1. Save your project first (TDflowMCP keeps its data next to the saved `.toe`).
@@ -185,7 +185,13 @@ On Windows with TouchDesigner 2025.32440, lock the output TOP in TouchDesigner a
 
 The agent can search supported local operator types and inspect parameter names on an existing instance. Ask it to group the network in a Base COMP and propose a page of scalar controls. An Operator with `read`, `update` and `execute` access can request approval for definitions. Review the names, labels, defaults, and ranges, then approve expressions separately when the agent connects the controls to the network.
 
-When the agent adds the first Out TOP in a Base COMP, use that native connector to attach the component to your enclosing network. Pulse buttons in TouchDesigner after approving any associated callback changes. The agent can undo the last eligible edit to restore the previous definitions and order. Use TouchDesigner to rename or remove controls that may have existing dependencies.
+When the agent adds the first Out TOP to a Base COMP, ask it to check the exposed port and the intended consumer input. Make the connection in TouchDesigner, then ask the agent to verify the exact wire and check how the output responds to the control. Pulse buttons in TouchDesigner after approving any associated callback changes. Use TouchDesigner to rename or remove controls that may have existing dependencies.
+
+## Recovering an edit
+
+Ask the agent to use the mutation's audit sequence for undo and check the restored state. This ties the request to the exact change and prevents a stale retry from selecting a different one. If recovery is refused or cannot be verified, inspect the result in TouchDesigner before resuming.
+
+An inert component checkpoint supports an isolated, bounded constant TOP network in the running project. Recovery checks both trees, current grants, and the recorded state. Use TouchDesigner's own project recovery when a copy belongs to another run or the operator structure or checkpoint has changed. Project save remains a separate owner-approved action.
 
 ## Diagnosing a network
 
