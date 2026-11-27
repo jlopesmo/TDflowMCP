@@ -378,4 +378,6 @@ The five release assets are public. GitHub-hosted Windows and Ubuntu runners ind
 
 ## v1.6 Network Visual Inspection
 
-The disposable Windows and TouchDesigner 2025.32440 probe found pane owner, bounds and view metadata without a pane image API. The open pane state matched before and after the read-only probe. A scoped network schematic is proposed for Issue #19. [Development evidence](validation-index.md#v16-network-visual-inspection-development) · [ADR-0019](../decisions/0019-network-visual-inspection.md)
+The disposable Windows and TouchDesigner 2025.32440 probe found pane owner, bounds and view metadata without a pane image API. The open pane state matched before and after the read-only probe. Issue #19 uses the scope-filtered schematic path. [Development evidence](validation-index.md#v16-network-visual-inspection-development) · [ADR-0019](../decisions/0019-network-visual-inspection.md)
+
+The `1.6.0.dev1` package adds an audited, read-only network diagram. A 20-node scoped fixture received a 960×640 PNG and structured positions and wire indexes. Moving hidden nodes and adding a hidden wire left both outputs identical. Cook, callback and pane state remained stable. Client image interpretation and release verification are pending. [Packaged evidence](validation-index.md#v16-network-visual-inspection-development)

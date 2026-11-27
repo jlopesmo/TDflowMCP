@@ -112,6 +112,10 @@ def script():
         ext.launcher = lambda url: True
         yield from __import__("td_runner_diagnostics").run(comp, ext, T, frames, until, checkpoint, R)
         return
+    if MODE == "network_visual":
+        ext.launcher = lambda url: True
+        yield from __import__("td_runner_network_visual").run(comp, ext, T, frames, until, checkpoint, R)
+        return
     if MODE.startswith(("gate", "perf", "onboard", "dogfood", "memory", "native", "probe", "codex")):        # audit-worker gate + 1B-vs-worker comparison
         ext.launcher = lambda url: True
         yield from __import__("td_runner_gate").run(MODE, comp, ext, T, frames, until, checkpoint, R)

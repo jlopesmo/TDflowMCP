@@ -10,6 +10,6 @@
 | TDflowMCP v1.3 | v1.3.0 published and public downloads verified | [Visual diagnostics](v1.3-visual-diagnostics.md) |
 | TDflowMCP v1.4 | v1.4.0 published and public downloads verified | [Connected workflows and recovery](v1.4-workflow-recovery.md) |
 | TDflowMCP v1.5 | v1.5.0 published and public downloads verified. Active Script authoring deferred | [Procedural authoring](v1.5-procedural-authoring.md) |
-| TDflowMCP v1.6 | Disposable pane probe completed. Scoped diagram proposed | [Network Visual Inspection](v1.6-network-vision.md) |
+| TDflowMCP v1.6 | Scoped diagram implemented in development. Client vision and release checks pending | [Network Visual Inspection](v1.6-network-vision.md) |
 
 Detailed milestone files for Phase 2 onward will be written once Phase 1B passes, so the plans reflect spike and enforcement evidence.

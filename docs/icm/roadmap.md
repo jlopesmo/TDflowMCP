@@ -104,7 +104,7 @@ v1.5.0 delivered locally verified operator guidance and a procedural workflow us
 
 ## v1.6 Network Visual Inspection
 
-The owner approved Network Visual Inspection first, followed by separately gated Script lifecycle research after the v1.6 release. The installed-pane spike supports a scope-filtered diagram for the v1.6 implementation. [Issue #19](https://github.com/jlopesmo/TDflowMCP/issues/19) · [Issue #20](https://github.com/jlopesmo/TDflowMCP/issues/20) · [Milestone](../milestones/v1.6-network-vision.md)
+The owner approved Network Visual Inspection first, followed by separately gated Script lifecycle research after the v1.6 release. The scoped diagram passed its initial packaged checks. Client vision and release verification are the next gates. [Issue #19](https://github.com/jlopesmo/TDflowMCP/issues/19) · [Issue #20](https://github.com/jlopesmo/TDflowMCP/issues/20) · [Milestone](../milestones/v1.6-network-vision.md)
 
 ## D28 — Codex acceptance and release of 1.0.1 (owner, GitHub Issue #3, 2026-11-25)
 

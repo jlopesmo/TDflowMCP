@@ -32,6 +32,8 @@ For the v1.3 diagnostic workflow, `tdflow_describe_network` accepts optional `di
 
 `tdflow_compare_tops` requires `read` on both exact TOP paths. Both outputs must be owner-locked, outside bypass, and on the same verified Windows/TouchDesigner 2025.32440 runtime as capture. A texture is limited to 262,144 pixels. Different dimensions return dimensions alone. Same-size samples report aggregate aligned RGB deltas and near-black fractions using a 1/255 threshold. Alpha, compositing, color conversion, and source attribution are outside this measurement. Comparison shares capture's one-call-per-second budget and attaches no image. [Diagnostic milestone](../milestones/v1.3-visual-diagnostics.md)
 
+`tdflow_capture_network` requires `read` on an exact COMP and filters its direct children by their own read decisions. It returns a 960×640 schematic PNG and structured `nodes` and `edges`. Marker IDs identify rows within the response. Wire rows give the source and target IDs and exact connector indexes. Y increases upward in the returned TouchDesigner coordinates. The diagram is limited to 64 shown nodes and 128 wires. `partial` reports an output limit on readable facts. `NETWORK_VISUAL_LIMIT` refuses an oversized inspection without counts. The independent diagram budget allows one request per second per component on Windows with TouchDesigner 2025.32440. [Network visual milestone](../milestones/v1.6-network-vision.md)
+
 ## v1.2 component authoring
 
 - `tdflow_list_operator_types` reads a scoped COMP and lists installed, product-supported creation types. The catalog filters by name, family or a short curated purpose. It identifies types that need approval. Per-call grants and destination checks still determine creation. Optional `guidance: true` includes coverage, verified platform and build, and selected names, labels, styles and uses for covered types. `tdflow_get_parameters` gives actual parameter metadata and state on an instance.
@@ -59,6 +61,7 @@ For the v1.3 diagnostic workflow, `tdflow_describe_network` accepts optional `di
 | Tool | Classification | Purpose |
 |---|---|---|
 | `tdflow_capture_top` | read `path` | An owner-locked TOP's cached image as MCP image content (PNG/JPEG, ≤ 1920×1080, one per second). Image bytes are absent from audit and structured results. `TOP_LOCK_REQUIRED` covers unlocked or bypassed outputs, including inherited bypass. `TOP_READ_UNVERIFIED` covers runtimes outside Windows with TouchDesigner 2025.32440. |
+| `tdflow_capture_network` | read exact COMP `path` and filter each direct child | A rendered PNG plus authorized positions and native wire indexes. Bounded to one component level. `NETWORK_VISUAL_UNVERIFIED` covers other runtime combinations. |
 | `tdflow_lease_scope` | update `scope` (not the project root) | Reserve a scope: other agents' changes and undos inside or above it get `LEASED` (L2); release, expiry, a dashboard release, or the holder losing its token or permission end it; renewal for at most an hour |
 
 ## Continuity and memory tools

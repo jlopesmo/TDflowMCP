@@ -34,6 +34,7 @@ from tdflowmcp import capabilities as CAPS
 from tdflowmcp import codemode as CM
 from tdflowmcp import memory as MEM
 from tdflowmcp import memrepo as REPO
+from tdflowmcp import network_diagram as DIAGRAM
 from tdflowmcp.identity import Identity, Sessions
 from tdflowmcp.policy import CAP_MEMORY_REPO_WRITE, ROLES, Agent, Policy, Target
 from tdflowmcp.protocol import tool_error, tool_result
@@ -276,6 +277,13 @@ class Engine:
         # 3. Execute on the main thread (re-resolves; aborts if anything changed since the plan).
         try:
             out = m(lambda: self._execute(tool, args, agent, token_id, plan, label, snap_id))
+            if tool.handler == "capture_network":
+                try:
+                    png = DIAGRAM.render(out["nodes"], out["edges"])
+                except DIAGRAM.RenderLimit as exc:
+                    raise ToolFailure("NETWORK_VISUAL_LIMIT", str(exc)) from exc
+                out.update(width=DIAGRAM.WIDTH, height=DIAGRAM.HEIGHT, format="png", bytes=len(png),
+                           _image={"bytes": png, "mimeType": "image/png"})
             outcome, code, detail = "ok", None, out.pop("_audit", None)
         except ToolFailure as f:
             out, outcome, code, detail = None, ("unknown" if f.code == "OUTCOME_UNKNOWN" else "error"), f.code, f.extra.get("_audit")
@@ -314,6 +322,14 @@ class Engine:
             return tool_error(failure.code, failure.message, audit_seq=oseq, **extra)
         if mutating:
             out.update(audit_seq=oseq, undo_label=label if reversible != "no" else None, reversible=reversible != "no")
+        if tool.handler == "capture_network":
+            current = self.identity.agent_for_token(token_id)
+            if current is None or current.id != agent.id:
+                return self._deny(base, "DENIED", "A0", "The token was revoked. No diagram was delivered.", None)
+            if self.suspended():
+                return self._deny(base, "SUSPENDED", "K1", "All agents are suspended. No diagram was delivered.", None)
+            if self.policy.version(current) != plan["policy_version"]:
+                return self._deny(base, "PRECONDITION_CHANGED", "R0", "The read policy changed. Request a new diagram.", None)
         img = out.pop("_image", None)               # Phase 4: image content, encoded here (handler thread)
         r = tool_result(out)
         if isinstance(img, dict) and img.get("bytes"):
@@ -470,6 +486,8 @@ class Engine:
         if plan.get("approved") and v.policy_version != plan["policy_version"]:
             raise ToolFailure("APPROVAL_POLICY_CHANGED", "Your permissions changed since the approval; nothing was "
                                                          "executed. Ask again.")
+        if tool.handler == "capture_network" and v.policy_version != plan["policy_version"]:
+            raise ToolFailure("PRECONDITION_CHANGED", "The read policy changed. Request a new diagram.")
         if self.suspended():
             raise ToolFailure("SUSPENDED", "All agents are suspended; nothing was executed.")
         return self.adapter.execute(tool, args, res, label, lambda ts: self.policy.filter_readable(current, ts)[0])

@@ -233,6 +233,12 @@ def core_registry() -> Registry:
            "1800) or when you release them (release: true). Leases do not survive a restart.",
            obj({"scope": PATH, "ttl_s": {"type": "integer", "minimum": 30, "maximum": 1800},
                 "release": {"type": "boolean"}}, ["scope"]), ("update",), "lease", "lease_scope"))
+    T(Tool("tdflow_capture_network", "Diagram network", "Render a scoped schematic of an exact component's readable "
+           "direct children. The PNG labels the returned nodes by ID. Structured facts include their positions "
+           "and exact ports for wires between shown nodes. One diagram per second per component. "
+           "Verified on Windows with TouchDesigner 2025.32440.",
+           obj({"path": PATH}, ["path"]), ("read",), "read_children", "capture_network",
+           read_only=True, idempotent=True))
     # Phase 4: visual analysis. The adapter gates access to the frozen output.
     T(Tool("tdflow_capture_top", "Capture TOP", "Read an owner-locked TOP image (PNG or JPEG, up to 1920x1080, "
            "one per second). The TOP and enclosing components must have bypass off. "
