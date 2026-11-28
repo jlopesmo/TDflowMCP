@@ -14,15 +14,22 @@ if __name__ == "__main__":
     repo = Path(__file__).resolve().parents[2]
     sys.path[:0] = [str(repo / "spikes/v17"), str(Path(__file__).resolve().parent)]
 
-from recovery_ledger import Ledger, Refused
-from run_td_advanced_script_probe import FAMILIES, counts, prepare_stage, read_json, write_json
-from script_intent import source_preview
-from transfer_review import HOST_WARNING, Lease, binding, read_manifest, verify_transfer
+if __package__:
+    from spikes.v17.recovery_ledger import Ledger, Refused
+    from spikes.v17.script_intent import source_preview
+    from spikes.v17.transfer_review import HOST_WARNING, Lease, binding, read_manifest, verify_transfer
+    from .run_td_advanced_script_probe import FAMILIES, counts, prepare_stage, read_json, write_json
+else:
+    from recovery_ledger import Ledger, Refused
+    from run_td_advanced_script_probe import FAMILIES, counts, prepare_stage, read_json, write_json
+    from script_intent import source_preview
+    from transfer_review import HOST_WARNING, Lease, binding, read_manifest, verify_transfer
 
 
 BUILD = "2025.32440"
 POLICY = "issue-24-disposable"
 AGENT = "fixture-agent"
+PHASES = ("source", "owner", "fault", "crash", "restart")
 CALLBACK = """from os import environ, fsync, getpid
 from pathlib import Path
 
@@ -335,6 +342,19 @@ def checks_for(reports, recovery):
     }
 
 
+def phase_accepted(phase, report, pid, status, recovery):
+    if (not report or report.get("build") != BUILD or report.get("pid") != pid or "result" not in report
+            or not status["other_processes_untouched"]):
+        return False
+    if phase == "crash":
+        return status["exit"] != 0 and status["killed"] and recovery == 1
+    return status["exit"] == 0 and not status["killed"]
+
+
+def run_accepted(processes):
+    return tuple(processes) == PHASES and all(row["accepted"] for row in processes.values())
+
+
 def main():
     argparse.ArgumentParser(description=__doc__).parse_args()
     sys.path.insert(0, str(repo / "tools"))
@@ -350,7 +370,7 @@ def main():
     reports = {}
     processes = {}
     recovery = 0
-    for phase in ("source", "owner", "fault", "crash", "restart"):
+    for phase in PHASES:
         run = work / phase
         run.mkdir()
         if phase in ("owner", "fault", "crash"):
@@ -379,12 +399,12 @@ def main():
             if process.alive():
                 process.finish(0)
         others_untouched = process.others_untouched()
-        processes[phase] = {"exit": code, "killed": process.killed, "other_processes_untouched": others_untouched}
-        result = reports.get(phase) or {}
-        if (result.get("build") != BUILD or result.get("pid") != process.pid or not others_untouched
-                or (phase == "crash" and recovery != 1) or (phase != "crash" and (code != 0 or process.killed))):
+        status = {"exit": code, "killed": process.killed, "other_processes_untouched": others_untouched}
+        status["accepted"] = phase_accepted(phase, reports.get(phase), process.pid, status, recovery)
+        processes[phase] = status
+        if not status["accepted"]:
             break
-    complete = len(processes) == 5 and all(item and "result" in item for item in reports.values())
+    complete = run_accepted(processes)
     checks = checks_for(reports, recovery) if complete else {}
     report = work / "boundary-evidence.json"
     write_json(report, {"processes": processes, "reports": reports, "checks": checks,

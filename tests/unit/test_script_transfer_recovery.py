@@ -13,6 +13,21 @@ import unittest
 
 from spikes.v17.recovery_ledger import Ledger, Refused
 from spikes.v17.transfer_review import Lease, binding, read_manifest, verify_transfer
+from tests.td.run_td_script_boundary_probe import BUILD, PHASES, phase_accepted, run_accepted
+
+
+class SupervisorTests(unittest.TestCase):
+    def test_valid_final_observation_cannot_mask_failed_process(self):
+        report = {"build": BUILD, "pid": 123, "result": {}}
+        passed = {"exit": 0, "killed": False, "other_processes_untouched": True}
+        statuses = dict.fromkeys(PHASES, {"accepted": True})
+        self.assertTrue(phase_accepted("restart", report, 123, passed, 1))
+        self.assertTrue(run_accepted(statuses))
+        for override in ({"exit": 1}, {"killed": True}, {"other_processes_untouched": False}):
+            with self.subTest(override=override):
+                accepted = phase_accepted("restart", report, 123, {**passed, **override}, 1)
+                self.assertFalse(accepted)
+                self.assertFalse(run_accepted({**statuses, "restart": {"accepted": accepted}}))
 
 
 class TransferTests(unittest.TestCase):
