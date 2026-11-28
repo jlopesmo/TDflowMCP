@@ -112,7 +112,7 @@ The disposable prototype verified inert draft review and a controlled cold trans
 
 Owner-approved Issue #24 adds isolated boundary, manifest transfer and crash-recovery research after PR #23. The current recommendation retains the production deny and leaves an offline-only draft proposal as the smallest separately scoped next step. [Issue #24](https://github.com/jlopesmo/TDflowMCP/issues/24) · [Decision matrix](../milestones/v1.7-script-access.md#issue-24-boundary-and-recovery-follow-up)
 
-Issue #26 authorizes a v1.7.0 offline drafting workspace after PR #25. Product release requires new owner and compatibility decisions. Executable Script lifecycle remains deferred under Issue #20. [Milestone](../milestones/v1.7-offline-script-drafts.md) · [Offline decision](../decisions/0020-offline-script-drafts.md)
+Issue #26 delivered the offline drafting workspace in v1.7.0. The clean tagged package passed Windows TouchDesigner 2025.32440 acceptance and independent hosted Windows and Ubuntu download verification. Executable Script lifecycle remains deferred under Issue #20. [Release](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.7.0) · [Release receipts](validation-index.md#v170-tagged-release) · [Milestone](../milestones/v1.7-offline-script-drafts.md) · [Offline decision](../decisions/0020-offline-script-drafts.md)
 
 ## D28 — Codex acceptance and release of 1.0.1 (owner, GitHub Issue #3, 2026-11-25)
 
