@@ -120,7 +120,7 @@ Issue #29 covers compact network context, scoped search and passive dependency i
 
 The dev2 evaluation extends the runtime-checked guide and compares both real clients across three fixture sizes. Exact-path inspection skips hidden sibling enumeration for known operators. Review the residual availability signal before any release decision. [Dev2 milestone](../milestones/v1.8-network-intelligence.md#dev2-evaluation)
 
-The owner accepted the residual risk for local evaluation, approved the Windows and TouchDesigner 2025.32440 waiver for v1.8.0 only and authorized promotion. Verify the clean annotated-tag build, final package acceptance and public downloads before closing Issue #29. [Release preparation](../milestones/v1.8-network-intelligence.md#release-preparation)
+The owner accepted the residual risk for local evaluation, approved the Windows and TouchDesigner 2025.32440 waiver for v1.8.0 only and authorized promotion. The clean annotated-tag build passed full package acceptance and both hosted platforms verified the public downloads. [Tagged release evidence](validation-index.md#v180-tagged-release) [Release preparation](../milestones/v1.8-network-intelligence.md#release-preparation)
 
 ## D28 — Codex acceptance and release of 1.0.1 (owner, GitHub Issue #3, 2026-11-25)
 

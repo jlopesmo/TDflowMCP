@@ -13,6 +13,6 @@
 | TDflowMCP v1.6 | v1.6.0 published and public downloads verified. Live vision passed | [Network Visual Inspection](v1.6-network-vision.md) |
 | TDflowMCP v1.7 | Disposable transfer and recovery research. Production Script activation deferred | [Advanced Script Access](v1.7-script-access.md) |
 | TDflowMCP v1.7.0 | Offline-only workspace, released and public downloads verified | [Offline Script drafts](v1.7-offline-script-drafts.md) |
-| TDflowMCP v1.8 | Dev2 feature scope frozen for v1.8.0 owner review | [Network intelligence](v1.8-network-intelligence.md) |
+| TDflowMCP v1.8 | v1.8.0 published and public downloads verified | [Network intelligence](v1.8-network-intelligence.md) |
 
 Detailed milestone files for Phase 2 onward will be written once Phase 1B passes, so the plans reflect spike and enforcement evidence.

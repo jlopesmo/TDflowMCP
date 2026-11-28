@@ -2,23 +2,23 @@
 
 A source-first, AI-powered TouchDesigner development environment: an MCP server packaged as a reusable `.tox`, with server-side permissions, agent identity, audit logging, approvals, a local browser dashboard, safe experimentation and optional Code Mode orchestration.
 
-> **TDflowMCP 1.7.0 was released for evaluation. [Download TDflowMCP-v1.7.0.tox](https://github.com/jlopesmo/TDflowMCP/releases/download/v1.7.0/TDflowMCP-v1.7.0.tox).**
-> - v1.7 adds an offline workspace for drafting Script CHOP, SOP and TOP Python. The paired owner grants temporary scope, reviews exact text and hashes, and can explicitly copy the approved text and its checksum manifest. The workspace keeps drafts as text. Live Script operator creation and activation remain blocked through TDflowMCP.
-> - The verified release configuration is **Windows with TouchDesigner 2025.32440**. Capture and comparison require the owner to lock the TOPs and keep bypass off on them and their enclosing components. Approved Python runs in TouchDesigner with access to the host.
-> - Claude Code and Codex on Windows support consent-based Connect Agent without copying credentials. Codex was tested with the Codex CLI 0.160.0 and the Codex VS Code extension 26.1120; the Codex desktop app is not verified. Other documented clients use a manual setup fallback.
-> - MCP binds to `127.0.0.1` only, enforces agent scopes and approvals, and requires an intact durable security audit.
-> - The `.tox` is built from the `v1.7.0` tag. [v1.7 development and release record](docs/milestones/v1.7-offline-script-drafts.md)
-> - Earlier releases remain available. [v1.6.0](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.6.0) · [v1.5.0](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.5.0) · [v1.4.0](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.4.0) · [v1.3.0](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.3.0) · [v1.2.0](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.2.0) · [v1.1.0](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.1.0) · [v1.0.1](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.0.1) · [v1.0.0](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.0.0)
+> **TDflowMCP 1.8.0 was released for evaluation. [Download TDflowMCP-v1.8.0.tox](https://github.com/jlopesmo/TDflowMCP/releases/download/v1.8.0/TDflowMCP-v1.8.0.tox).**
+> - v1.8 adds compact network inspection, scoped search, exact-path reads, native wire indexes and literal dependency candidates. The opt-in guide covers 33 operator types. [Release notes](docs/operations/release-notes-v1.8.0.md)
+> - The verified runtime is **Windows with TouchDesigner 2025.32440**. Compact inspection uses a cooperative work limit. Exact paths skip sibling discovery. Native inspection can still expose coarse timing and availability differences in large hidden graphs. [Accepted ADR-0021](docs/decisions/0021-compact-network-inspection.md)
+> - Claude Code and Codex on Windows support consent-based Connect Agent without copying credentials. The server binds to `127.0.0.1` and enforces scopes, approvals and a durable audit.
+> - TOP capture and comparison require owner-locked TOPs with bypass off on them and their enclosing components. Approved Python runs in TouchDesigner with access to the host. The Codex desktop app remains outside the verified client scope.
+> - Earlier releases remain available. [v1.7.0](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.7.0) · [v1.6.0](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.6.0) · [v1.5.0](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.5.0) · [v1.4.0](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.4.0) · [v1.3.0](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.3.0) · [v1.2.0](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.2.0) · [v1.1.0](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.1.0) · [v1.0.1](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.0.1) · [v1.0.0](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.0.0)
 
 ## Download and first run
 
-1. Download the versioned component. [TDflowMCP-v1.7.0.tox](https://github.com/jlopesmo/TDflowMCP/releases/download/v1.7.0/TDflowMCP-v1.7.0.tox) · [Byte-identical compatibility download](https://github.com/jlopesmo/TDflowMCP/releases/download/v1.7.0/TDflowMCP.tox)
-2. Run `Get-FileHash .\TDflowMCP-v1.7.0.tox -Algorithm SHA256` in PowerShell and compare the result with the value below. [Published checksums](https://github.com/jlopesmo/TDflowMCP/releases/download/v1.7.0/SHA256SUMS)
+1. Download the versioned component. [TDflowMCP-v1.8.0.tox](https://github.com/jlopesmo/TDflowMCP/releases/download/v1.8.0/TDflowMCP-v1.8.0.tox) · [Byte-identical compatibility download](https://github.com/jlopesmo/TDflowMCP/releases/download/v1.8.0/TDflowMCP.tox)
+2. Run `Get-FileHash .\TDflowMCP-v1.8.0.tox -Algorithm SHA256` in PowerShell and compare the result with the value below. [Published checksums](https://github.com/jlopesmo/TDflowMCP/releases/download/v1.8.0/SHA256SUMS)
 
-   `efe6e7ece9a17a5e139797015da4d0b311b8049b8a7f3101d3f535d0474b1a5b`
+   `33d57421c37eab9e1451b25604c057b6f7f5a33f29ccfaf92571618deeba8ff1`
+
 3. Save your TouchDesigner project, then drag the verified `.tox` into it. Use Windows with TouchDesigner 2025.32440, and try it first in a copy of a project.
 
-GitHub-hosted Windows and Ubuntu runners verified both binary downloads, the manifest, the checksums and the installation guide. [Download verification](https://github.com/jlopesmo/TDflowMCP/actions/runs/46109397143) · [Release notes and installation guide](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.7.0)
+GitHub-hosted Windows and Ubuntu runners independently verified both binaries, the manifest, the checksums and the installation guide. [Download verification](https://github.com/jlopesmo/TDflowMCP/actions/runs/46164116574) · [GitHub Release](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.8.0)
 
 Then, in TouchDesigner:
 

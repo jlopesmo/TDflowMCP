@@ -1,4 +1,4 @@
-# TDflowMCP v1.8.0 release notes draft
+# TDflowMCP v1.8.0 release notes
 
 ## Network intelligence
 
@@ -13,3 +13,7 @@ The matched benchmark compared v1.7.0 and v1.8 dev2 on the same disposable 24-, 
 ## Compatibility and inspection limits
 
 Verified runtime scope is **Windows with TouchDesigner 2025.32440**. Compact inspection runs on the TouchDesigner main thread under a cooperative work limit. Native enumeration can make broad requests fail or take longer on complex hidden networks. Exact paths avoid sibling enumeration. Denied and authorized missing lookups can still take different amounts of time, such as when reading a named parameter reference. Native wire inspection can also spend time on links that the response omits. [ADR-0021](../decisions/0021-compact-network-inspection.md#residual-timing-and-availability-side-channel)
+
+## Downloads
+
+The versioned component and its compatibility alias have the same SHA-256. [Release assets](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.8.0) · [Independent verification](https://github.com/jlopesmo/TDflowMCP/actions/runs/46164116574)
