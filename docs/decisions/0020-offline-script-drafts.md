@@ -1,6 +1,6 @@
 # ADR-0020 — Offline Script drafts
 
-**Status:** Conditionally Accepted (owner, 2026-11-27, [Issue #26](https://github.com/jlopesmo/TDflowMCP/issues/26)). Production promotion requires separate approval and the release validation gates.
+**Status:** Conditionally Accepted (owner, 2026-11-27, [Issue #26](https://github.com/jlopesmo/TDflowMCP/issues/26)). The owner separately approved promotion of the bounded offline workspace. v1.7.0 passed its release gates. [Release authorization](https://github.com/jlopesmo/TDflowMCP/issues/26#issuecomment-7234042119) · [Tagged verification](../icm/validation-index.md#v170-tagged-release)
 
 Store bounded inert text and a previous revision for comparison in the existing private project SQLite store. Use the established project identity and storage worker. The `.toe`, `.tox`, MCP audit export and product source are outside the draft store. An authenticated owner can explicitly copy reviewed text and a checksum manifest for manual use. The private database contains credentials and must stay private.
 

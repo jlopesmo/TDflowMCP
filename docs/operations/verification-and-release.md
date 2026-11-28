@@ -57,4 +57,6 @@ Both backfills passed on GitHub-hosted Windows and Ubuntu runners. The validatio
 
 **v1.6.0 compatibility exception (owner, 2026-11-27).** The owner approved runtime verification on Windows with TouchDesigner **2025.32440** for v1.6.0 only. The runtime compatibility claim is limited to that tested build and platform. All other release gates apply. [Owner decision](https://github.com/jlopesmo/TDflowMCP/pull/21#issuecomment-7226593404)
 
+**v1.7.0 compatibility exception (owner, 2026-11-27).** The owner approved Windows with TouchDesigner **2025.32440** for v1.7.0 only and waived the latest-build runtime test for this release. All other release gates apply. PR #27 merged at `afd7bc8864a8b271b366cf86898d1ed3443b283e`. [Owner decision](https://github.com/jlopesmo/TDflowMCP/issues/26#issuecomment-7234042119) · [Release CI #170](https://github.com/jlopesmo/TDflowMCP/actions/runs/46107533352) · [Release receipts](../icm/validation-index.md#v170-tagged-release)
+
 **Never:** release from `dev`, release an untested `.tox`, or claim compatibility with a TD build that was not tested.
