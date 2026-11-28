@@ -54,3 +54,5 @@ Skill 1.12 adds guidance for scope-filtered diagrams and exact connector verific
 Skill 1.14 adds guidance for compact context, scoped search and passive dependency inspection in the v1.8 development component. It uses the existing direct MCP connection and independent named parameter reads. [v1.8 milestone](../milestones/v1.8-network-intelligence.md)
 
 Skill 1.15 adds exact-path inspection for already known operators in dev2. [Dev2 milestone](../milestones/v1.8-network-intelligence.md#dev2-evaluation)
+
+Skill 1.16 and the shared Copy Agent Prompt document compact depth and page bounds, pagination and exact paths for known descendants. Empty results are insufficient to establish that a path is absent. [v1.8 release preparation](../milestones/v1.8-network-intelligence.md#release-preparation)

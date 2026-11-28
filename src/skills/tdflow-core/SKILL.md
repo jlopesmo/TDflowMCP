@@ -2,19 +2,19 @@
 name: tdflow-core
 description: Use when working in a TouchDesigner project through the TDflowMCP MCP server (tools named tdflow_*). Covers checking identity and scope first, reporting what you may do (tdflow_capabilities), reading before changing, small audited changes, verified undo, resuming and handing over tasks through project memory, the kill switch, denials and what never to do without the user.
 metadata:
-  tdflow-skill-version: "1.15"
+  tdflow-skill-version: "1.16"
 ---
 
 # Working in TouchDesigner with TDflowMCP
 
-TDflowMCP skill version 1.15 (tool surface 1). This file is guidance. The TDflowMCP server enforces
+TDflowMCP skill version 1.16 (tool surface 1). This file is guidance. The TDflowMCP server enforces
 every permission itself; nothing here grants access.
 
 ## 1. Start every session with `tdflow_whoami`
 - It returns your role, your scopes (which operator paths you may read or change, and which actions),
   the project root, `server_version`, `tool_surface_version` and `expected_skill_version`.
-- If `expected_skill_version` differs from this skill's version (1.15), tell the user: "The TDflowMCP
-  Skills on this computer are version 1.15 but the component expects <version>. Update them from the
+- If `expected_skill_version` differs from this skill's version (1.16), tell the user: "The TDflowMCP
+  Skills on this computer are version 1.16 but the component expects <version>. Update them from the
   component's Setup page." Then continue carefully, trusting the server's answers over this file.
 - Work only inside your scopes. Do not probe paths outside them: denials are recorded in the audit log.
 - For reusable components, use `tdflow_list_operator_types` for suitable local types. Use `guidance: true` for
@@ -92,10 +92,14 @@ every permission itself; nothing here grants access.
   asks for it.
 - `tdflow_describe_network` gives one network level in one call: operators, wiring, errors, cook times and
   hints. Hints are heuristics: check them before acting on them.
-- For a larger network, start with `compact: {"depth": 2}` in a direct MCP call and follow `next_offset` for more matches.
-  Use `query` for name, type or curated purpose and `state` for a recorded error or warning on a non-COMP.
-  Check `purpose_search` for whether the verified Windows 2025.32440 catalog supported that query.
-  Supply `paths` for already known operators within that depth to avoid enumerating siblings.
+- For discovery, use `compact` in a direct `tdflow_describe_network` call on a readable component. Set `depth`
+  to 1–4 (default 1) and `limit` to 1–80 (default 40). For more matches, pass `next_offset` back as `offset`
+  with the same options. Use `query` for name, type or curated purpose and `state` for a recorded error or
+  warning on a non-COMP. Check `purpose_search` for verified catalog search on Windows 2025.32440.
+- When you already know the relevant operators, prefer `compact.paths` with 1–80 exact absolute descendant
+  paths inside that depth. Use a readable parent as `path`. This skips sibling discovery. An omitted path
+  gives no evidence about its existence. If you receive `NETWORK_INSPECTION_LIMIT`, choose a smaller readable
+  component, reduce depth, or use exact paths you already know.
   Add `dependencies: true` for native wire indexes between returned operators. Use `parameters` to
   request named reference candidates on those operators. A literal reference is a lead to verify with
   exact parameter reads. Use connector inspection to check omitted links and exact ports.

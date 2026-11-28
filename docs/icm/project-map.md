@@ -52,6 +52,8 @@ This map lists the repository's actual contents (Phase 1C). Planned directories 
 | `tests/td/run_td_operator_guidance.py` | Disposable TouchDesigner probe for supported guide classes, parameter names, labels and styles | [Dev2 milestone](../milestones/v1.8-network-intelligence.md#dev2-evaluation) |
 | `build/v1.8.0-dev1/` | Git-ignored v1.8 development component and provenance manifest for evaluation | [v1.8 evidence](validation-index.md#v18-compact-network-inspection) |
 | `build/v1.8.0-dev2/` | Git-ignored dev2 component and source and binary digests for evaluation | [Dev2 milestone](../milestones/v1.8-network-intelligence.md#dev2-evaluation) |
+| `dist/TDflowMCP-1.8.0-candidate-<commit>/` and matching ZIP | Git-ignored review package with a binary, source provenance, installation guide and checksums | [Candidate evidence](validation-index.md#v180-release-candidate) |
+| `docs/operations/release-notes-v1.8.0.md` | Prepared release notes, benchmark summary and compatibility scope | [v1.8 milestone](../milestones/v1.8-network-intelligence.md#release-preparation) |
 | `src/td_adapter/custompars.py` | TD adapter for bounded custom definition plans, application and snapshot restoration | [tool surface](../architecture/tool-surface.md) |
 | `src/integrations/clients.json` | Coding-agent registry (support levels, the Claude Code automatic-setup facts, manual-fallback snippets and reasons, token-entry recipes), embedded as the `clients` DAT | [agent integration](../architecture/agent-integration.md) |
 | `src/skills/tdflow-core/SKILL.md` | Bundled TDflowMCP Skill, including the v1.1 Python authoring workflow. Installation requires user consent. | [ADR-0011](../decisions/0011-agent-integration-and-skills.md) |

@@ -120,6 +120,8 @@ Issue #29 approves a benchmark-led `dev` increment for compact network context, 
 
 The dev2 evaluation extends the runtime-checked guide and compares both real clients across three fixture sizes. Exact-path inspection skips hidden sibling enumeration for known operators. Review the residual availability signal before any release decision. [Dev2 milestone](../milestones/v1.8-network-intelligence.md#dev2-evaluation)
 
+The owner requested release preparation with the dev2 feature scope frozen. Review the v1.8.0 candidate, the residual in ADR-0021 and the Windows/TouchDesigner 2025.32440 release-specific compatibility decision before authorizing promotion. Build from the clean annotated tag and verify public downloads only after release authorization. [Release preparation](../milestones/v1.8-network-intelligence.md#release-preparation)
+
 ## D28 — Codex acceptance and release of 1.0.1 (owner, GitHub Issue #3, 2026-11-25)
 
 The owner ran the hands-on check on `1.0.1rc1` and reported it passed ([Issue #3](https://github.com/jlopesmo/TDflowMCP/issues/3#issuecomment-7175371704)): OpenAI Codex selected, Connect Agent approved, the Codex chat in VS Code returned `tdflow_whoami`, TouchDesigner showed `Agent Connected — Ready` and `Codex 0.171.0`. Decided:
