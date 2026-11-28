@@ -409,3 +409,5 @@ With 2,400 denied siblings in the disposable fixture, exact-path inspection retu
 ### v1.8.0 release candidate
 
 The release candidate source carries version `1.8.0` and preserves the dev2 operator catalog, inspection code and server policy. Skill 1.16 and Copy Agent Prompt describe the inspection bounds and recommend exact paths where the relevant operators are known. The verified TouchDesigner scope is Windows with 2025.32440. The residual decision, release-specific compatibility decision and promotion authorization are pending owner review. [Candidate evidence](validation-index.md#v180-release-candidate) · [Release preparation](../milestones/v1.8-network-intelligence.md#release-preparation)
+
+The clean local candidate from `ae3ea28452819c9cc705f84dd58ebf6bc1fde6b6` passed full packaged acceptance, including the updated prompt, both real clients and recovery. The release PR carries the candidate source and the reconciled risk disclosure for review. [PR #30](https://github.com/jlopesmo/TDflowMCP/pull/30) · [Candidate receipts](validation-index.md#v180-release-candidate)
