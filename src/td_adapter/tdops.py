@@ -22,6 +22,7 @@ import re
 import secrets
 import sys
 import time
+from collections import deque
 
 import td
 
@@ -61,6 +62,7 @@ MAX_LIST = 200
 MAX_CONNECTOR_ROWS = 24
 MAX_DIAGRAM_CHILDREN = 1024
 MAX_DIAGRAM_CONNECTOR_WORK = 2048
+MAX_COMPACT_OPERATORS = INS.MAX_ROWS
 CHECKPOINT_TOPS = frozenset({"constantTOP", "levelTOP", "noiseTOP", "nullTOP", "outTOP"})
 MAX_CHECKPOINT_TOPS = 24
 README_EMBEDDED = ("Project memory for this TouchDesigner project (TDflowMCP, embedded authority).\n"
@@ -251,7 +253,8 @@ class TDAdapter(Adapter):
                     raise ToolFailure("DAT_SOURCE_UNAVAILABLE", "Read the authored Text DAT or Execute DAT source. "
                                       "Computed, wired and file-linked DATs can trigger external reads or code.")
             context = {"op": o}
-            if tool.handler == "capture_network" or (tool.name == "tdflow_get_operator" and args.get("connectors")):
+            if (tool.handler == "capture_network" or (tool.handler == "describe_network" and "compact" in args)
+                    or (tool.name == "tdflow_get_operator" and args.get("connectors"))):
                 context["read_identity"] = int(o.id)
             return Resolution([self._facts(o, "read")], context)
         if k == "set_params":
@@ -595,23 +598,27 @@ class TDAdapter(Adapter):
                    "executeDAT": "Run an approved frame or project callback"}
         query = args.get("query", "").casefold().split()
         wanted_family = args.get("family")
+        build = str(td.app.build)
+        guidance_available = args.get("guidance") and sys.platform == "win32" and build == GUIDES.VERIFIED_BUILD
         rows = []
         for name in sorted(SAFE_CREATE_TYPES | APPROVABLE_CREATE_TYPES):
             family = re.search(r"[A-Z]+$", name).group()
             summary = purpose.get(name, "")
+            search = name + " " + summary
+            if query and guidance_available:
+                search += " " + GUIDES.search_text(name)
             if ((wanted_family and wanted_family != family) or not isinstance(getattr(td, name, None), type)
-                    or not all(term in (name + " " + summary).casefold() for term in query)):
+                    or not all(term in search.casefold() for term in query)):
                 continue
             rows.append({"type": name, "family": family, "purpose": summary,
                          "creation": "approval_required" if name in APPROVABLE_CREATE_TYPES else "scoped"})
         off, limit = args.get("offset", 0), args.get("limit", 30)
-        build = str(td.app.build)
         page = rows[off:off + limit]
         result = {"path": res.context["op"].path, "td_build": build, "types": page,
                   "total": len(rows), "next_offset": off + limit if off + limit < len(rows) else None,
                   "note": "Catalog types are present in this runtime. Creation checks your role, scope and destination."}
         if args.get("guidance"):
-            available = sys.platform == "win32" and build == GUIDES.VERIFIED_BUILD
+            available = guidance_available
             covered = sorted(GUIDES.GUIDED_TYPES & {row["type"] for row in rows}) if available else []
             result["guidance_coverage"] = {"available": available, "verified_platform": "Windows",
                                            "verified_build": GUIDES.VERIFIED_BUILD, "matching_types": covered,
@@ -826,6 +833,10 @@ class TDAdapter(Adapter):
         o = res.context["op"]
         if not o.isCOMP:
             raise ToolFailure("INVALID_ARGS", f"{o.path} is not a component.")
+        if "compact" in args:
+            if args.get("diagnostics"):
+                raise ToolFailure("INVALID_ARGS", "Choose compact or detailed diagnostics for this request.")
+            return self._compact_network(o, args["compact"], readable)
         kids = sorted(o.children, key=lambda c: c.name)
         vis = {t.path for t in readable([self._facts(c, "read") for c in kids])}
         rows, input_notes = [], {}
@@ -881,6 +892,149 @@ class TDAdapter(Adapter):
                        "look, not findings.")
         return out
 
+    def _compact_network(self, root, options, readable):
+        deadline = time.monotonic() + 0.075
+        limited = "This inspection exceeds the work limit. Use a smaller component or a shallower depth."
+        depth = options.get("depth", 1)
+        def check_budget():
+            if time.monotonic() > deadline:
+                raise ToolFailure("NETWORK_INSPECTION_LIMIT", limited)
+
+        if "paths" in options:
+            visible = self._compact_known_paths(root.path, options["paths"], depth, readable, check_budget)
+        else:
+            visible = {}
+            pending = deque([(root, 0)])
+            while pending:
+                parent, level = pending.popleft()
+                check_budget()
+                children = parent.children
+                check_budget()
+                for start in range(0, len(children), 32):
+                    check_budget()
+                    batch = [(self._facts(child, "read"), child) for child in children[start:start + 32]]
+                    allowed = {target.path for target in readable([target for target, _ in batch])}
+                    if len(visible) + len(allowed) > MAX_COMPACT_OPERATORS:
+                        raise ToolFailure("NETWORK_INSPECTION_LIMIT", limited)
+                    for target, child in batch:
+                        if target.path in allowed:
+                            visible[target.path] = child
+                            if level + 1 < depth and child.isCOMP:
+                                pending.append((child, level + 1))
+
+        query = options.get("query", "").casefold().split()
+        state = options.get("state")
+        guide_available = sys.platform == "win32" and str(td.app.build) == GUIDES.VERIFIED_BUILD
+        guidance = {}
+        rows = []
+        for path, child in sorted(visible.items()):
+            check_budget()
+            op_type = child.OPType
+            if query:
+                fields = f"{child.name} {op_type}".casefold()
+                if guide_available:
+                    if op_type not in guidance:
+                        guidance[op_type] = GUIDES.search_text(op_type).casefold()
+                    fields += " " + guidance[op_type]
+                if any(term not in fields for term in query):
+                    continue
+            row = {"path": path, "type": op_type}
+            if state:
+                if child.isCOMP:
+                    continue
+                status = child.errors if state == "error" else child.warnings
+                if not status(recurse=False):
+                    continue
+                row[state] = True
+            rows.append(row)
+
+        offset, limit = options.get("offset", 0), options.get("limit", 40)
+        page = rows[offset:offset + limit]
+        for row in page:
+            check_budget()
+            child = visible[row["path"]]
+            if not child.isCOMP:
+                if state != "error" and child.errors(recurse=False):
+                    row["error"] = True
+                if state != "warning" and child.warnings(recurse=False):
+                    row["warning"] = True
+        out = {"path": root.path, "depth": depth, "operators": page, "total": len(rows),
+               "next_offset": offset + limit if offset + limit < len(rows) else None}
+        if query:
+            out["purpose_search"] = guide_available
+        shown = {row["path"]: row["path"] for row in page}
+        if options.get("dependencies"):
+            wires, partial = self._native_wires(shown, visible, deadline, limited, "NETWORK_INSPECTION_LIMIT")
+            out["edges"] = [[wire["source"], wire["target"], wire["output_index"], wire["input_index"]] for wire in wires]
+            out["edges_truncated"] = partial
+        if "parameters" in options:
+            targets = {(entry["path"], name) for entry in options["parameters"] if entry["path"] in shown
+                       for name in entry["names"]}
+            references = []
+            for path, name in sorted(targets):
+                check_budget()
+                ref = self._compact_reference(visible[path], name, readable)
+                if ref is not None:
+                    references.append(ref)
+            out["parameter_references"] = references
+        check_budget()
+        return out
+
+    def _compact_known_paths(self, root, paths, depth, readable, check_budget):
+        """Check the full path chain before any native lookup. Omit unavailable paths uniformly."""
+        prefix = root.rstrip("/") + "/"
+        visible = {}
+        for path in sorted(set(paths)):
+            check_budget()
+            if not path.startswith(prefix):
+                continue
+            names = path[len(prefix):].split("/")
+            if len(names) > depth or any(not re.fullmatch(r"[A-Za-z0-9_]+", name) for name in names):
+                continue
+            chain = [prefix + "/".join(names[:i]) for i in range(1, len(names) + 1)]
+            targets = [self._facts(None, "read", path=ancestor) for ancestor in chain]
+            if len(readable(targets)) != len(chain):
+                continue
+            child = td.op(path)
+            check_budget()
+            if child is not None and child.path == path and readable([self._facts(child, "read")]):
+                visible[path] = child
+        return visible
+
+    def _compact_reference(self, child, name, readable):
+        par = self._compact_parameter(child, name)
+        if par is None:
+            return None
+        mode = str(par.mode).split(".")[-1]
+        if mode not in ("EXPRESSION", "BIND", "EXPORT"):
+            return None
+        candidate = None
+        if mode != "EXPORT":
+            candidate = INS.literal_reference(par.expr if mode == "EXPRESSION" else par.bindExpr)
+        matches = []
+        if candidate is not None:
+            literal, kind, name_in_peer = candidate
+            if LITERAL_OP_PATH.fullmatch(literal):
+                path = posixpath.normpath(posixpath.join(child.parent().path, literal))
+                peer = td.op(path) if readable([self._facts(None, "read", path=path)]) else None
+                if peer is not None and peer.path == path and readable([self._facts(peer, "read")]):
+                    if kind == "channel" and peer.family == "CHOP":
+                        matches.append({"operator": path, kind: name_in_peer})
+                    elif kind == "parameter" and self._compact_parameter(peer, name_in_peer) is not None:
+                        matches.append({"operator": path, kind: name_in_peer})
+        return {"operator": child.path, "parameter": name, "mode": mode, "candidates": matches,
+                "unresolved": not matches}
+
+    @staticmethod
+    def _compact_parameter(child, name):
+        if _denied_par(name) or child.OPType in EXECUTABLE_TYPES:
+            return None
+        par = getattr(child.par, name, None)
+        if (par is not None and getattr(par, "name", None) == name
+                and par.style not in REFERENCE_STYLES and not getattr(par, "password", False)):
+            return par
+        return None
+
     def _t_capture_network(self, args, res, label, readable):
         """Snapshot native wiring and positions. The handler renders this plain data."""
         if sys.platform != "win32" or str(td.app.build) != DIAGRAM.VERIFIED_BUILD:
@@ -903,7 +1057,8 @@ class TDAdapter(Adapter):
                   "y": _pos(by_path[path], "nodeY")} for path, ident in allowed.items()]
         if time.monotonic() > deadline:
             raise ToolFailure("NETWORK_VISUAL_LIMIT", limited)
-        edges, partial_edges = self._diagram_edges(allowed, by_path, deadline, limited)
+        edges, partial_edges = self._native_wires(allowed, by_path, deadline, limited, "NETWORK_VISUAL_LIMIT",
+                                                MAX_DIAGRAM_CONNECTOR_WORK)
         locations = {}
         for node in nodes:
             locations.setdefault((node["x"], node["y"]), []).append(node["id"])
@@ -915,20 +1070,23 @@ class TDAdapter(Adapter):
                         "not establish that a port is unconnected. Confirm state with structured tools."}
 
     @staticmethod
-    def _diagram_edges(allowed, by_path, deadline, limited):
+    def _native_wires(allowed, by_path, deadline, limited, limit_code, work=None):
         edges = []
-        work = MAX_DIAGRAM_CONNECTOR_WORK
         for path, target in allowed.items():
             connectors = by_path[path].inputConnectors
-            work -= len(connectors)
-            if work < 0 or time.monotonic() > deadline:
-                raise ToolFailure("NETWORK_VISUAL_LIMIT", limited)
+            if work is not None:
+                work -= len(connectors)
+            if (work is not None and work < 0) or time.monotonic() > deadline:
+                raise ToolFailure(limit_code, limited)
             for connector in connectors:
                 links = connector.connections
-                work -= len(links)
-                if work < 0 or time.monotonic() > deadline:
-                    raise ToolFailure("NETWORK_VISUAL_LIMIT", limited)
+                if work is not None:
+                    work -= len(links)
+                if (work is not None and work < 0) or time.monotonic() > deadline:
+                    raise ToolFailure(limit_code, limited)
                 for link in links:
+                    if work is None and time.monotonic() > deadline:
+                        raise ToolFailure(limit_code, limited)
                     source = allowed.get(link.owner.path)
                     if source is not None:
                         if len(edges) == DIAGRAM.MAX_EDGES:

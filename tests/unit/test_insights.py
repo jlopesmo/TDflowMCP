@@ -15,6 +15,18 @@ ROWS = [
 
 
 class InsightTests(unittest.TestCase):
+    def test_static_reference_accepts_exact_parameter_and_channel_forms(self):
+        self.assertEqual(I.literal_reference(" op('../controls').par.Fade "),
+                         ("../controls", "parameter", "Fade"))
+        self.assertEqual(I.literal_reference('op("/p/mod")["chan1"]'), ("/p/mod", "channel", "chan1"))
+
+    def test_static_reference_omits_dynamic_or_unbounded_source(self):
+        for expression in ("op(name).par.Fade", "op('controls').par.Fade.eval()",
+                           "op('a').par.Fade + op('b').par.Fade", "op('x')['bad/path']",
+                           "getattr(op('x').par,'Fade')", "1 / 0", "x" * 513, "\x00"):
+            with self.subTest(expression=expression[:24]):
+                self.assertIsNone(I.literal_reference(expression))
+
     def test_summary(self):
         s = I.summarize(ROWS, total=7, filtered=2)
         self.assertEqual(s["edges"], [["/p/noise1", "/p/level1"], ["/p/level1", "/p/out"]])

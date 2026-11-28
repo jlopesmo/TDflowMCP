@@ -6,14 +6,40 @@ are heuristics, labelled as such: they point at where to look, they are not find
 """
 from __future__ import annotations
 
+import ast
 from collections import deque
 from math import isfinite
+import re
 from typing import Dict, List, Mapping, Sequence
 
 MAX_ROWS = 300
 SLOW_MS = 2.0              # one operator's last cook (ms) worth mentioning at 60 fps
 FRAME_MS = 1000.0 / 60.0
 MAX_FINDINGS = 12
+_REFERENCE_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,63}\Z")
+
+
+def literal_reference(source: str):
+    """Recognize one exact stored op('path').par.Name or op('path')['channel'] expression."""
+    if not source or len(source) > 512:
+        return None
+    try:
+        node = ast.parse(source.strip(), mode="eval").body
+    except (SyntaxError, ValueError, RecursionError):
+        return None
+    if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Attribute) and node.value.attr == "par":
+        call, kind, name = node.value.value, "parameter", node.attr
+    elif isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Constant):
+        call, kind, name = node.value, "channel", node.slice.value
+    else:
+        return None
+    if not isinstance(name, str) or not _REFERENCE_NAME.fullmatch(name):
+        return None
+    if (isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and call.func.id == "op"
+            and len(call.args) == 1 and not call.keywords and isinstance(call.args[0], ast.Constant)
+            and isinstance(call.args[0].value, str)):
+        return call.args[0].value, kind, name
+    return None
 
 
 def _measured_cooks(rows):

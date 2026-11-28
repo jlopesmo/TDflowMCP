@@ -31,7 +31,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
-from tdflowmcp import drafts as DRAFTS, schema
+from tdflowmcp import drafts as DRAFTS, insights as INS, schema
 from tdflowmcp.policy import ACTIONS
 
 RESOLVERS = {"none", "project", "read_path", "read_children", "read_tree", "set_params", "create", "delete",
@@ -268,8 +268,24 @@ def core_registry() -> Registry:
            "each readable operator's type, family, inputs, flags, errors and TouchDesigner's own cook count and "
            "last cook time, the wiring as edges, counts by family, and heuristic hints (slow cooks, frame budget, "
            "large locked textures, errors, outputs nothing reads). Set diagnostics to get observed faults, scoped "
-           "upstream leads and ranked last CPU cook samples without cooking or evaluating parameters.",
-           obj({"path": PATH, "diagnostics": {"type": "boolean"}}, ["path"]), ("read",), "read_children", "describe_network", read_only=True,
+           "upstream leads and ranked last CPU cook samples. Or set compact for a bounded multi-level view, "
+           "search by name, type or curated purpose on Windows TD 2025.32440, and filter non-COMPs by error or warning. "
+           "Set compact.dependencies for exact native wires and compact.parameters to identify literal reference candidates. "
+           "Use compact.paths for already known operators without enumerating sibling networks. "
+           "Compact requires a direct MCP call. Both forms are passive reads.",
+           obj({"path": PATH, "diagnostics": {"type": "boolean"}, "compact": obj({
+               "depth": {"type": "integer", "minimum": 1, "maximum": 4, "description": "Readable child levels, default 1"},
+               "paths": {"type": "array", "minItems": 1, "maxItems": 80, "items": PATH,
+                         "description": "Inspect only these exact descendant paths within depth, with readable ancestors"},
+               "query": {"type": "string", "maxLength": 100, "description": "Match terms in name, type or curated purpose"},
+               "state": {"type": "string", "enum": ["error", "warning"]},
+               "limit": {"type": "integer", "minimum": 1, "maximum": 80, "description": "Page size, default 40"},
+               "offset": {"type": "integer", "minimum": 0, "maximum": INS.MAX_ROWS, "description": "Use the returned next_offset"},
+               "dependencies": {"type": "boolean", "description": "Exact native wires between operators on this page"},
+               "parameters": {"type": "array", "maxItems": 8, "items": obj({
+                   "path": PATH, "names": {"type": "array", "minItems": 1, "maxItems": 8, "items": NAME},
+               }, ["path", "names"]), "description": "Inspect exact named parameters on readable returned operators"},
+           })}, ["path"]), ("read",), "read_children", "describe_network", read_only=True,
            idempotent=True))
     T(Tool("tdflow_get_errors", "Get errors", "Errors and warnings of an operator and its children (filtered).",
            obj({"path": PATH, "limit": {"type": "integer", "minimum": 1, "maximum": 500}}, ["path"]),

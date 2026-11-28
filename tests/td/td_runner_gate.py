@@ -646,7 +646,8 @@ def native_onboard(comp, ext, T, frames, until, checkpoint, R):
     pr = copied[-1] if copied else ""
     T("prompt.READY_PROMPT_IS_A_FIRST_MESSAGE", all(x in pr for x in (
         "existing `tdflow` MCP server", "already configured", "`tdflow_whoami`", "`tdflow_project_info`",
-        "brief overview", "approval", "Make no changes to the project until I give you a task")) and "## " not in pr
+        "brief overview", "`depth` 1–4", "`limit` 1–80", "`next_offset`", "`compact.paths`", "approval",
+        "Make no changes to the project until I give you a task")) and "## " not in pr
       and len(pr) < 2000, text=pr[:500])
     T("prompt.COPY_REPORTED", p.Statusdetail.eval() == "Prompt copied: paste it", detail=p.Statusdetail.eval())
     T("prompt.NO_SECRET_OR_PATH_IN_THE_PROMPT", not TOKEN_SHAPE.search(pr) and home not in pr

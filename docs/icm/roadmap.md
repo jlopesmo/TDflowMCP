@@ -114,6 +114,14 @@ Owner-approved Issue #24 adds isolated boundary, manifest transfer and crash-rec
 
 Issue #26 delivered the offline drafting workspace in v1.7.0. The clean tagged package passed Windows TouchDesigner 2025.32440 acceptance and independent hosted Windows and Ubuntu download verification. Executable Script lifecycle remains deferred under Issue #20. [Release](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.7.0) · [Release receipts](validation-index.md#v170-tagged-release) · [Milestone](../milestones/v1.7-offline-script-drafts.md) · [Offline decision](../decisions/0020-offline-script-drafts.md)
 
+## v1.8 Network intelligence
+
+Issue #29 covers compact network context, scoped search and passive dependency inspection on Windows with TouchDesigner 2025.32440. Existing handoff resumes cover the first owner-edit scenario. A new change summary requires a verified permission-bound comparison. [Issue #29](https://github.com/jlopesmo/TDflowMCP/issues/29) · [Milestone](../milestones/v1.8-network-intelligence.md) · [ADR-0021](../decisions/0021-compact-network-inspection.md)
+
+The dev2 evaluation extends the runtime-checked guide and compares both real clients across three fixture sizes. Exact-path inspection skips hidden sibling enumeration for known operators. Review the residual availability signal before any release decision. [Dev2 milestone](../milestones/v1.8-network-intelligence.md#dev2-evaluation)
+
+The owner accepted the residual risk for local evaluation, approved the Windows and TouchDesigner 2025.32440 waiver for v1.8.0 only and authorized promotion. Verify the clean annotated-tag build, final package acceptance and public downloads before closing Issue #29. [Release preparation](../milestones/v1.8-network-intelligence.md#release-preparation)
+
 ## D28 — Codex acceptance and release of 1.0.1 (owner, GitHub Issue #3, 2026-11-25)
 
 The owner ran the hands-on check on `1.0.1rc1` and reported it passed ([Issue #3](https://github.com/jlopesmo/TDflowMCP/issues/3#issuecomment-7175371704)): OpenAI Codex selected, Connect Agent approved, the Codex chat in VS Code returned `tdflow_whoami`, TouchDesigner showed `Agent Connected — Ready` and `Codex 0.171.0`. Decided:

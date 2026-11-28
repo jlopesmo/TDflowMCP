@@ -162,12 +162,15 @@ def expose_output(scenario, builder, path, source, baseline):
 
 
 def guidance_checks(builder, operator, path):
+    from tdflowmcp.opguides import GUIDED_TYPES
+
     scenario = Scenario("guidance")
     name = "tdflow_list_operator_types"
     catalog = scenario.call(builder, name, path=path, guidance=True, limit=1)
     coverage = catalog.get("guidance_coverage", {})
-    expected = ["constantTOP", "levelTOP", "mathCHOP", "noiseCHOP", "noiseTOP", "outTOP", "parameterexecuteDAT"]
+    expected = sorted(GUIDED_TYPES)
     scenario.check("bounded_verified_coverage", coverage.get("matching_types") == expected
+                   and len(coverage["matching_types"]) == 33
                    and coverage.get("available") is True and coverage.get("verified_build") == "2025.32440"
                    and len(catalog.get("types", [])) == 1 and catalog.get("next_offset") == 1)
     math = scenario.call(builder, name, path=path, query="mathCHOP", family="CHOP", guidance=True)
@@ -178,6 +181,12 @@ def guidance_checks(builder, operator, path):
     plain = scenario.call(builder, name, path=path, query="mathCHOP")
     scenario.check("prior_catalog_shape", mcp.ok(plain) and "guidance_coverage" not in plain
                    and "guidance" not in (plain.get("types") or [{}])[0])
+    grid = scenario.call(builder, name, path=path, family="SOP", query="regular grid", guidance=True)
+    scenario.check("guidance_search_finds_grid_by_purpose",
+                   mcp.ok(grid) and [row["type"] for row in grid.get("types", [])] == ["gridSOP"])
+    plain_grid = scenario.call(builder, name, path=path, family="SOP", query="regular grid")
+    scenario.check("guide_only_terms_leave_plain_search_unchanged",
+                   mcp.ok(plain_grid) and plain_grid.get("types") == [] and "guidance_coverage" not in plain_grid)
     scoped = scenario.call(builder, name, path="/project1", guidance=True)
     scenario.check("catalog_requires_read_access", scoped.get("code") == "DENIED")
     scripts = scenario.call(builder, name, path=path, query="script", guidance=True)

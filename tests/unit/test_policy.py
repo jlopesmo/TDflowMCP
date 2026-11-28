@@ -73,6 +73,10 @@ class GrantTests(unittest.TestCase):
                                                              effect="deny"),))
         self.assertEqual(P.evaluate(a, [Target("read", "/project1/secret/a")]).rule_id, "G1")
         self.assertTrue(P.evaluate(a, [Target("read", "/project1/other")]).allow)
+        exact = agent("observer", ("/project1/**",), extra=(Grant("/project1/private", frozenset({"read"}),
+                                                                  effect="deny"),))
+        self.assertEqual(P.evaluate(exact, [Target("read", "/project1/private")]).rule_id, "G1")
+        self.assertTrue(P.evaluate(exact, [Target("read", "/project1/private/allowed")]).allow)
 
     def test_all_or_nothing_mutations(self):
         a = agent()

@@ -163,6 +163,10 @@ class AgentPromptTests(unittest.TestCase):
                       "Connection", cx)
         self.assertNotIn("/mcp", cx)
         self.assertIn("`tdflow_whoami`", cx)
+        for prompt in (text, cx):
+            for guidance in ("`depth` 1–4", "`limit` 1–80", "`next_offset`", "`compact.paths`",
+                             "An omitted path gives no evidence about existence"):
+                self.assertIn(guidance, prompt)
         talked = tellagent.agent_prompt("connected", client="Cursor", set_up=False)
         self.assertIn("registered by me (manual setup)", talked)         # review 21: wording from the set-up fact
         self.assertNotIn("Connect Agent", talked)

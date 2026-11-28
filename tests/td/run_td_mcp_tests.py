@@ -4,7 +4,7 @@
 
 Two TouchDesigner launches with the same disposable Datadir (under .tmp/, via TDFLOW_DATADIR):
 1. ``mcp``: pairing approved inside TD, agent tokens via the paired admin API, Enable MCP, both protocol
-   eras, all 16 tools, scoped allow/deny + hard denies, verified undo, interleaving conflict, kill switch
+   eras, the public tool catalog, scoped allow/deny + hard denies, verified undo, interleaving conflict, kill switch
    (incl. a queued request), audit fail-closed/integrity/tamper, revocation, secrets scan.
 2. ``mcp_restart``: agents, sessions and the audit chain persist; an undo across the restart is refused.
 Results: build/td-mcp-test-results.json. Safety as in run_td_tests.py (own process tree only, 127.0.0.1).
@@ -40,7 +40,9 @@ EXPECTED_TOOLS = sorted(["tdflow_approval_status", "tdflow_capabilities", "tdflo
                          "tdflow_set_dat_text", "tdflow_set_parameters", "tdflow_undo", "tdflow_whoami",
                          # Phase 2A memory tools (additive; tested in run_td_memory_tests.py)
                          "tdflow_handoff_create", "tdflow_handoff_resume", "tdflow_task_checkpoint",
-                         "tdflow_task_list"])
+                         "tdflow_task_list",
+                         "tdflow_script_draft_guide", "tdflow_script_draft_list", "tdflow_script_draft_get",
+                         "tdflow_script_draft_create", "tdflow_script_draft_revise", "tdflow_script_draft_submit"])
 SECRET_BODIES = []          # responses that legitimately contain a token (token creation): excluded from scans
 
 
@@ -194,13 +196,14 @@ def cp_enabled(data, pid):
     T("proto.notification_202", st == 202 and not r.get("body"))
     st, j, _ = B.rpc("tools/list")
     names = sorted(t["name"] for t in (j or {}).get("result", {}).get("tools", []))
-    T("proto.tools_list_28", names == EXPECTED_TOOLS, names=names)   # + tdflow_execute_script once Code Mode is on
+    T("proto.legacy_tools_list", names == EXPECTED_TOOLS, names=names)   # + tdflow_execute_script once Code Mode is on
     # modern era
     st, j, _ = B.rpc("server/discover", modern=True)
     T("proto.modern_discover", st == 200 and "2026-07-28" in j["result"]["supportedVersions"])
     st, j, _ = B.rpc("tools/list", modern=True)
-    T("proto.modern_tools_list", st == 200 and j["result"]["resultType"] == "complete" and len(j["result"]["tools"]) == len(EXPECTED_TOOLS)
-      and j["result"].get("ttlMs") == 0 and j["result"].get("cacheScope") == "private")
+    names = sorted(t["name"] for t in (j or {}).get("result", {}).get("tools", []))
+    T("proto.modern_tools_list", st == 200 and j["result"]["resultType"] == "complete" and names == EXPECTED_TOOLS
+      and j["result"].get("ttlMs") == 0 and j["result"].get("cacheScope") == "private", names=names)
     st, j, _ = B.rpc("tools/list", modern=True, extra={"Mcp-Method": "tools/call"})
     T("proto.modern_header_mismatch", st == 400 and j["error"]["code"] == -32020)
     st, j, _ = B.rpc("tools/call", {"name": "tdflow_nope", "arguments": {}}, modern=True)
