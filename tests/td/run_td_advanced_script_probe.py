@@ -13,7 +13,10 @@ import traceback
 
 if __name__ == "__main__":
     sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "spikes/v17"))
-import script_intent as intent
+if __package__:
+    from spikes.v17 import script_intent as intent
+else:
+    import script_intent as intent
 
 
 FAMILIES = ("scriptCHOP", "scriptSOP", "scriptTOP")
