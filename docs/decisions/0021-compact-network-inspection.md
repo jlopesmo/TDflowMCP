@@ -1,6 +1,6 @@
 # ADR-0021 — Compact network inspection
 
-**Status:** Proposed, ready for owner decision. [Issue #29](https://github.com/jlopesmo/TDflowMCP/issues/29) covers development and release preparation on `dev`.
+**Status:** Accepted (owner release authorization, 2026-11-28) for the v1.8.0 local evaluation threat model. [Issue #29](https://github.com/jlopesmo/TDflowMCP/issues/29) · [Release PR #30](https://github.com/jlopesmo/TDflowMCP/pull/30)
 
 ## Context
 
@@ -31,6 +31,6 @@ The view can omit wires whose endpoints are on other pages. Callers can verify e
 - **Selected references and wires.** In broad or exact-path requests, checking an authorized missing reference peer can take a different amount of time than skipping a denied peer. Native connector inspection may visit links from hidden operators before returning only wires between shown operators. Reference or wire inspection can affect elapsed time or reach the same work limit.
 - **Observed evidence.** In the dev2 Windows and TouchDesigner 2025.32440 fixture, adding 2,400 denied siblings preserved the exact-path readable result in 5/5 samples. Broad inspection succeeded in 5/5 before the change and refused in 5/5 afterwards. Denied and authorized missing paths returned identical empty results in this fixture. The test established the response boundary and recorded timings. It did not establish timing indistinguishability. [Pressure checks](../icm/validation-index.md#v180dev2-evaluation)
 
-## Owner decision requested
+## Owner decision
 
-Accept the compact inspection design and its medium residual timing and availability risk for v1.8.0 evaluation only if the intended scoped-read threat model tolerates coarse timing inference and occasional work-limit refusals. Recommend exact paths for known operators and retain the existing scope, audit and suspension controls. Keep the release on hold if the threat model requires timing confidentiality or isolation from native main-thread overruns. That higher bar requires separately validated, independently bounded authorized lookup and enumeration. Record the owner's decision with its date and link before promoting this ADR to Accepted.
+On 2026-11-28 the owner accepted the compact inspection design and its documented residual timing and availability risk for the intended v1.8.0 local evaluation threat model. That scope tolerates coarse timing inference and occasional work-limit refusals. Prefer exact paths for known operators and retain the existing scope, audit and suspension controls. A deployment that requires timing confidentiality or isolation from native main-thread overruns needs separately validated, independently bounded authorized lookup and enumeration. [Release PR #30](https://github.com/jlopesmo/TDflowMCP/pull/30)

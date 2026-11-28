@@ -116,11 +116,11 @@ Issue #26 delivered the offline drafting workspace in v1.7.0. The clean tagged p
 
 ## v1.8 Network intelligence
 
-Issue #29 approves a benchmark-led `dev` increment for compact network context, scoped search and passive dependency inspection. Evaluate a tested development component on Windows with TouchDesigner 2025.32440. Existing handoff resumes cover the first owner-edit scenario. A new change summary requires a verified permission-bound comparison. [Issue #29](https://github.com/jlopesmo/TDflowMCP/issues/29) · [Milestone](../milestones/v1.8-network-intelligence.md) · [Proposed ADR](../decisions/0021-compact-network-inspection.md)
+Issue #29 covers compact network context, scoped search and passive dependency inspection on Windows with TouchDesigner 2025.32440. Existing handoff resumes cover the first owner-edit scenario. A new change summary requires a verified permission-bound comparison. [Issue #29](https://github.com/jlopesmo/TDflowMCP/issues/29) · [Milestone](../milestones/v1.8-network-intelligence.md) · [ADR-0021](../decisions/0021-compact-network-inspection.md)
 
 The dev2 evaluation extends the runtime-checked guide and compares both real clients across three fixture sizes. Exact-path inspection skips hidden sibling enumeration for known operators. Review the residual availability signal before any release decision. [Dev2 milestone](../milestones/v1.8-network-intelligence.md#dev2-evaluation)
 
-The owner requested release preparation with the dev2 feature scope frozen. Review the v1.8.0 candidate, the residual in ADR-0021 and the Windows/TouchDesigner 2025.32440 release-specific compatibility decision before authorizing promotion. Build from the clean annotated tag and verify public downloads only after release authorization. [Release preparation](../milestones/v1.8-network-intelligence.md#release-preparation)
+The owner accepted the residual risk for local evaluation, approved the Windows and TouchDesigner 2025.32440 waiver for v1.8.0 only and authorized promotion. Verify the clean annotated-tag build, final package acceptance and public downloads before closing Issue #29. [Release preparation](../milestones/v1.8-network-intelligence.md#release-preparation)
 
 ## D28 — Codex acceptance and release of 1.0.1 (owner, GitHub Issue #3, 2026-11-25)
 

@@ -50,7 +50,7 @@ For the v1.3 diagnostic workflow, `tdflow_describe_network` accepts optional `di
 
 ### Compact network inspection
 
-The v1.8 development candidate adds a `compact` object to direct `tdflow_describe_network` calls. Start with `{"depth": 2}` for the next two readable levels. Use `query` to match terms against names, types and catalog guidance. `purpose_search` reports whether the verified Windows 2025.32440 catalog was used. Use `state: "error"` or `"warning"` for non-COMP operators with recorded status. Compact and detailed diagnostics are separate request forms.
+v1.8.0 adds a `compact` object to direct `tdflow_describe_network` calls. Start with `{"depth": 2}` for the next two readable levels. Use `query` to match terms against names, types and catalog guidance. `purpose_search` reports whether the verified Windows 2025.32440 catalog was used. Use `state: "error"` or `"warning"` for non-COMP operators with recorded status. Compact and detailed diagnostics are separate request forms.
 
 The response gives matching path and type rows in path order. `total` counts readable matches. Follow `next_offset` with the same options and refresh if the graph or scope changes. Depth is 1–4, the default page is 40 rows and pages can request up to 80 rows. With `dependencies: true`, an edge is `[source, target, output_index, input_index]`. Both operators must be on the page. The wire limit is reported by `edges_truncated`. Use connector inspection for exact details beyond the page.
 
@@ -58,7 +58,7 @@ In dev2, `compact.paths` accepts up to 80 exact descendants within the requested
 
 An omitted path gives no evidence about its existence. Check your read scopes before requesting more detail. For broad pages, keep `limit` at or below 80 and follow `next_offset`.
 
-Use `parameters: [{"path": "/project1/fx/level1", "names": ["opacity"]}]` for selected parameters on the page. Results label expression, bind or export mode, literal candidates and unresolved cases. Static candidates describe a stored reference. Use a named parameter read to see the applicable current state. [Proposed ADR](../decisions/0021-compact-network-inspection.md)
+Use `parameters: [{"path": "/project1/fx/level1", "names": ["opacity"]}]` for selected parameters on the page. Results label expression, bind or export mode, literal candidates and unresolved cases. Static candidates describe a stored reference. Use a named parameter read to see the applicable current state. [ADR-0021](../decisions/0021-compact-network-inspection.md)
 
 **Experiments and save (Phase 3 increment 2, implemented; [record](../research/2026-11-23-phase-3-experiments.md)):**
 
