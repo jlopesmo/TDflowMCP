@@ -12,6 +12,8 @@ The scoped diagram's pure PNG renderer is `src/tdflowmcp/network_diagram.py`. It
 
 The v1.7 inert draft review prototype is `spikes/v17/script_intent.py`. The disposable export, import and restart probe runs from `tests/td/run_td_advanced_script_probe.py`. These files are outside the packaged runtime. [Milestone](../milestones/v1.7-script-access.md)
 
+Issue #24 adds `spikes/v17/transfer_review.py` for inert manifests, `spikes/v17/recovery_ledger.py` for the SQLite recovery experiment, and `spikes/v17/probe_windows_integrity.py` for the synthetic Windows integrity comparison. `tests/td/run_td_script_boundary_probe.py` runs the disposable native checks. `tests/unit/test_script_transfer_recovery.py` covers transfer, authorization and interrupted ledger cases. [Milestone](../milestones/v1.7-script-access.md#issue-24-boundary-and-recovery-follow-up)
+
 This map lists the repository's actual contents (Phase 1C). Planned directories are listed in [source-of-truth.md](../architecture/source-of-truth.md#directory-layout). **They do not exist yet.**
 
 | Path | Purpose | Governing doc |

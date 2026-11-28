@@ -1,6 +1,6 @@
 # ADR-0018 — Script operator lifecycle
 
-**Status:** Proposed. [Issue #14](https://github.com/jlopesmo/TDflowMCP/issues/14) and [Issue #20](https://github.com/jlopesmo/TDflowMCP/issues/20) authorize disposable research. A changed production execution policy requires explicit owner acceptance of a proven design.
+**Status:** Proposed. [Issue #14](https://github.com/jlopesmo/TDflowMCP/issues/14), [Issue #20](https://github.com/jlopesmo/TDflowMCP/issues/20) and [Issue #24](https://github.com/jlopesmo/TDflowMCP/issues/24) authorize disposable research. A changed production execution policy requires explicit owner acceptance of a proven design.
 
 ## Context
 
@@ -37,3 +37,7 @@ The v1.5.0 tagged binary refused creation of Script CHOP, SOP and TOP through MC
 An off-by-default Advanced Script Authoring capability would separate inert source authoring from execution. It would use distinct owner-issued, per-agent, project- and path-scoped, expiring permissions and approval for each exact action. The draft preview is text and structured evidence. A production activation surface would require a separately verified boundary and owner decision. Existing Script creation denies, protected resources, mandatory audit and suspension remain in effect.
 
 The disposable transfer and restart probe observed zero callbacks for a controlled cold fixture. Exact dry-run approvals failed after import or restart and after changes to inputs, callback identity or source. Explicit fixture activation ran in the destination TouchDesigner process, and a graph rollback could not erase the faulting callback's observed effect. Active Script authoring stays deferred. [Threat model, state transitions and owner options](../milestones/v1.7-script-access.md) · [Observed verification](../icm/validation-index.md#v17-script-access-research)
+
+## Issue #24 proposed disposition
+
+Use inert source and declarative metadata for any separately approved offline transfer design. Require a fresh receiver identity, separate owner authoring and activation decisions, and a durable intent before any future native dispatch. A missing result is unknown and demands quarantine and owner recovery. A local low-integrity child could still read a synthetic NTFS file and write to the exFAT work volume. Keep the live Script lifecycle denied until independently enforced TouchDesigner containment and audit protection can be verified. [Decision matrix and recovery model](../milestones/v1.7-script-access.md#issue-24-boundary-and-recovery-follow-up)
