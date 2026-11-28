@@ -37,6 +37,7 @@ class NotCookingTests(unittest.TestCase):
             # Static assets come from the immutable snapshot and need no main thread.
             self.assertEqual(h.run(lambda: req(h.port), pump=False)[0], 200)
             # Frames resume: served again, and the refused requests did not queue up behind it.
+            self.assertEqual(h.t.pump(h.dispatch), 0)                  # owner frame before the client sends
             st, _, _ = h.run(lambda: req(h.port, "GET", "/setup/api/status", API))
             self.assertEqual(st, 200)
             self.assertEqual(len(h.dispatched_on), 2)

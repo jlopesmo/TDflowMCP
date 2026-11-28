@@ -1,4 +1,6 @@
 """Owner-built, disposable network for passive context and search benchmarks."""
+import os
+
 import td
 
 import td_runner_gate as gate
@@ -38,9 +40,13 @@ def run(comp, ext, T, frames, until, checkpoint, R):
     protected = node(root, td.baseCOMP, "protected_canary")
     protected.tags.add("tdflowProject")
     protected_leaf = node(protected, td.constantTOP, "protected_child")
-    for parent in (signals, group):
-        for i in range(24):
-            node(parent, td.nullTOP, f"spare_{i:02d}")
+    size = os.environ.get("TDFLOW_INTELLIGENCE_SIZE", "medium")
+    extra = {"small": 4, "medium": 24, "large": 100}[size]
+    for parent, source_cls, pass_cls in ((signals, td.constantCHOP, td.nullCHOP),
+                                         (group, td.constantTOP, td.nullTOP)):
+        for i in range(extra // 2):
+            branch = node(parent, source_cls, f"zz_aux_{i:03d}_in")
+            node(parent, pass_cls, f"zz_aux_{i:03d}_out", branch)
     # Unrelated passive callback fixture. Its callback counter is inspected from the owner side.
     watcher = node(group, td.parameterexecuteDAT, "passive_watch")
     watcher.text = ("def onValueChange(par, prev):\n"
@@ -56,7 +62,8 @@ def run(comp, ext, T, frames, until, checkpoint, R):
     fields = {"root": root.path, "signals": signals.path, "group": group.path, "picture": picture.path,
               "rack": controls.path, "motion": motion.path, "oscillator": oscillator.path, "plate": plate.path,
               "level": level.path, "output": output.path, "fault": fault.path, "private": private.path,
-              "protected": protected.path, "hidden_user": hidden_user.path, "dynamic": dynamic.path}
+              "protected": protected.path, "hidden_user": hidden_user.path, "dynamic": dynamic.path, "size": size,
+              "network_operators": sum(len(c.children) for c in (root, signals, picture, group, protected))}
     yield checkpoint("intelligence_seed", fields)
     # Owner edit between the stored task checkpoint and model resume.
     fade.val = 0
@@ -77,7 +84,7 @@ def run(comp, ext, T, frames, until, checkpoint, R):
     yield checkpoint("intelligence_clients", fields, seconds=730)
     live = observation()
     T("intelligence.live_passive", after == live, before=after, after=live)
-    if not settings.get("candidate"):
+    if not settings.get("security_checks"):
         return
 
     backup = controls.appendCustomPage("Bindings").appendFloat("Backup")[0]
@@ -99,6 +106,28 @@ def run(comp, ext, T, frames, until, checkpoint, R):
     hidden_sink.inputConnectors[0].connect(hidden_wire.outputConnectors[0])
     hidden_user.par.opacity.expr = "op('/project1/fx/signals/absent_canary').par.Secret"
     yield checkpoint("intelligence_hidden_changed", fields)
+    if settings.get("focus_checks"):
+        focused = node(root, td.baseCOMP, "focused")
+        focus_plate = node(focused, td.constantTOP, "active_plate")
+        node(focused, td.nullTOP, "active_output", focus_plate)
+        banned = node(focused, td.baseCOMP, "unreadable")
+        node(banned, td.nullTOP, "readable_child")
+        guarded = node(focused, td.baseCOMP, "guarded")
+        guarded.tags.add("tdflowProject")
+        node(guarded, td.nullTOP, "private_child")
+        nested = node(focused, td.baseCOMP, "nested")
+        inner = node(nested, td.baseCOMP, "inner")
+        node(inner, td.nullTOP, "too_deep")
+        sibling = node(root, td.baseCOMP, "focused_other")
+        node(sibling, td.nullTOP, "active_plate")
+        yield checkpoint("intelligence_focus_before", {"path": focused.path, "hidden_siblings": 0})
+        for i in range(2400):
+            node(focused, td.nullTOP, f"hidden_{i:04d}")
+            if i % 200 == 199:
+                yield frames(1)
+        yield checkpoint("intelligence_focus_after", {"path": focused.path, "hidden_siblings": 2400})
+        focused.destroy()
+        sibling.destroy()
     mesh = node(root, td.baseCOMP, "mesh")
     channels = [node(mesh, td.nullCHOP, f"channel_{i:02d}") for i in range(15)]
     for i in range(9):

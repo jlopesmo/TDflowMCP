@@ -271,9 +271,12 @@ def core_registry() -> Registry:
            "upstream leads and ranked last CPU cook samples. Or set compact for a bounded multi-level view, "
            "search by name, type or curated purpose on Windows TD 2025.32440, and filter non-COMPs by error or warning. "
            "Set compact.dependencies for exact native wires and compact.parameters to identify literal reference candidates. "
+           "Use compact.paths for already known operators without enumerating sibling networks. "
            "Compact requires a direct MCP call. Both forms are passive reads.",
            obj({"path": PATH, "diagnostics": {"type": "boolean"}, "compact": obj({
                "depth": {"type": "integer", "minimum": 1, "maximum": 4, "description": "Readable child levels, default 1"},
+               "paths": {"type": "array", "minItems": 1, "maxItems": 80, "items": PATH,
+                         "description": "Inspect only these exact descendant paths within depth, with readable ancestors"},
                "query": {"type": "string", "maxLength": 100, "description": "Match terms in name, type or curated purpose"},
                "state": {"type": "string", "enum": ["error", "warning"]},
                "limit": {"type": "integer", "minimum": 1, "maximum": 80, "description": "Page size, default 40"},

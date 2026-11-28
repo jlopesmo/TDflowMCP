@@ -681,7 +681,11 @@ class EngineTests(unittest.TestCase):
         path = "/project1/fx"
         valid = {"path": path, "compact": {"depth": 3}}
         for args in ({"path": path, "compact": {"depth": 5}}, {"path": path, "compact": {"limit": 81}},
-                     {"path": path, "compact": {"parameters": [{"path": path, "names": []}]}}):
+                     {"path": path, "compact": {"parameters": [{"path": path, "names": []}]}},
+                     {"path": path, "compact": {"paths": []}},
+                     {"path": path, "compact": {"paths": [path + "/operator"] * 81}},
+                     {"path": path, "compact": {"paths": [path + "/../other"]}},
+                     {"path": path, "compact": {"paths": [path + "/child*"]}}):
             self.assertEqual(self.eng.call(self.tid, "tdflow_describe_network", args)["structuredContent"]["code"],
                              "INVALID_ARGS")
         self.assertEqual(self.eng.call(self.tid, "tdflow_describe_network", valid, in_script=True)

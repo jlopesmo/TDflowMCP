@@ -1,5 +1,6 @@
 """Benchmark the same read-only operator tasks against a packaged baseline or candidate."""
 import argparse
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 import hashlib
@@ -11,6 +12,7 @@ import os
 from pathlib import Path
 import posixpath
 import shutil
+import statistics
 import subprocess
 import sys
 import tempfile
@@ -47,6 +49,8 @@ def token_for(name, scope):
         {"scope": "/project1/fx/picture/grade/restricted_wire", "effect": "deny", "actions": ["read"]},
         {"scope": "/project1/fx/bounded/hidden_extra", "effect": "deny", "actions": ["read"]},
         {"scope": "/project1/fx/mesh/zz_hidden_feed", "effect": "deny", "actions": ["read"]},
+        {"scope": "/project1/fx/focused/hidden_*", "effect": "deny", "actions": ["read"]},
+        {"scope": "/project1/fx/focused/unreadable", "effect": "deny", "actions": ["read"]},
     ]})
     if result["status"] != 200:
         raise RuntimeError("Fixture read exclusions failed")
@@ -94,7 +98,9 @@ def measure(token):
                     self.send_error(502)
                     return
                 if name:
-                    calls.append({"tool": name, "bytes": len(payload), "ms": round((time.perf_counter() - start) * 1000, 2)})
+                    end = time.perf_counter()
+                    calls.append({"tool": name, "bytes": len(payload), "ms": round((end - start) * 1000, 2),
+                                  "span": (start, end)})
                 self.send_response(response.status)
                 for key in ("Content-Type", "Mcp-Session-Id"):
                     if response.getheader(key):
@@ -115,8 +121,8 @@ def measure(token):
             thread.join(5)
 
 
-def live(work, data, candidate, label):
-    token, _ = STATE[label]
+def live(work, data, candidate, label, explicit_bounds=False):
+    token, agent = STATE[label]
     expected = {"top_source": data["plate"], "top_stage": data["level"], "chop_stage": data["motion"],
                 "control_operator": data["rack"], "control_parameter": "Fade", "control_value": 0, "fault_operator": data["fault"],
                 "owner_change_operator": data["rack"], "owner_change_parameter": "Fade"}
@@ -132,6 +138,10 @@ def live(work, data, candidate, label):
         "Keys: " + ", ".join(expected) + ".")
     if candidate:
         prompt += " Prefer compact multi-level description, dependency inspection and purpose/error filters where applicable."
+        if data["size"] == "large":
+            prompt += " Inspect the relevant component pages if their operators are split across the root page."
+        if explicit_bounds:
+            prompt += " Keep compact depth between 1 and 4 and limit between 1 and 80. Follow next_offset to paginate."
     started = time.perf_counter()
     result, usage, api_ms = "", None, None
     with measure(token) as (url, calls):
@@ -169,15 +179,21 @@ def live(work, data, candidate, label):
             result = next((item.get("text", "") for item in reversed(items) if item.get("type") == "agent_message"), "")
             usage = next((event.get("usage") for event in reversed(events) if event.get("type") == "turn.completed"), None)
             success = proc.returncode == 0 and not any(item.get("type") == "command_execution" for item in items)
+        finished = time.perf_counter()
     try:
         answer = json.loads(result[result.index("{"):result.rindex("}") + 1])
     except (ValueError, TypeError):
         answer = {}
     score = {key: answer.get(key) == value for key, value in expected.items()}
+    cursor, covered = started, 0
+    for low, high in sorted(record.pop("span") for record in calls):
+        covered += max(0, high - max(cursor, low))
+        cursor = max(cursor, high)
     report = {"client_ok": bool(success and calls), "correct": sum(score.values()), "total": len(score),
               "answers": score, "calls": len(calls), "response_bytes": sum(record["bytes"] for record in calls),
-              "rpc_ms": round(sum(record["ms"] for record in calls), 2), "elapsed_s": round(time.perf_counter() - started, 2),
-              "api_ms": api_ms, "usage": usage, "tools": calls}
+              "rpc_ms": round(sum(record["ms"] for record in calls), 2), "elapsed_s": round(finished - started, 2),
+              "rpc_wall_ms": round(covered * 1000, 2), "outside_tool_rpc_ms": round((finished - started - covered) * 1000, 2),
+              "api_ms": api_ms, "usage": usage, "tools": calls, "audit_actor": agent}
     return report
 
 
@@ -190,7 +206,7 @@ def seed(data):
         STATE[name] = token_for("Network benchmark " + name, data["root"])
 
 
-def suite(data, candidate):
+def suite(data, candidate, focus_checks):
     client = mcp.MCP(STATE["scripted"][0])
     def call(name, arguments):
         status, reply, raw = client.rpc("tools/call", {"name": name, "arguments": arguments})
@@ -217,12 +233,20 @@ def suite(data, candidate):
                 (data["oscillator"], data["motion"])} <= links
 
     if candidate:
-        record("understand", [described(data["root"], compact={"depth": 3, "limit": 80, "dependencies": True})],
-               wiring)
-        record("trace", [described(data["root"], compact={"depth": 3, "limit": 80, "dependencies": True,
-              "parameters": [{"path": data["level"], "names": ["opacity"]}]}),
+        scopes = ("signals", "group") if data["size"] == "large" else ("root",)
+        record("understand", [described(data[key], compact={"depth": 3, "limit": 80, "dependencies": True})
+                              for key in scopes], wiring)
+        trace = {"depth": 1 if focus_checks or data["size"] == "large" else 3, "limit": 80, "dependencies": True,
+                 "parameters": [{"path": data["level"], "names": ["opacity"]}]}
+        if focus_checks:
+            trace["paths"] = [data["plate"], data["level"], data["output"]]
+        trace_root = data["group"] if trace["depth"] == 1 else data["root"]
+        record("trace", [described(trace_root, compact=trace),
               (PARAMS, {"path": data["rack"], "names": ["Fade"]})],
                lambda rows: (data["level"], data["output"]) in {tuple(edge[:2]) for edge in rows[0]["edges"]}
+               and (not focus_checks or (rows[0]["total"] == len(trace["paths"])
+                    and [row["path"] for row in rows[0]["operators"]] == sorted(trace["paths"])
+                    and [data["plate"], data["level"], 0, 0] in rows[0]["edges"]))
                and rows[1]["parameters"][0]["value"] == 0
                and {"operator": data["level"], "parameter": "opacity", "mode": "EXPRESSION",
                     "candidates": [{"operator": data["rack"], "parameter": "Fade"}], "unresolved": False}
@@ -243,12 +267,25 @@ def suite(data, candidate):
            and data["rack"] in json.dumps(rows[0]["fingerprint"]["parameter_changes"])
            and "Fade" in json.dumps(rows[0]["fingerprint"]["parameter_changes"]))
     EVIDENCE["scripted"] = tasks
-    scoped, _ = call(DESCRIBE, {"path": data["root"], **({"compact": {"depth": 3, "dependencies": True}} if candidate else {})})
+    EVIDENCE["size"] = data["size"]
+    EVIDENCE["network_operators"] = data["network_operators"]
+    security_checks = candidate and data["size"] == "medium"
+    EVIDENCE["profile"] = "candidate_acceptance" if security_checks else "benchmark"
+    EVIDENCE["pressure_scheduled"] = security_checks and focus_checks
+    scoped, scoped_rpc = call(DESCRIBE, {"path": data["signals"], **({"compact": {}} if candidate else {})})
     direct, _ = call(DESCRIBE, {"path": data["private"]})
     gate.T("intelligence.direct_private_denied", direct.get("code") == "DENIED")
-    gate.T("intelligence.network_omits_private_path", data["private"] not in json.dumps(scoped))
+    gate.T("intelligence.network_omits_private_path", scoped_rpc["ok"] and data["private"] not in json.dumps(scoped))
     EVIDENCE["legacy_reports_filtered_count"] = "filtered" in scoped
     if candidate:
+        root, signals = data["root"], data["signals"]
+        absent = compact(root, depth=2, paths=[signals + "/absent_canary"])
+        denied = compact(root, depth=2, paths=[data["private"]])
+        gate.T("intelligence.exact_denied_and_missing_omitted",
+               mcp.ok(absent) and absent.get("operators") == [] and denied == absent)
+        selected = compact(root, depth=1, paths=[root, signals, signals, data["motion"], root + "_other/signals"])
+        gate.T("intelligence.exact_unique_descendants_at_depth",
+               mcp.ok(selected) and [row["path"] for row in selected.get("operators", [])] == [signals])
         for modern in (False, True):
             status, reply, _ = client.rpc("tools/list", modern=modern)
             tools = (reply or {}).get("result", {}).get("tools", [])
@@ -257,19 +294,38 @@ def suite(data, candidate):
             gate.T("intelligence.exact_catalog_" + ("modern" if modern else "legacy"),
                    status == 200 and names == mcp.EXPECTED_TOOLS
                    and "compact" in describe.get("inputSchema", {}).get("properties", {}))
-    return {"candidate": candidate}
+    return {"security_checks": security_checks, "focus_checks": focus_checks}
 
 
-def run_clients(data, work, candidate):
+def run_clients(data, work, candidate, explicit_bounds=False):
     with ThreadPoolExecutor(max_workers=2) as pool:
         jobs = {}
         for label in ("claude", "codex"):
             client_work = work / label
             client_work.mkdir()
-            jobs[label] = pool.submit(live, client_work, data, candidate, label)
+            jobs[label] = pool.submit(live, client_work, data, candidate, label, explicit_bounds)
         results = {label: job.result() for label, job in jobs.items()}
     EVIDENCE["clients"] = results
+    EVIDENCE["explicit_bounds_prompt"] = explicit_bounds
     for label, result in results.items():
+        actor = result.pop("audit_actor")
+        query = {"agent": actor, "limit": 150}
+        events = []
+        while True:
+            response = mcp.admin("POST", "/api/audit/search", query)
+            page = mcp.base.jbody(response) or {}
+            if response["status"] != 200 or not isinstance(page.get("events"), list):
+                raise RuntimeError("Benchmark audit receipt unavailable")
+            events.extend(row for row in page["events"] if row.get("tool") in METHODS)
+            if not page.get("more"):
+                break
+            query["before"] = page["events"][-1]["seq"]
+        durations = [row["duration_ms"] for row in events if row.get("kind") == "outcome"
+                     and isinstance(row.get("duration_ms"), (int, float))]
+        result["audited_outcomes"] = len(durations)
+        result["audit_to_outcome_ms"] = sum(durations)
+        result["audit_denials"] = dict(Counter(row.get("error_code") or "unspecified" for row in events
+                                               if row.get("kind") == "deny"))
         gate.T("intelligence.live_" + label, result["client_ok"] and (not candidate or result["correct"] == result["total"]),
                correct=result["correct"], total=result["total"])
 
@@ -325,11 +381,16 @@ def security(data):
     broad = mcp.MCP(mcp.TOKENS["B"])
     protected = broad.call(DESCRIBE, {"path": data["protected"], "compact": {}})
     projected = broad.call(DESCRIBE, {"path": root, "compact": {"depth": 3}})
+    protected_leaf = data["protected"] + "/protected_child"
+    exact_options = {"depth": 2, "paths": [protected_leaf]}
+    focused = broad.call(DESCRIBE, {"path": root, "compact": exact_options})
     outsider = compact("/project1")
     absent_outside = compact("/project1/unknown")
     gate.T("intelligence.protected_and_outside_scopes_denied",
            protected.get("code") == outsider.get("code") == absent_outside.get("code") == "DENIED"
            and data["protected"] not in json.dumps(projected))
+    gate.T("intelligence.exact_path_omits_protected_descendant",
+           mcp.ok(focused) and focused.get("operators") == [])
     gate.T("intelligence.invalid_root_and_combined_views_refused",
            compact(data["level"]).get("code") == "INVALID_ARGS"
            and broad.call(DESCRIBE, {"path": root, "compact": {}, "diagnostics": True}).get("code") == "INVALID_ARGS")
@@ -391,13 +452,62 @@ def readable_limit(data, compare=False):
                code=result.get("code"), total=result.get("total"))
 
 
+def focus_pressure(data, compare=False):
+    path = data["path"]
+    wanted = path + "/active_plate"
+    expected = [{"path": wanted, "type": "constantTOP"}]
+    path_sets = {"focused": [wanted, path + "/unreadable/readable_child", path + "/missing",
+                             path + "/hidden_0000", path + "/guarded/private_child",
+                             path + "/nested/inner/too_deep", path + "_other/active_plate",
+                             "/project1/outside"],
+                 "denied": [path + "/unreadable/readable_child"],
+                 "absent": [path + "/missing_parent/missing_child"], "broad": None}
+    evidence, responses = {}, {}
+    stable = True
+    for label, paths in path_sets.items():
+        times, results = [], []
+        for _ in range(5):
+            started = time.perf_counter()
+            reply = compact(path, depth=2, **({"paths": paths} if paths else {}))
+            times.append((time.perf_counter() - started) * 1000)
+            results.append(reply)
+        responses[label] = results[0]
+        if paths:
+            stable &= all(result == results[0] for result in results)
+        evidence[label] = {"min_ms": round(min(times), 2), "median_ms": round(statistics.median(times), 2),
+                           "max_ms": round(max(times), 2), "refusals": sum(not mcp.ok(result) for result in results)}
+    EVIDENCE.setdefault("hidden_pressure", {})["after" if compare else "before"] = {
+        "hidden_siblings": data["hidden_siblings"], "samples": evidence,
+        "broad_code": responses["broad"].get("code"), "broad_total": responses["broad"].get("total")}
+    gate.T("intelligence.focus_after" if compare else "intelligence.focus_before",
+           stable and mcp.ok(responses["focused"]) and responses["focused"].get("operators") == expected
+           and mcp.ok(responses["absent"]) and responses["denied"] == responses["absent"]
+           and responses["absent"].get("operators") == []
+           and (not compare or STATE["focus_before"] == responses["focused"]))
+    if not compare:
+        STATE["focus_before"] = responses["focused"]
+        sink = path + "/active_output"
+        only_sink = compact(path, paths=[sink], dependencies=True)
+        both = compact(path, paths=[sink, wanted], dependencies=True)
+        gate.T("intelligence.focus_wires_require_both_endpoints", mcp.ok(only_sink) and only_sink.get("edges") == []
+               and mcp.ok(both) and both.get("edges") == [[wanted, sink, 0, 0]])
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tox", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--candidate", action="store_true")
     parser.add_argument("--live-clients", action="store_true")
+    parser.add_argument("--size", choices=("small", "medium", "large"), default="medium")
+    parser.add_argument("--focus-checks", action="store_true",
+                        help="Use exact-path trace and run the hidden-sibling pressure check on the medium fixture")
+    parser.add_argument("--explicit-bounds", action="store_true", help="State unchanged compact bounds in the live client prompt")
     args = parser.parse_args()
+    if (args.focus_checks or args.explicit_bounds) and not args.candidate:
+        parser.error("--focus-checks and --explicit-bounds require --candidate")
+    if args.explicit_bounds and not args.live_clients:
+        parser.error("--explicit-bounds requires --live-clients")
     tox = args.tox.resolve(strict=True)
     if any(gate.oslisteners.other_listeners(port, 0) for port in gate.base.PORTS):
         raise SystemExit("A TouchDesigner fixture port is in use.")
@@ -407,14 +517,17 @@ def main():
     project.mkdir()
     shutil.copyfile(HERE / "td_runner_network_intelligence.py", run / "td_runner_network_intelligence.py")
     result = gate.launch("network_intelligence", str(tox), str(run), str(project),
-                         {"TDFLOW_PRIVATE_ROOT": str(work / "private")},
+                         {"TDFLOW_PRIVATE_ROOT": str(work / "private"), "TDFLOW_INTELLIGENCE_SIZE": args.size},
                          {"setup_ready": mcp.cp_setup_ready, "pair_approved": mcp.cp_pair_approved,
                           "intelligence_seed": lambda data, _pid: seed(data),
-                          "intelligence_benchmark": lambda data, _: suite(data, args.candidate),
-                          "intelligence_clients": lambda data, _: run_clients(data, work, args.candidate) if args.live_clients else None,
+                          "intelligence_benchmark": lambda data, _: suite(data, args.candidate, args.focus_checks),
+                          "intelligence_clients": lambda data, _: run_clients(data, work, args.candidate, args.explicit_bounds)
+                          if args.live_clients else None,
                           "intelligence_security": lambda data, _: security(data),
                           "intelligence_hidden_changed": lambda data, _: gate.T("intelligence.hidden_edits_omit_counts_paths_and_edges",
                                                                                  snapshot(data) == STATE["projection"]),
+                          "intelligence_focus_before": lambda data, _: focus_pressure(data),
+                          "intelligence_focus_after": lambda data, _: focus_pressure(data, compare=True),
                           "intelligence_truncated": lambda data, _: truncated(data),
                           "intelligence_truncated_after_hidden": lambda data, _: truncated(data, compare=True),
                           "intelligence_before_hidden_sibling": lambda data, _: readable_limit(data),
@@ -426,6 +539,21 @@ def main():
                           "intelligence_revoke": lambda data, _: revoked(data)},
                          deadline_s=800)
     checks = result.get("tests", []) + gate.H["tests"]
+    if args.candidate:
+        expected = {"intelligence.exact_denied_and_missing_omitted", "intelligence.exact_unique_descendants_at_depth"}
+        pressure = args.focus_checks and args.size == "medium"
+        if args.size == "medium":
+            expected.update(("intelligence.exact_path_omits_protected_descendant", "intelligence.compact_reads_passive",
+                             "intelligence.hidden_edits_omit_counts_paths_and_edges", "intelligence.wire_output_truncated",
+                             "intelligence.hidden_wire_does_not_change_edge_truncation",
+                             "intelligence.hidden_sibling_does_not_spend_readable_budget", "intelligence.generic_work_refusal",
+                             "intelligence.kill_switch", "intelligence.minimized_read_refused",
+                             "intelligence.restored_read_recovers", "intelligence.revoked_token_refused"))
+        if pressure:
+            expected.update(("intelligence.focus_before", "intelligence.focus_wires_require_both_endpoints",
+                             "intelligence.focus_after"))
+        observed = {check["name"] for check in checks}
+        checks.append({"name": "intelligence.exact_path_checks_completed", "ok": expected <= observed})
     report = {"tox_sha256": hashlib.sha256(tox.read_bytes()).hexdigest(), "td_build": result.get("td_build"),
               "version": result.get("component_version"), "checks": checks, "errors": result.get("errors", []),
               "evidence": EVIDENCE}

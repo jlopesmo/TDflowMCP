@@ -96,3 +96,5 @@ Configure the existing TDflowMCP connection and ask the owner to grant temporary
 ## Compact network inspection (bundled Skill 1.14)
 
 Use the existing connection and read scopes. The Skill shows how to page compact context, search by purpose or recorded status, and verify static reference candidates with named parameter reads. It continues to use `tdflow_handoff_resume` after owner edits. [Compact tool contract](tool-surface.md#compact-network-inspection)
+
+Skill 1.15 adds exact-path inspection for known operators. Use the verified catalog when searching unfamiliar operator types. [Dev2 milestone](../milestones/v1.8-network-intelligence.md#dev2-evaluation)

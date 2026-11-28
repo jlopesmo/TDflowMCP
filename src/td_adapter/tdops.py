@@ -598,23 +598,27 @@ class TDAdapter(Adapter):
                    "executeDAT": "Run an approved frame or project callback"}
         query = args.get("query", "").casefold().split()
         wanted_family = args.get("family")
+        build = str(td.app.build)
+        guidance_available = args.get("guidance") and sys.platform == "win32" and build == GUIDES.VERIFIED_BUILD
         rows = []
         for name in sorted(SAFE_CREATE_TYPES | APPROVABLE_CREATE_TYPES):
             family = re.search(r"[A-Z]+$", name).group()
             summary = purpose.get(name, "")
+            search = name + " " + summary
+            if query and guidance_available:
+                search += " " + GUIDES.search_text(name)
             if ((wanted_family and wanted_family != family) or not isinstance(getattr(td, name, None), type)
-                    or not all(term in (name + " " + summary).casefold() for term in query)):
+                    or not all(term in search.casefold() for term in query)):
                 continue
             rows.append({"type": name, "family": family, "purpose": summary,
                          "creation": "approval_required" if name in APPROVABLE_CREATE_TYPES else "scoped"})
         off, limit = args.get("offset", 0), args.get("limit", 30)
-        build = str(td.app.build)
         page = rows[off:off + limit]
         result = {"path": res.context["op"].path, "td_build": build, "types": page,
                   "total": len(rows), "next_offset": off + limit if off + limit < len(rows) else None,
                   "note": "Catalog types are present in this runtime. Creation checks your role, scope and destination."}
         if args.get("guidance"):
-            available = sys.platform == "win32" and build == GUIDES.VERIFIED_BUILD
+            available = guidance_available
             covered = sorted(GUIDES.GUIDED_TYPES & {row["type"] for row in rows}) if available else []
             result["guidance_coverage"] = {"available": available, "verified_platform": "Windows",
                                            "verified_build": GUIDES.VERIFIED_BUILD, "matching_types": covered,
@@ -892,25 +896,31 @@ class TDAdapter(Adapter):
         deadline = time.monotonic() + 0.075
         limited = "This inspection exceeds the work limit. Use a smaller component or a shallower depth."
         depth = options.get("depth", 1)
-        pending = deque([(root, 0)])
-        visible = {}
-        while pending:
-            parent, level = pending.popleft()
+        def check_budget():
             if time.monotonic() > deadline:
                 raise ToolFailure("NETWORK_INSPECTION_LIMIT", limited)
-            children = parent.children
-            for start in range(0, len(children), 32):
-                if time.monotonic() > deadline:
-                    raise ToolFailure("NETWORK_INSPECTION_LIMIT", limited)
-                batch = children[start:start + 32]
-                allowed = {target.path for target in readable([self._facts(child, "read") for child in batch])}
-                if len(visible) + len(allowed) > MAX_COMPACT_OPERATORS:
-                    raise ToolFailure("NETWORK_INSPECTION_LIMIT", limited)
-                for child in batch:
-                    if child.path in allowed:
-                        visible[child.path] = child
-                        if child.isCOMP and level + 1 < depth:
-                            pending.append((child, level + 1))
+
+        if "paths" in options:
+            visible = self._compact_known_paths(root.path, options["paths"], depth, readable, check_budget)
+        else:
+            visible = {}
+            pending = deque([(root, 0)])
+            while pending:
+                parent, level = pending.popleft()
+                check_budget()
+                children = parent.children
+                check_budget()
+                for start in range(0, len(children), 32):
+                    check_budget()
+                    batch = [(self._facts(child, "read"), child) for child in children[start:start + 32]]
+                    allowed = {target.path for target in readable([target for target, _ in batch])}
+                    if len(visible) + len(allowed) > MAX_COMPACT_OPERATORS:
+                        raise ToolFailure("NETWORK_INSPECTION_LIMIT", limited)
+                    for target, child in batch:
+                        if target.path in allowed:
+                            visible[target.path] = child
+                            if level + 1 < depth and child.isCOMP:
+                                pending.append((child, level + 1))
 
         query = options.get("query", "").casefold().split()
         state = options.get("state")
@@ -918,10 +928,9 @@ class TDAdapter(Adapter):
         guidance = {}
         rows = []
         for path, child in sorted(visible.items()):
-            if time.monotonic() > deadline:
-                raise ToolFailure("NETWORK_INSPECTION_LIMIT", limited)
+            check_budget()
+            op_type = child.OPType
             if query:
-                op_type = child.OPType
                 fields = f"{child.name} {op_type}".casefold()
                 if guide_available:
                     if op_type not in guidance:
@@ -929,23 +938,26 @@ class TDAdapter(Adapter):
                     fields += " " + guidance[op_type]
                 if any(term not in fields for term in query):
                     continue
-            row = {"path": path, "type": child.OPType}
-            if child.isCOMP:
-                if state:
+            row = {"path": path, "type": op_type}
+            if state:
+                if child.isCOMP:
                     continue
-            else:
-                error = bool(child.errors(recurse=False))
-                warning = bool(child.warnings(recurse=False))
-                if (state == "error" and not error) or (state == "warning" and not warning):
+                status = child.errors if state == "error" else child.warnings
+                if not status(recurse=False):
                     continue
-                if error:
-                    row["error"] = True
-                if warning:
-                    row["warning"] = True
+                row[state] = True
             rows.append(row)
 
         offset, limit = options.get("offset", 0), options.get("limit", 40)
         page = rows[offset:offset + limit]
+        for row in page:
+            check_budget()
+            child = visible[row["path"]]
+            if not child.isCOMP:
+                if state != "error" and child.errors(recurse=False):
+                    row["error"] = True
+                if state != "warning" and child.warnings(recurse=False):
+                    row["warning"] = True
         out = {"path": root.path, "depth": depth, "operators": page, "total": len(rows),
                "next_offset": offset + limit if offset + limit < len(rows) else None}
         if query:
@@ -960,13 +972,34 @@ class TDAdapter(Adapter):
                        for name in entry["names"]}
             references = []
             for path, name in sorted(targets):
-                if time.monotonic() > deadline:
-                    raise ToolFailure("NETWORK_INSPECTION_LIMIT", limited)
+                check_budget()
                 ref = self._compact_reference(visible[path], name, readable)
                 if ref is not None:
                     references.append(ref)
             out["parameter_references"] = references
+        check_budget()
         return out
+
+    def _compact_known_paths(self, root, paths, depth, readable, check_budget):
+        """Check the full path chain before any native lookup. Omit unavailable paths uniformly."""
+        prefix = root.rstrip("/") + "/"
+        visible = {}
+        for path in sorted(set(paths)):
+            check_budget()
+            if not path.startswith(prefix):
+                continue
+            names = path[len(prefix):].split("/")
+            if len(names) > depth or any(not re.fullmatch(r"[A-Za-z0-9_]+", name) for name in names):
+                continue
+            chain = [prefix + "/".join(names[:i]) for i in range(1, len(names) + 1)]
+            targets = [self._facts(None, "read", path=ancestor) for ancestor in chain]
+            if len(readable(targets)) != len(chain):
+                continue
+            child = td.op(path)
+            check_budget()
+            if child is not None and child.path == path and readable([self._facts(child, "read")]):
+                visible[path] = child
+        return visible
 
     def _compact_reference(self, child, name, readable):
         par = self._compact_parameter(child, name)
