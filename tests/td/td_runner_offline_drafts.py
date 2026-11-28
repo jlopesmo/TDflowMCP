@@ -63,4 +63,25 @@ def run(mode, comp, ext, T, frames, until, checkpoint, R):
         td.project.save()
         coin.par.active = True
         R["drafts_toe"] = str(Path(td.project.folder) / td.project.name)
+    else:
+        original = ext.engine.draft_project
+        run_dir = Path(os.environ["TDFLOW_RUN_DIR"]).resolve()
+        current = (Path(td.project.folder) / td.project.name).resolve()
+        if not current.is_relative_to(run_dir.parent / "project"):
+            raise RuntimeError("The move fixture requires the generated scratch project.")
+        # Keep older incremental saves outside the project folder so this tests a move.
+        backups = run_dir / "prior-save-files"
+        backups.mkdir()
+        for sibling in current.parent.glob("*.toe"):
+            candidate = sibling.resolve()
+            if (candidate.parent == current.parent and candidate != current
+                    and ext._m.storage.same_project_file(str(candidate), str(current))):
+                candidate.rename(backups / candidate.name)
+        ext = yield from gate.relocation(comp, ext, T, frames, until, checkpoint, R)
+        claimed = ext.engine.draft_project
+        owner_view = yield from gate.store_op(ext, until, "draft_request", claimed, "owner_list", {},
+                                                {"tool": "offline_draft_fixture_claim"},
+                                                ext.engine.policy, {}, lambda: True)
+        T("drafts.copied_project_claim_has_no_inherited_drafts_or_grants",
+          bool(claimed) and claimed != original and owner_view.get("drafts") == [] and owner_view.get("grants") == [])
     R["component_version"] = str(comp.par.Version.eval())

@@ -16,6 +16,7 @@ from tdflowmcp.policy import Agent, Grant, Target
 FAMILIES = ("CHOP", "SOP", "TOP")
 GRANTS = ("read", "author", "submit")
 MAX_BYTES, MAX_LINES, MAX_DRAFTS, MAX_REVISIONS = 12288, 400, 32, 100
+MAX_DRAFTS_PER_AGENT = 8
 MAX_GRANTS, CALLS_PER_MINUTE = 64, 30
 MAX_DIFF_BYTES, MAX_DIFF_LINES = 8192, 80
 WARNING = ("Offline review only. Manually placing and activating this source in TouchDesigner can run Python "
@@ -60,6 +61,7 @@ OWNER_SCHEMAS = {
     "owner_list": closed({}),
     "owner_get": closed({"id": ID}),
     "owner_export": closed(EXACT),
+    "discard": closed({**EXACT, "confirmed": {"type": "boolean", "const": True}}),
     "decide": closed({**EXACT, "decision": {"type": "string", "enum": ["approved_offline", "rejected"]}}),
     "grant": closed({"agent": AGENT, "scope": PATH,
                      "minutes": {"type": "integer", "minimum": 1, "maximum": 120},
@@ -132,7 +134,8 @@ def _guide(family):
     return {"families": [dict(family=f, guidance=hints[f], template="def onCook(scriptOp):\n    return\n")
                          for f in FAMILIES if family is None or family == f],
             "validation": "Bounded syntax parsing only. Runtime behavior is unverified.", "warning": WARNING,
-            "limits": {"bytes": MAX_BYTES, "lines": MAX_LINES, "drafts": MAX_DRAFTS, "revisions": MAX_REVISIONS}}
+            "limits": {"bytes": MAX_BYTES, "lines": MAX_LINES, "drafts": MAX_DRAFTS,
+                       "drafts_per_author": MAX_DRAFTS_PER_AGENT, "revisions": MAX_REVISIONS}}
 
 
 class Workspace:
@@ -214,13 +217,13 @@ class Workspace:
         if args["revision"] != d["revision"] or args["sha256"] != d["sha256"]:
             fail("DRAFT_CONFLICT", "The revision or hash changed. Read the draft again.")
 
-    def _list(self):
-        items = []
+    def _records(self):
         for id_, raw, mac in self.db.execute("SELECT id,record,mac FROM script_drafts WHERE project=? LIMIT ?",
                                             (self.project, MAX_DRAFTS + 1)):
-            d = self._decoded(id_, raw, mac)
-            if self._permitted(d["scope"], d["intended_target"], "read"):
-                items.append(self._view(d))
+            yield self._decoded(id_, raw, mac)
+
+    def _list(self):
+        items = [self._view(d) for d in self._records() if self._permitted(d["scope"], d["intended_target"], "read")]
         return sorted(items, key=lambda d: (d["updated_at"], d["id"]), reverse=True)
 
     def _owner_grants(self):
@@ -241,6 +244,14 @@ class Workspace:
         if not hmac.compare_digest(self._seal_grant(agent, scope, expires, permissions), seal):
             fail("DRAFT_CORRUPT", "The private draft grant could not be verified.")
 
+    def grant_subject(self, action, args):
+        if self.agent_id is not None or action not in ("grant", "revoke") or schema.errors(args, OWNER_SCHEMAS[action]):
+            return None
+        agent, scope = args["agent"], args["scope"]
+        if self._permitted(scope, None) and self.db.execute("SELECT 1 FROM agents WHERE id=?", (agent,)).fetchone():
+            return {"agent": agent, "scope": scope}
+        return None
+
     def _grant(self, args):
         agent, scope = args["agent"], args["scope"]
         if not self._permitted(scope, None):
@@ -260,7 +271,20 @@ class Workspace:
         self.db.execute("INSERT INTO script_draft_grants VALUES(?,?,?,?,?,?) ON CONFLICT(project,agent,scope) "
                         "DO UPDATE SET expires=excluded.expires,permissions=excluded.permissions,mac=excluded.mac",
                         (self.project, agent, scope, expires, permissions, seal))
-        return {"changed": True}
+        return {"changed": True, "grant": {"agent": agent, "scope": scope, "permissions": actions, "expires": expires}}
+
+    def _revoke(self, args):
+        agent, scope = args["agent"], args["scope"]
+        row = self.db.execute("SELECT expires,permissions,mac FROM script_draft_grants WHERE project=? AND agent=? AND scope=?",
+                              (self.project, agent, scope)).fetchone()
+        if row is None:
+            return {"changed": False}
+        expires, permissions, seal = row
+        self._check_grant(agent, scope, expires, permissions, seal)
+        self.db.execute("DELETE FROM script_draft_grants WHERE project=? AND agent=? AND scope=?",
+                        (self.project, agent, scope))
+        return {"changed": True, "grant": {"agent": agent, "scope": scope,
+                                           "permissions": permissions.split(","), "expires": expires}}
 
     def run(self, action, args):
         contract = OWNER_SCHEMAS if self.agent_id is None else AGENT_SCHEMAS
@@ -277,16 +301,16 @@ class Workspace:
         if action == "grant":
             return self._grant(args)
         if action == "revoke":
-            self.db.execute("DELETE FROM script_draft_grants WHERE project=? AND agent=? AND scope=?",
-                            (self.project, args["agent"], args["scope"]))
-            return {"changed": True}
+            return self._revoke(args)
         if action == "create":
             scope, target = args["scope"], args.get("intended_target")
             if not self._permitted(scope, target, "read", "author"):
                 fail("DENIED", "The draft scope or intended target is inaccessible.")
-            count, = self.db.execute("SELECT count(*) FROM script_drafts WHERE project=?", (self.project,)).fetchone()
-            if count >= MAX_DRAFTS:
+            records = list(self._records())
+            if len(records) >= MAX_DRAFTS:
                 fail("DRAFT_LIMIT", "The project has reached the draft count limit.")
+            if sum(d["agent"] == self.agent_id for d in records) >= MAX_DRAFTS_PER_AGENT:
+                fail("DRAFT_LIMIT", "This author has reached the draft count limit.")
             title = args["title"].strip()
             if not title or any(unicodedata.category(ch) in ("Cc", "Cf", "Zl", "Zp") for ch in title):
                 fail("DRAFT_TEXT", "Use a visible title on one line.")
@@ -306,6 +330,9 @@ class Workspace:
         if self.agent_id is not None and self.agent_id != d["agent"]:
             fail("DENIED", "Only the original author can revise or submit this draft.")
         self._exact(args, d)
+        if action == "discard":
+            self.db.execute("DELETE FROM script_drafts WHERE project=? AND id=?", (self.project, d["id"]))
+            return {"id": d["id"], "revision": d["revision"], "state": "discarded"}
         if action == "owner_export":
             if d["state"] != "approved_offline":
                 fail("DRAFT_STATE", "Only the currently reviewed revision can be copied.")

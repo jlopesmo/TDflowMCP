@@ -79,10 +79,16 @@ def check_browser(work, expected, source):
                      url=origin + "/ui/")
         browser.call("Page.addScriptToEvaluateOnNewDocument", source=
                      "sessionStorage.setItem('tdflow_csrf'," + json.dumps(mcp.STATE["csrf"]) + ");")
-        browser.goto(origin + "/ui/#drafts")
-        timeout = time.monotonic() + 12
-        while time.monotonic() < timeout and not browser.js("document.querySelector('#draft-choice').options.length > 1"):
-            time.sleep(0.2)
+        browser.call("Page.addScriptToEvaluateOnNewDocument", source="""globalThis.draftClipboard = [];
+          Object.defineProperty(navigator, 'clipboard', {value: {
+            writeText: async text => globalThis.draftClipboard.push(text)
+          }});""")
+        for _ in range(2):
+            browser.goto(origin + "/ui/#drafts")
+            if browser.wait("(document.querySelector('#draft-choice')?.options.length || 0) > 1", seconds=12):
+                break
+        else:
+            raise RuntimeError("The paired draft dashboard did not load in the disposable browser.")
         browser.js("const picker=document.querySelector('#draft-choice'); picker.value=" + json.dumps(expected["id"])
                    + "; picker.dispatchEvent(new Event('change'));")
         timeout = time.monotonic() + 12
@@ -107,6 +113,19 @@ def check_browser(work, expected, source):
             time.sleep(0.25)
         gate.T("drafts.browser_exact_decision", view.get("state") == "approved_offline"
                and view.get("reviewed_at") and view.get("sha256") == expected["sha256"])
+        gate.T("drafts.browser_no_implicit_clipboard_action", browser.js("draftClipboard.length") == 0)
+        if not browser.wait("!document.querySelector('#draft-details').hidden && "
+                            "!document.querySelector('#draft-copy-source').disabled"):
+            raise RuntimeError("The approved draft did not enable copy.")
+        browser.js("document.querySelector('#draft-copy-source').click()")
+        if not browser.wait("draftClipboard.length === 1"):
+            raise RuntimeError("The explicit source copy did not reach the clipboard stub.")
+        browser.js("document.querySelector('#draft-copy-manifest').click()")
+        if not browser.wait("draftClipboard.length === 2"):
+            raise RuntimeError("The explicit manifest copy did not reach the clipboard stub.")
+        copied = browser.js("draftClipboard")
+        gate.T("drafts.browser_explicit_copy_only_exact_text", copied[0] == source
+               and json.loads(copied[1])["sha256"] == expected["sha256"])
     finally:
         browser.close()
 
@@ -234,6 +253,13 @@ def exercise(work, project, run, clients):
     broken = ok("drafts.invalid_syntax_record_is_reviewable", draft(c, "create", request("create", "def broken(", "Syntax problem")))
     gate.T("drafts.broken_syntax_refused_for_submission", not broken["syntax_ok"]
            and draft(c, "submit", exact(broken)).get("code") == "DRAFT_STATE")
+    unconfirmed = {**exact(broken), "confirmed": False}
+    discard_path = URL + "/discard"
+    gate.T("drafts.discard_requires_explicit_owner_confirmation",
+           body(mcp.admin("POST", discard_path, unconfirmed)).get("code") == "INVALID_ARGS")
+    removed = mcp.admin("POST", discard_path, {**exact(broken), "confirmed": True})
+    gate.T("drafts.owner_discard_removes_exact_revision", body(removed).get("state") == "discarded"
+           and draft(c, "get", {"id": broken["id"]}).get("code") == "DRAFT_NOT_FOUND")
     with ThreadPoolExecutor(2) as pool:
         a, b = list(pool.map(lambda n: draft(mcp.MCP(ungranted), "revise", {**exact(hostile),
                                   "source": source + f"# changed {n}\n"}), (1, 2)))
@@ -273,6 +299,14 @@ def restarted(data, pid):
            and draft(c, "get", {"id": expected["id"]}).get("code") == "DRAFT_NOT_FOUND")
     denied = body(mcp.admin("POST", URL + "/decide", {**expected, "decision": "approved_offline"}))
     gate.T("drafts.no_review_replay_after_restart", denied.get("code") == "DRAFT_STATE")
+    gate.T("drafts.restore_explicit_grant_for_move", grant(STATE["aid"])["status"] == 200)
+
+
+def moved(data, pid):
+    expected = STATE["exact"]
+    r = draft(mcp.MCP(STATE["token"]), "get", {"id": expected["id"]})
+    gate.T("drafts.confirmed_project_move_preserves_exact_review", mcp.ok(r) and exact(r) == expected
+           and r["state"] == "approved_offline")
 
 
 def main():
@@ -309,7 +343,7 @@ def main():
         mcp.STATE["cookies"], mcp.STATE["csrf"] = {}, None
         phases.append(gate.launch("offline_drafts_restart", str(tox), str(second), str(project), env,
                                   {"setup_ready": mcp.cp_setup_ready, "pair_approved": ready_again,
-                                   "drafts_restarted": restarted}, deadline_s=120, toe=saved))
+                                   "drafts_restarted": restarted, "after_move": moved}, deadline_s=180, toe=saved))
     native = [check for phase in phases for check in phase.get("tests", [])]
     all_checks = gate.H["tests"] + native
     failures.extend(t["name"] for t in all_checks if not t["ok"])

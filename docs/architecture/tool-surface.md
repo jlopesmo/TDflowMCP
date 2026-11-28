@@ -106,4 +106,4 @@ Errors added in 2A: `MEMORY_UNAVAILABLE` (no, an uninitialised, or more than one
 | `tdflow_script_draft_revise` | Original author, draft author and read, exact id, revision and SHA-256, and new source. Resets the review state. |
 | `tdflow_script_draft_submit` | Original author, draft submit and read, and an exact current revision with valid offline syntax. |
 
-The paired dashboard under **Script drafts** owns grants, exact offline decisions and explicit text copy. The agent tool surface offers no approval action or Script graph operation. These tools use the dedicated offline resolver and are unavailable inside Code Mode. [Milestone](../milestones/v1.7-offline-script-drafts.md)
+The paired dashboard under **Script drafts** owns grants, exact offline decisions, explicit text copy and confirmed draft discard. The agent tool surface offers no approval, discard or Script graph operation. These tools use the dedicated offline resolver and are unavailable inside Code Mode. [Milestone](../milestones/v1.7-offline-script-drafts.md)

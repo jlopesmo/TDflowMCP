@@ -78,6 +78,7 @@ class OfflineDraftTests(unittest.TestCase):
         self.grant()
         for target in ("/project1/else/top", SCOPE + "/private/top", "/sys/top"):
             self.assertEqual(self.create(intended_target=target)["code"], "DENIED")
+        self.assertEqual(self.create(intended_target=SCOPE + "/private\n")["code"], "INVALID_ARGS")
         self.assertEqual(self.create(scope=SCOPE + "/../invalid")["code"], "INVALID_ARGS")
         d = self.create(intended_target=SCOPE + "/future_top")
         self.st.grant_add("writer", SCOPE + "/future_top", "read", "deny")
@@ -241,3 +242,33 @@ class OfflineDraftTests(unittest.TestCase):
         self.assertIn("Create and revise offline Script drafts", available())
         self.owner("revoke", {"agent": "writer", "scope": SCOPE})
         self.assertNotIn("Create and revise offline Script drafts", available())
+
+    def test_audit_keeps_grant_and_revocation_history_with_exact_expiry(self):
+        grant = self.grant(submit=False)["grant"]
+        self.assertEqual(grant["permissions"], ["read", "author"])
+        removed = self.owner("revoke", {"agent": "writer", "scope": SCOPE})
+        self.assertEqual(removed["grant"], grant)
+        for tool in ("offline_grant", "offline_revoke"):
+            rows = self.st.events("tool=?", (tool,))
+            intent = next(e for e in rows if e["kind"] == "intent")
+            outcome = next(e for e in rows if e["kind"] == "outcome")
+            self.assertEqual(json.loads(intent["detail"]), {"agent": "writer", "scope": SCOPE})
+            self.assertEqual(json.loads(outcome["detail"])["grant"], grant)
+
+    def test_author_quota_shared_capacity_and_exact_owner_discard(self):
+        self.grant()
+        self.grant("viewer")  # read-only graph role still allows separately granted offline authoring
+        mine = [self.create() for _ in range(drafts.MAX_DRAFTS_PER_AGENT)]
+        self.assertTrue(all("id" in d for d in mine))
+        self.assertEqual(self.create()["code"], "DRAFT_LIMIT")
+        self.assertIn("id", self.call("create", {"family": "CHOP", "title": "Another author",
+                                             "scope": SCOPE, "source": "x = 1\n"}, who="viewer"))
+        old = self.exact(mine[0])
+        current = self.call("revise", {**old, "source": "new_value = 1\n"})
+        self.assertEqual(self.owner("discard", {**old, "confirmed": True})["code"], "DRAFT_CONFLICT")
+        self.assertEqual(self.owner("discard", {**self.exact(current), "confirmed": False})["code"], "INVALID_ARGS")
+        exact_request = {**self.exact(current), "confirmed": True}
+        self.assertEqual(self.call("discard", exact_request)["code"], "INVALID_ARGS")
+        self.assertEqual(self.owner("discard", exact_request)["state"], "discarded")
+        self.assertEqual(self.call("get", {"id": old["id"]})["code"], "DRAFT_NOT_FOUND")
+        self.assertIn("id", self.create())

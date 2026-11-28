@@ -229,15 +229,15 @@ class Store:
             return {"code": "DRAFT_RATE", "message": "Wait for the offline workspace request limit to reset."}
         self._draft_rates[agent] = (until, calls + 1)
         self._draft_rates[""] = (global_until, global_calls + 1)
-        seq = self.append("intent", **audit)
         db = self._cc()
+        workspace = DRAFTS.Workspace(db, project, self._key_for(b"script-drafts"), policy, protected,
+                                     agent, audit.get("token_id"))
+        seq = self.append("intent", **audit, detail=workspace.grant_subject(action, args))
         try:
             db.execute("BEGIN IMMEDIATE")
             try:
                 if not guard():
                     DRAFTS.fail("DRAFT_PAUSED", "The offline workspace is suspended or authorization changed.")
-                workspace = DRAFTS.Workspace(db, project, self._key_for(b"script-drafts"), policy, protected,
-                                             agent, audit.get("token_id"))
                 result = workspace.run(action, args)
                 if not guard():
                     DRAFTS.fail("DRAFT_PAUSED", "The offline workspace is suspended or authorization changed.")
@@ -258,6 +258,8 @@ class Store:
         detail = {"intent_seq": seq}
         if "id" in result:
             detail.update(draft_id=result["id"], revision=result["revision"], state=result["state"])
+        if "grant" in result:
+            detail["grant"] = result["grant"]
         self.append("outcome", **audit, outcome="ok", detail=detail)
         return result
 

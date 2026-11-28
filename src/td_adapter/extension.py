@@ -1694,6 +1694,7 @@ class TDflowMCPExt:
             ("GET", "/api/script-drafts"): "owner_list",
             ("POST", "/api/script-drafts/view"): "owner_get",
             ("POST", "/api/script-drafts/copy"): "owner_export",
+            ("POST", "/api/script-drafts/discard"): "discard",
             ("POST", "/api/script-drafts/decide"): "decide",
             ("POST", "/api/script-drafts/grant"): "grant",
             ("POST", "/api/script-drafts/revoke"): "revoke",

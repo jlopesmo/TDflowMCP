@@ -213,6 +213,16 @@
     }
   }
 
+  async function discardDraft() {
+    if (!draftRecord) return;
+    const { id, revision, sha256 } = draftRecord;
+    if (!window.confirm("Permanently discard this draft and its previous revision?")) return;
+    clearDraftView();
+    const r = await api("POST", "/api/script-drafts/discard", { id, revision, sha256, confirmed: true });
+    setText("draft-status", r.ok ? "Draft discarded." : why(r));
+    refreshDrafts();
+  }
+
   // ---- overview + kill switch ------------------------------------------------------------------------------
   async function refreshOverview() {
     const r = await api("GET", "/api/overview");
@@ -793,6 +803,7 @@
     $("draft-reject").addEventListener("click", () => draftDecision("rejected"));
     $("draft-copy-source").addEventListener("click", () => copyDraft("source"));
     $("draft-copy-manifest").addEventListener("click", () => copyDraft("manifest"));
+    $("draft-discard").addEventListener("click", discardDraft);
     $("search").addEventListener("submit", (ev) => { ev.preventDefault(); filters = readFilters(); lastSeq = 0; refreshEvents(false); });
     $("more").addEventListener("click", olderEvents);
     $("token-form").addEventListener("submit", createToken);
