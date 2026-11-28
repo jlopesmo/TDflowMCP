@@ -50,3 +50,5 @@ Skill 1.10 adds guidance for audit-sequence-bound undo, owner wiring verificatio
 Skill 1.11 adds the selected, local operator guidance and instance verification workflow. [v1.5 milestone](../milestones/v1.5-procedural-authoring.md)
 
 Skill 1.12 adds guidance for scope-filtered diagrams and exact connector verification before edits. [v1.6 milestone](../milestones/v1.6-network-vision.md)
+
+Skill 1.14 adds guidance for compact context, scoped search and passive dependency inspection in the v1.8 development component. It uses the existing direct MCP connection and independent named parameter reads. [v1.8 milestone](../milestones/v1.8-network-intelligence.md)

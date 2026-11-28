@@ -397,3 +397,7 @@ The released component provides an offline-only CHOP, SOP and TOP draft workspac
 The corrected v1.7.0 review source adds auditable temporary grant history, an eight-draft author cap and exact, explicitly confirmed owner discard. The paired browser and packaged restart, move and claim fixtures passed. The owner approved promotion and a v1.7.0-only exception for Windows with TouchDesigner 2025.32440. [PR #27](https://github.com/jlopesmo/TDflowMCP/pull/27) · [Observed verification](validation-index.md#issue-26-offline-script-drafts)
 
 The annotated `v1.7.0` tag points to the PR #27 merge at `afd7bc8864a8b271b366cf86898d1ed3443b283e`. The clean tagged binary passed full packaged acceptance and GitHub-hosted Windows and Ubuntu verified all five public downloads. [Public release](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.7.0) · [Release receipts](validation-index.md#v170-tagged-release)
+
+## v1.8 development evaluation
+
+The `1.8.0.dev1` evaluation component extends `tdflow_describe_network` with compact multi-level pages, scoped purpose and diagnostic search, native wire indexes, and named static parameter and CHOP reference candidates. All 62 disposable Windows and TouchDesigner 2025.32440 checks passed on the evaluation binary. Claude Code and Codex each verified 9/9 facts with smaller responses. Existing handoff resume detected the owner edit. [Issue #29](https://github.com/jlopesmo/TDflowMCP/issues/29) · [Benchmark and acceptance](validation-index.md#v18-compact-network-inspection)

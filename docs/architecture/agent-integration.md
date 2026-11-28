@@ -92,3 +92,7 @@ Skill 1.12 explains how to map a network diagram's numbered markers to readable 
 ## Offline Script drafting (bundled Skill 1.13)
 
 Configure the existing TDflowMCP connection and ask the owner to grant temporary draft permissions in **Script drafts**. The six offline tools cover discovery, creation, scoped reads, exact revision edits and submission for review. Keep draft source away from live callback DATs and execution tools. An owner review confirms the presented text and revision. [Offline tool contract](tool-surface.md#additive-offline-script-workspace-issue-26)
+
+## Compact network inspection (bundled Skill 1.14)
+
+Use the existing connection and read scopes. The Skill shows how to page compact context, search by purpose or recorded status, and verify static reference candidates with named parameter reads. It continues to use `tdflow_handoff_resume` after owner edits. [Compact tool contract](tool-surface.md#compact-network-inspection)

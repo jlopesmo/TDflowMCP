@@ -117,6 +117,10 @@ def script():
         ext.launcher = lambda url: True
         yield from __import__("td_runner_network_visual").run(comp, ext, T, frames, until, checkpoint, R)
         return
+    if MODE == "network_intelligence":
+        ext.launcher = lambda url: True
+        yield from __import__("td_runner_network_intelligence").run(comp, ext, T, frames, until, checkpoint, R)
+        return
     if MODE in ("offline_drafts", "offline_drafts_restart"):
         ext.launcher = lambda url: True
         yield from __import__("td_runner_offline_drafts").run(MODE, comp, ext, T, frames, until, checkpoint, R)

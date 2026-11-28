@@ -231,6 +231,8 @@ class Engine:
         errs = schema.errors(args, tool.input_schema)
         if errs:
             return self._deny(base, "INVALID_ARGS", "V1", "; ".join(errs[:5]), None)
+        if in_script and tool.handler == "describe_network" and "compact" in args:
+            return self._deny(base, "INVALID_ARGS", "V1", "Use compact inspection through a direct MCP call.", None)
         if tool.resolver == "none":
             return self._run_identity_tool(tool, agent, args, base, t0)
         if tool.resolver == "undo":
@@ -333,14 +335,17 @@ class Engine:
             return tool_error(failure.code, failure.message, audit_seq=oseq, **extra)
         if mutating:
             out.update(audit_seq=oseq, undo_label=label if reversible != "no" else None, reversible=reversible != "no")
-        if tool.handler == "capture_network":
+        if _scoped_network_read(tool, args):
+            diagram = tool.handler == "capture_network"
             current = self.identity.agent_for_token(token_id)
             if current is None or current.id != agent.id:
-                return self._deny(base, "DENIED", "A0", "The token was revoked. No diagram was delivered.", None)
+                message = "The token was revoked. No diagram was delivered." if diagram else "The token was revoked before delivery."
+                return self._deny(base, "DENIED", "A0", message, None)
             if self.suspended():
-                return self._deny(base, "SUSPENDED", "K1", "All agents are suspended. No diagram was delivered.", None)
+                message = "All agents are suspended. No diagram was delivered." if diagram else "All agents are suspended."
+                return self._deny(base, "SUSPENDED", "K1", message, None)
             if self.policy.version(current) != plan["policy_version"]:
-                return self._deny(base, "PRECONDITION_CHANGED", "R0", "The read policy changed. Request a new diagram.", None)
+                return self._deny(base, "PRECONDITION_CHANGED", "R0", _network_policy_changed(tool), None)
         img = out.pop("_image", None)               # Phase 4: image content, encoded here (handler thread)
         r = tool_result(out)
         if isinstance(img, dict) and img.get("bytes"):
@@ -519,8 +524,8 @@ class Engine:
         if plan.get("approved") and v.policy_version != plan["policy_version"]:
             raise ToolFailure("APPROVAL_POLICY_CHANGED", "Your permissions changed since the approval; nothing was "
                                                          "executed. Ask again.")
-        if tool.handler == "capture_network" and v.policy_version != plan["policy_version"]:
-            raise ToolFailure("PRECONDITION_CHANGED", "The read policy changed. Request a new diagram.")
+        if _scoped_network_read(tool, args) and v.policy_version != plan["policy_version"]:
+            raise ToolFailure("PRECONDITION_CHANGED", _network_policy_changed(tool))
         if self.suspended():
             raise ToolFailure("SUSPENDED", "All agents are suspended; nothing was executed.")
         return self.adapter.execute(tool, args, res, label, lambda ts: self.policy.filter_readable(current, ts)[0])
@@ -1392,6 +1397,15 @@ FP_CHUNK = 50                               # operators fingerprinted per main-t
 
 NOT_COOKING = ("TouchDesigner is not running frames right now, so nothing was executed. Its window may be minimized "
                "(ask the user to restore it), or it is busy with a long operation. Then retry.")
+
+
+def _scoped_network_read(tool, args):
+    return tool.handler == "capture_network" or (tool.handler == "describe_network" and "compact" in args)
+
+
+def _network_policy_changed(tool):
+    return ("The read policy changed. Request a new diagram." if tool.handler == "capture_network"
+            else "Read permissions changed. Inspect again.")
 
 
 def _main_reason(code: str, default: str = "TouchDesigner did not process the request") -> str:

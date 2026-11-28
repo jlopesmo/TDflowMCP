@@ -30,6 +30,7 @@ Only Accepted ADRs bind implementation. Work that depends on a **Proposed** ADR 
 | [0018](0018-script-operator-lifecycle.md) | Script operator lifecycle and activation boundary | Proposed, activation deferred |
 | [0019](0019-network-visual-inspection.md) | Network visual inspection | Proposed |
 | [0020](0020-offline-script-drafts.md) | Offline Script source workspace and exact owner review | Conditionally Accepted, Issue #26 |
+| [0021](0021-compact-network-inspection.md) | Compact network inspection, scoped search and dependency candidates | Proposed, Issue #29 |
 
 The requirements behind ADRs 0010–0013 are owner-approved. The designs of 0010–0013 are Conditionally Accepted (0011 on 2026-11-22, for Phase 1C).
 

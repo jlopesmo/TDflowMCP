@@ -592,3 +592,27 @@ On 2026-11-26, local `dev` and GitHub `main` and `dev` matched at `04f47877bbcef
 - The tagged component passed component workflows **220/220**, diagnostics **61/61**, Setup **59/59 + 71/71**, MCP **103/103 + 295/295**, audit and restart **49/49 + 105/105**, project memory **54/54 + 182/182**, onboarding **7/7 + 47/47**, real Claude Code **90/90 + 83/83**, real Codex **55/55 + 68/68**, network visuals **48/48**, native visuals **16/16**, and browser checks **179/179**.
 - The first MCP run passed 103 native and 293 host checks. Two catalog assertions still expected the pre-v1.7 inventory. A scratch copy of the tagged test harness added the six reviewed draft tool names and required exact name equality in both protocol versions. The complete rerun used the original tagged binary. [Tagged assertions](https://github.com/jlopesmo/TDflowMCP/blob/v1.7.0/tests/td/run_td_mcp_tests.py#L195-L203)
 - The Windows and Ubuntu hosted jobs independently downloaded all five assets anonymously over HTTPS. Both published matching sizes and SHA-256 checksums for each file, verified both recorded hash anchors, and resolved the tag to the tested source commit. The eight earlier annotated tags and 42 earlier asset IDs, sizes and digests matched the pre-release snapshots. [Public release](https://github.com/jlopesmo/TDflowMCP/releases/tag/v1.7.0) · [Hosted download verification](https://github.com/jlopesmo/TDflowMCP/actions/runs/46109397143)
+
+## v1.8 compact network inspection
+
+- The matched benchmark used the published v1.7.0 binary SHA-256 `efe6e7ece9a17a5e139797015da4d0b311b8049b8a7f3101d3f535d0474b1a5b` and development binary SHA-256 `7aeefadac4d8d2ae7fb1694c95ab6e24f298328c1114919d8f147d57d4006e34` on Windows with TouchDesigner 2025.32440. The development build's embedded source SHA-256 is `390a8c6a97a26434b20e2924e9f949c98e87bde42bde5224d840d81e3f12aa4d`. The build verified the embedded file hashes and extension startup in a disposable process.
+- `python -I -B tests/td/run_td_network_intelligence.py --tox <binary> --out <report> --live-clients` passed **38/38** for v1.7.0 and **62/62** with `--candidate`. Both scripted runs recovered all four intended facts and the live clients scored all nine facts. The fixture verifies owner checkpoints and native edits without agent graph edits.
+- The candidate verified exact catalog names in both MCP protocol versions, literal parameter, bind and CHOP-channel candidates, withheld missing and denied reference targets, exact native wire ports, purpose search and error flags, stable pages, protected paths, kill switch, revocation, and minimize/restore. A hidden sibling at the 300-readable operator limit and a hidden wire at the 128-edge output limit left their respective responses identical. The matched benchmark and separate compact-only checks preserved observed cook and callback counters. An exploratory live run observed one oscillator cook while the clients used broader reads. The matched run asked both clients to retrieve only the named parameter values relevant to the task.
+
+| Scripted task | Calls, v1.7 → v1.8 | HTTP response bytes | Summed RPC ms |
+|---|---:|---:|---:|
+| Understand nested TOP/CHOP flow | 4 → 1 | 34,914 → 9,412 | 340.71 → 166.33 |
+| Trace the opacity control and verify its value | 4 → 2 | 21,342 → 10,716 | 332.58 → 316.65 |
+| Find the recorded operator fault | 3 → 1 | 29,165 → 455 | 273.32 → 149.82 |
+| Resume after the owner edit | 1 → 1 | 3,440 → 3,449 | 188.41 → 216.50 |
+
+| Real client | Correct facts | Calls | HTTP response bytes | Summed RPC ms | Elapsed seconds |
+|---|---:|---:|---:|---:|---:|
+| Claude Code | 9/9 → 9/9 | 8 → 5 | 55,741 → 15,696 | 699.45 → 593.11 | 25.61 → 19.64 |
+| Codex | 9/9 → 9/9 | 8 → 7 | 54,861 → 15,873 | 747.24 → 1181.15 | 20.60 → 24.22 |
+
+HTTP bytes include the actual MCP response body for each tool call. Client elapsed time includes model work and overhead. Claude Code reported 21,009 → 16,016 ms of API time. Its cache-creation, cache-read and output tokens were 19,019 → 11,512, 95,591 → 50,451, and 1,239 → 1,058. Codex reported 135,478 → 122,933 input tokens, including 121,856 → 112,128 cached, and 530 → 573 output tokens. The Codex run exposed no separate model time. These are individual runs on the confirmed fixture.
+
+- The passive packaged network-diagram regression passed **43/43** on the same development binary. The existing detailed response and handoff results passed the matched replay.
+- `python -B -m unittest discover -s tests -t . -q` ran **625 tests** with both system Python and TouchDesigner 2025.32440 bundled Python. Both passed, with four and three skips respectively. The documentation check passed and the staged source secret scan found zero findings.
+- Independent Claude Code and Codex reviewed the patch in separate read-only sessions. The first reviews found fixed work thresholds affected by unreadable graph size and a missing defensive non-COMP check. The final candidate charges its count caps to readable operators and shown wires. The final code review found no blocking defect. The final security review retained a medium availability side-channel finding because native enumeration of a sufficiently large hidden graph can still hit the wall-clock deadline. The candidate is for disposable evaluation. Review this residual before release approval. Final review patch SHA-256 `93623555b3ccb641c87304364510c5223cf64a1a064e64d56c421dfd70ee79ba`. [Proposed ADR](../decisions/0021-compact-network-inspection.md)

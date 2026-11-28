@@ -642,6 +642,53 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(result["structuredContent"]["code"], "OUTCOME_UNRECORDED")
         self.assertFalse(any(block["type"] == "image" for block in result["content"]))
 
+    def test_compact_summary_rechecks_child_grants_after_audit_outcome(self):
+        path = "/project1/fx"
+        self.ad.execute = lambda *_args: {"operators": [{"path": path + "/child"}]}
+        append = self.store.append
+
+        def restrict_after_outcome(kind, *args, **kwargs):
+            seq = append(kind, *args, **kwargs)
+            if kind == "outcome":
+                agent = self.idn.agent_for_token(self.tid)
+                deny = Grant(path + "/child", frozenset({"read"}), effect="deny")
+                self.idn.agents[agent.id] = replace(agent, grants=agent.grants + (deny,))
+            return seq
+
+        with patch.object(self.store, "append", side_effect=restrict_after_outcome):
+            result = self.eng.call(self.tid, "tdflow_describe_network", {"path": path, "compact": {}})
+        self.assertEqual(result["structuredContent"]["code"], "PRECONDITION_CHANGED")
+        self.assertNotIn("operators", result["structuredContent"])
+        self.assertEqual(self.kinds(), ["intent", "outcome", "deny"])
+
+    def test_compact_summary_fails_closed_when_audit_outcome_is_unavailable(self):
+        from tdflowmcp.store import AuditUnavailable
+
+        path = "/project1/fx"
+        append = self.store.append
+
+        def unavailable(kind, *args, **kwargs):
+            if kind == "outcome":
+                raise AuditUnavailable("test")
+            return append(kind, *args, **kwargs)
+
+        with patch.object(self.store, "append", side_effect=unavailable):
+            result = self.eng.call(self.tid, "tdflow_describe_network", {"path": path, "compact": {}})
+        self.assertEqual(result["structuredContent"]["code"], "OUTCOME_UNRECORDED")
+        self.assertNotIn("done", result["structuredContent"])
+
+    def test_compact_summary_schema_and_direct_call_boundary(self):
+        path = "/project1/fx"
+        valid = {"path": path, "compact": {"depth": 3}}
+        for args in ({"path": path, "compact": {"depth": 5}}, {"path": path, "compact": {"limit": 81}},
+                     {"path": path, "compact": {"parameters": [{"path": path, "names": []}]}}):
+            self.assertEqual(self.eng.call(self.tid, "tdflow_describe_network", args)["structuredContent"]["code"],
+                             "INVALID_ARGS")
+        self.assertEqual(self.eng.call(self.tid, "tdflow_describe_network", valid, in_script=True)
+                         ["structuredContent"]["code"], "INVALID_ARGS")
+        self.assertEqual(self.ad.executed, [])
+        self.assertFalse(self.eng.call(self.tid, "tdflow_describe_network", {"path": path}, in_script=True)["isError"])
+
     def test_main_step_not_run_or_unknown(self):
         from tdflowmcp.engine import MainNotRun, MainUnknown
         state = {"n": 0}

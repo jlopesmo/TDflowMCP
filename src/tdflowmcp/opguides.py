@@ -71,6 +71,11 @@ _GUIDES = {
 GUIDED_TYPES = frozenset(_GUIDES)
 
 
+def search_text(name):
+    purpose, parameters = _GUIDES.get(name, ("", ()))
+    return " ".join([purpose, *(f"{par} {label} {note}" for par, label, _, note in parameters)])
+
+
 def guidance_for(name):
     """Return an independent plain-data guide for a covered operator type."""
     entry = _GUIDES.get(name)

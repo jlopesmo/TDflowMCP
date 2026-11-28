@@ -13,7 +13,7 @@
 9. **No unauthorized installations or configuration changes.** Setup, compatibility checks and troubleshooting diagnose and instruct. Installs never happen, and file writes only with explicit, previewed user confirmation (owner revision, 2026-11-22).
 10. **No conflicting authoritative records.** Project memory has exactly one authoritative home: a Git repository **or** the embedded `tdflowProject` COMP (owner revision, 2026-11-22).
 11. **Security before orchestration.** Advanced orchestration (Code Mode, experiments, multi-agent) starts only after the Phase 1B enforcement gates pass. The minimal setup experience stays separate from the governance dashboard (owner revision, 2026-11-22).
-12. **The repository stays private**, and no public license is chosen until the owner decides (owner, 2026-11-22).
+12. **The repository is public for evaluation releases** under the owner's superseding decision of 2026-11-25. Public licensing requires a separate owner decision. [ADR-0008](../decisions/0008-upstream-reuse-policy.md)
 
 ## Engineering guardrails
 
