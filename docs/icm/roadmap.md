@@ -106,6 +106,10 @@ v1.5.0 delivered locally verified operator guidance and a procedural workflow us
 
 v1.6.0 delivered scoped network diagrams and passed tagged acceptance, including real Claude Code image interpretation and independently verified public downloads. Separately gated Script lifecycle research follows under Issue #20. [Issue #19](https://github.com/jlopesmo/TDflowMCP/issues/19) · [Issue #20](https://github.com/jlopesmo/TDflowMCP/issues/20) · [Milestone](../milestones/v1.6-network-vision.md) · [Release receipts](validation-index.md#v160-tagged-release)
 
+## v1.7 Advanced Script Access research
+
+The disposable prototype verified inert draft review and a controlled cold transfer. Production activation remains deferred pending a proven boundary and separate owner acceptance. [Issue #20](https://github.com/jlopesmo/TDflowMCP/issues/20) · [Threat model and owner decision](../milestones/v1.7-script-access.md) · [ADR-0018](../decisions/0018-script-operator-lifecycle.md)
+
 ## D28 — Codex acceptance and release of 1.0.1 (owner, GitHub Issue #3, 2026-11-25)
 
 The owner ran the hands-on check on `1.0.1rc1` and reported it passed ([Issue #3](https://github.com/jlopesmo/TDflowMCP/issues/3#issuecomment-7175371704)): OpenAI Codex selected, Connect Agent approved, the Codex chat in VS Code returned `tdflow_whoami`, TouchDesigner showed `Agent Connected — Ready` and `Codex 0.171.0`. Decided:

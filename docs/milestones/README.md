@@ -11,5 +11,6 @@
 | TDflowMCP v1.4 | v1.4.0 published and public downloads verified | [Connected workflows and recovery](v1.4-workflow-recovery.md) |
 | TDflowMCP v1.5 | v1.5.0 published and public downloads verified. Active Script authoring deferred | [Procedural authoring](v1.5-procedural-authoring.md) |
 | TDflowMCP v1.6 | v1.6.0 published and public downloads verified. Live vision passed | [Network Visual Inspection](v1.6-network-vision.md) |
+| TDflowMCP v1.7 | Disposable research verified. Production Script activation deferred | [Advanced Script Access](v1.7-script-access.md) |
 
 Detailed milestone files for Phase 2 onward will be written once Phase 1B passes, so the plans reflect spike and enforcement evidence.
