@@ -78,6 +78,7 @@ body[data-tab="capabilities"] header, body[data-tab="capabilities"] main, body[d
 .caps-scroll { overflow-x: auto; }
 table.caps { font-size: 0.85rem; }
 table.caps th, table.caps td { padding: 3px 6px; overflow-wrap: normal; }
+@media (max-width: 1499px) { table.caps th, table.caps td { padding-block: 2px; } }
 table.caps thead th { white-space: nowrap; }
 table.caps th.grp { color: var(--muted); font-weight: 600; width: 7rem; border-right: 1px solid var(--line); }
 table.caps tr.colgroups th { color: var(--muted); font-weight: 400; font-size: 0.78rem; text-align: center; border-bottom: 0; }

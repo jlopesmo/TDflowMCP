@@ -5,6 +5,7 @@
 (function () {
   const $ = (id) => document.getElementById(id);
   let csrf = null, tab = "overview", lastSeq = 0, oldestSeq = null, filters = {}, pairTimer = null, lastReport = null;
+  let draftRecord = null, draftView = 0;
   const POLL_MS = 1000;                                   // ADR-0005 gate: events appear within 1 s
 
   function el(tag, text, cls) { const e = document.createElement(tag); if (text !== undefined && text !== null) e.textContent = String(text); if (cls) e.className = cls; return e; }
@@ -92,6 +93,10 @@
   }
   function unpaired(msg) {
     csrf = null;
+    clearDraftView();
+    $("draft-choice").replaceChildren();
+    $("draft-grants").replaceChildren();
+    $("draft-agent").replaceChildren();
     try { sessionStorage.removeItem("tdflow_csrf"); } catch (e) { /* nothing stored */ }
     $("app").hidden = true;
     $("pair-box").hidden = false;
@@ -104,11 +109,118 @@
   // ---- tabs ----------------------------------------------------------------------------------------------
   function showTab(name) {
     if (!document.querySelector('[role=tab][data-tab="' + name + '"]')) name = "overview";
+    if (name !== "drafts" && tab === "drafts") clearDraftView();
     tab = name;
     document.body.dataset.tab = name;
     for (const b of document.querySelectorAll("[role=tab]")) b.setAttribute("aria-selected", String(b.dataset.tab === name));
     for (const s of document.querySelectorAll("[data-panel]")) s.hidden = s.dataset.panel !== name;
     refreshTab();
+  }
+
+  function clearDraftView() {
+    draftView++;
+    draftRecord = null;
+    $("draft-details").hidden = true;
+    for (const id of ["draft-source", "draft-diff", "draft-title", "draft-meta", "draft-hash", "draft-diagnostic"]) {
+      $(id).textContent = "";
+    }
+  }
+
+  async function showDraft() {
+    clearDraftView();
+    const id = $("draft-choice").value, view = draftView;
+    if (!id) return;
+    const r = await api("POST", "/api/script-drafts/view", { id });
+    if (view !== draftView || tab !== "drafts" || !csrf) return;
+    if (!r.ok || !r.data) { setText("draft-status", why(r)); return; }
+    const d = draftRecord = r.data;
+    setText("draft-title", d.title);
+    setText("draft-meta", [d.family, "Revision " + d.revision, d.state.replaceAll("_", " "), d.scope,
+      d.intended_target ? "Intended target " + d.intended_target : "", "Author " + d.agent].filter(Boolean).join(" · "));
+    setText("draft-hash", "SHA-256 " + d.sha256);
+    const diag = d.diagnostic || {};
+    setText("draft-diagnostic", d.syntax_ok ? "Offline syntax check passed" :
+      [diag.message, diag.line ? "Line " + diag.line : "", diag.column ? "Column " + diag.column : ""].filter(Boolean).join(" · "));
+    $("draft-source").textContent = d.source;
+    $("draft-diff").textContent = d.diff.lines.join("") + (d.diff.truncated ? "\nDiff truncated." : "") ||
+      "No previous revision";
+    for (const id of ["draft-approve", "draft-reject"]) $(id).disabled = d.state !== "pending_offline";
+    for (const id of ["draft-copy-source", "draft-copy-manifest"]) $(id).disabled = d.state !== "approved_offline";
+    $("draft-details").hidden = false;
+  }
+
+  async function refreshDrafts() {
+    const selected = $("draft-choice").value, agent = $("draft-agent").value;
+    clearDraftView();
+    const view = draftView;
+    const [r, a] = await Promise.all([api("GET", "/api/script-drafts"), api("GET", "/api/agents")]);
+    if (view !== draftView || tab !== "drafts" || !csrf) return;
+    if (!r.ok || !r.data) { setText("draft-status", why(r)); return; }
+    setText("draft-warning", r.data.warning);
+    const choices = $("draft-choice"), agents = $("draft-agent"), grants = $("draft-grants");
+    choices.replaceChildren(new Option("Select a draft", ""), ...r.data.drafts.map(d =>
+      new Option(d.family + " · " + d.title + " · r" + d.revision, d.id)));
+    if (r.data.drafts.some(d => d.id === selected)) choices.value = selected;
+    agents.replaceChildren(new Option("Select an agent", ""), ...((a.data || {}).agents || []).filter(x => x.enabled)
+      .map(x => new Option(x.display_name || x.id, x.id)));
+    if ([...agents.options].some(x => x.value === agent)) agents.value = agent;
+    grants.replaceChildren();
+    for (const g of r.data.grants) {
+      const li = el("li", [g.agent, g.scope, g.permissions, new Date(g.expires * 1000).toLocaleString()].join(" · ") + " ");
+      const button = el("button", "Revoke");
+      button.type = "button";
+      button.addEventListener("click", async () => {
+        const response = await api("POST", "/api/script-drafts/revoke", { agent: g.agent, scope: g.scope });
+        setText("draft-status", response.ok ? "Draft grant revoked." : why(response));
+        if (response.ok) refreshDrafts();
+      });
+      li.append(button);
+      grants.append(li);
+    }
+    if (selected) showDraft();
+  }
+
+  async function draftGrant(event) {
+    event.preventDefault();
+    const body = { agent: $("draft-agent").value, scope: $("draft-scope").value.trim(),
+      minutes: $("draft-minutes").valueAsNumber };
+    for (const name of ["read", "author", "submit"]) body[name] = $("draft-grant-" + name).checked;
+    const r = await api("POST", "/api/script-drafts/grant", body);
+    setText("draft-status", r.ok ? "Temporary draft grant set." : why(r));
+    if (r.ok) refreshDrafts();
+  }
+
+  async function draftDecision(decision) {
+    if (!draftRecord || draftRecord.state !== "pending_offline") return;
+    const { id, revision, sha256 } = draftRecord;
+    clearDraftView();
+    const r = await api("POST", "/api/script-drafts/decide", { id, revision, sha256, decision });
+    setText("draft-status", r.ok ? "Offline review recorded." : why(r));
+    refreshDrafts();
+  }
+
+  async function copyDraft(kind) {
+    if (!draftRecord || draftRecord.state !== "approved_offline") return;
+    const { id, revision, sha256 } = draftRecord, view = draftView;
+    const r = await api("POST", "/api/script-drafts/copy", { id, revision, sha256 });
+    if (view !== draftView || tab !== "drafts" || !csrf) return;
+    if (!r.ok || !r.data) { setText("draft-status", why(r)); showDraft(); return; }
+    try {
+      await navigator.clipboard.writeText(kind === "source" ? r.data.source : JSON.stringify(r.data.manifest, null, 2));
+      setText("draft-status", "Reviewed " + kind + " copied as text.");
+    } catch (e) {
+      setText("draft-status", "Clipboard access was unavailable.");
+    }
+  }
+
+  async function discardDraft() {
+    if (!draftRecord) return;
+    const { id, revision, sha256 } = draftRecord;
+    if (!window.confirm("Permanently discard this draft and its previous revision?")) return;
+    clearDraftView();
+    const r = await api("POST", "/api/script-drafts/discard", { id, revision, sha256, confirmed: true });
+    setText("draft-status", r.ok ? "Draft discarded." : why(r));
+    refreshDrafts();
   }
 
   // ---- overview + kill switch ------------------------------------------------------------------------------
@@ -660,6 +772,7 @@
     else if (tab === "agents") await refreshAgents();
     else if (tab === "capabilities") await refreshCapabilities(false);
     else if (tab === "memory") await refreshMemory();
+    else if (tab === "drafts") await refreshDrafts();
     else if (tab === "settings") await refreshSettings();
   }
   async function refreshAll() { await refreshOverview(); await refreshTab(); $("updated").textContent = new Date().toLocaleTimeString(); }
@@ -683,6 +796,14 @@
     $("kill").addEventListener("click", () => kill(true));
     $("resume").addEventListener("click", () => kill(false));
     for (const b of document.querySelectorAll("[role=tab]")) b.addEventListener("click", () => showTab(b.dataset.tab));
+    $("draft-refresh").addEventListener("click", refreshDrafts);
+    $("draft-choice").addEventListener("change", showDraft);
+    $("draft-grant").addEventListener("submit", draftGrant);
+    $("draft-approve").addEventListener("click", () => draftDecision("approved_offline"));
+    $("draft-reject").addEventListener("click", () => draftDecision("rejected"));
+    $("draft-copy-source").addEventListener("click", () => copyDraft("source"));
+    $("draft-copy-manifest").addEventListener("click", () => copyDraft("manifest"));
+    $("draft-discard").addEventListener("click", discardDraft);
     $("search").addEventListener("submit", (ev) => { ev.preventDefault(); filters = readFilters(); lastSeq = 0; refreshEvents(false); });
     $("more").addEventListener("click", olderEvents);
     $("token-form").addEventListener("submit", createToken);

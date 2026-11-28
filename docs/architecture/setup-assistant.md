@@ -224,3 +224,6 @@ The full text stays available through **View Full Instructions** (the `tellagent
 `Claimprojectmemory` in repository mode reads the record files on a background thread and refuses a folder whose `tdflow-project.json` names another `Projectid`. The `tdflowProject` component (not the TDflowMCP component) carries the read-only `Memoryauthority` and `Repopath` parameters; only a migration changes them.
 
 It is deliberately separate from the Phase 2B Governance Dashboard (`/ui/`), sharing only the gate, admin session and static-file serving.
+## Offline draft review
+
+Open the authenticated Governance Dashboard from TouchDesigner and use **Script drafts**. The owner grants a specific agent temporary read, author and submit permissions for a project scope. Existing ordinary read policy still applies. The workspace displays exact text, revision, SHA-256 and the previous-revision diff for offline review. The paired owner may copy the current approved source or its checksum manifest as plain text. Manual activation can affect the host outside project scopes. [Offline milestone](../milestones/v1.7-offline-script-drafts.md)

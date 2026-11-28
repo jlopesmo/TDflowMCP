@@ -26,7 +26,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 CRED_DB_NAME = "credentials.sqlite"      # private per-user credential store (agents, tokens, private settings)
 
-from tdflowmcp import approvals as APR
+from tdflowmcp import approvals as APR, drafts as DRAFTS
 
 SCHEMA_VERSION = 1
 GENESIS = "0" * 64
@@ -128,6 +128,7 @@ class Store:
         self.checkpoint_every = 50
         self._key: bytes = b""
         self.last_error = ""
+        self._draft_rates = {}
 
     # ---- lifecycle -----------------------------------------------------------------------------
     def open(self, readonly: bool = False) -> "Store":
@@ -170,6 +171,7 @@ class Store:
             self.cconn.execute("PRAGMA journal_mode=WAL")
             self.cconn.execute("PRAGMA synchronous=FULL")
             self.cconn.executescript(_DDL_CRED)
+            self.cconn.executescript(DRAFTS.DDL)
             self.cconn.execute("BEGIN IMMEDIATE")
             try:
                 if "review" not in {row[1] for row in self.cconn.execute("PRAGMA table_info(approvals)")}:
@@ -209,6 +211,66 @@ class Store:
 
     def _key_for(self, label: bytes) -> bytes:
         return hmac.new(self._key, label, hashlib.sha256).digest()
+
+    def draft_request(self, project, action, args, audit, policy, protected, guard):
+        """Serialized offline request. Candidate text never enters the audit chain."""
+        row = self._c().execute("SELECT v FROM meta WHERE k='project_id'").fetchone()
+        if not project or row != (project,):
+            return {"code": "DRAFT_PROJECT", "message": "A verified project identity is required."}
+        if not guard():
+            return {"code": "DRAFT_PAUSED", "message": "The offline workspace is suspended or authorization changed."}
+        agent = audit.get("agent_id")
+        now = time.monotonic()
+        self._draft_rates = {k: v for k, v in self._draft_rates.items() if now < v[0]}
+        until, calls = self._draft_rates.get(agent, (now + 60, 0))
+        global_until, global_calls = self._draft_rates.get("", (now + 60, 0))
+        limit = DRAFTS.CALLS_PER_MINUTE if agent else 120
+        if calls >= limit or global_calls >= 180:
+            return {"code": "DRAFT_RATE", "message": "Wait for the offline workspace request limit to reset."}
+        self._draft_rates[agent] = (until, calls + 1)
+        self._draft_rates[""] = (global_until, global_calls + 1)
+        db = self._cc()
+        workspace = DRAFTS.Workspace(db, project, self._key_for(b"script-drafts"), policy, protected,
+                                     agent, audit.get("token_id"))
+        seq = self.append("intent", **audit, detail=workspace.grant_subject(action, args))
+        try:
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                if not guard():
+                    DRAFTS.fail("DRAFT_PAUSED", "The offline workspace is suspended or authorization changed.")
+                result = workspace.run(action, args)
+                if not guard():
+                    DRAFTS.fail("DRAFT_PAUSED", "The offline workspace is suspended or authorization changed.")
+                if workspace.grant_expiry and time.time() >= workspace.grant_expiry:
+                    DRAFTS.fail("DENIED", "The offline draft grant expired.")
+                db.execute("COMMIT")
+            except BaseException:
+                db.execute("ROLLBACK")
+                raise
+        except DRAFTS.DraftError as exc:
+            self.append("outcome", **audit, outcome="error", error_code=exc.result["code"],
+                        detail={"intent_seq": seq})
+            return exc.result
+        except (sqlite3.Error, ValueError, TypeError, KeyError, OverflowError) as exc:
+            self.append("outcome", **audit, outcome="error", error_code="DRAFT_STORE",
+                        detail={"intent_seq": seq})
+            raise AuditUnavailable(type(exc).__name__) from None
+        detail = {"intent_seq": seq}
+        if "id" in result:
+            detail.update(draft_id=result["id"], revision=result["revision"], state=result["state"])
+        if "grant" in result:
+            detail["grant"] = result["grant"]
+        self.append("outcome", **audit, outcome="ok", detail=detail)
+        return result
+
+    def draft_grants_status(self, project):
+        """Capability descriptions need only verified temporary grant metadata."""
+        owner = DRAFTS.Workspace(self._cc(), project, self._key_for(b"script-drafts"), None, {}, None, None)
+        try:
+            return owner._owner_grants() if self._c().execute(
+                "SELECT v FROM meta WHERE k='project_id'").fetchone() == (project,) else []
+        except DRAFTS.DraftError:
+            return []
 
     # ---- audit ---------------------------------------------------------------------------------
     def args_hmac(self, args: Any) -> str:

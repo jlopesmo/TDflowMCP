@@ -29,6 +29,7 @@ Only Accepted ADRs bind implementation. Work that depends on a **Proposed** ADR 
 | [0017](0017-codex-one-click-connection.md) | One-click OpenAI Codex connection through `http_headers_helper` (extends 0015) | Accepted (owner D28, GitHub Issue #3, 2026-11-25; for the tested Windows and Codex interfaces) |
 | [0018](0018-script-operator-lifecycle.md) | Script operator lifecycle and activation boundary | Proposed, activation deferred |
 | [0019](0019-network-visual-inspection.md) | Network visual inspection | Proposed |
+| [0020](0020-offline-script-drafts.md) | Offline Script source workspace and exact owner review | Conditionally Accepted, Issue #26 |
 
 The requirements behind ADRs 0010–0013 are owner-approved. The designs of 0010–0013 are Conditionally Accepted (0011 on 2026-11-22, for Phase 1C).
 

@@ -144,6 +144,9 @@ class Engine:
         self._runtime_id = secrets.token_hex(16)   # operator IDs are unique only within the running instance
         self.code_mode = False                     # ADR-0004: off until the user turns it on (dashboard)
         self.dashboard_page: Callable[[], str] = lambda: ""   # D25: the Capabilities page address (no credential)
+        self.draft_project = ""
+        self.draft_current = lambda: True
+        self.draft_agents_active = lambda: True
         self.seen: Dict[str, dict] = {}            # agent_id -> {last, client}: authenticated requests (UX: Connected)
         self.leases: Dict[str, dict] = {}          # Phase 4: scope -> {agent_id, expires} (memory; audited)
         self._lease_lock = threading.RLock()       # re-entrant: _lease checks holders while holding it
@@ -192,7 +195,7 @@ class Engine:
         if agent is None or self.suspended():
             return []
         return [t.describe() for t in self.registry.all() if t.name in self.active
-                and (t.resolver in ("none",) or agent.grants) and (t.resolver != "script" or self.code_mode)]
+                and (t.resolver in ("none", "draft") or agent.grants) and (t.resolver != "script" or self.code_mode)]
 
     def call(self, token_id: str, name: str, args: dict, client_info: Optional[dict] = None,
              request_id: str = "", main: Optional[Callable[[Callable], object]] = None,
@@ -204,11 +207,13 @@ class Engine:
         if tool is None or tool.name not in self.active:
             return None                                              # protocol error: unknown tool
         t0 = self.clock()
-        ci = redact(client_info or {}, 200)
+        offline = tool.resolver == "draft"
+        ci = None if offline else redact(client_info or {}, 200)
         agent = self.identity.agent_for_token(token_id)
         base = {"token_id": token_id, "tool": name, "method": "tools/call", "client_info": ci,
-                "request_id": request_id, "args_hmac": self.store.args_hmac(args) if self.store.available else None,
-                "args_redacted": redact(args)}
+                "request_id": request_id,
+                "args_hmac": self.store.args_hmac(args) if not offline and self.store.available else None,
+                "args_redacted": None if offline else redact(args)}
         if agent is None:
             return self._deny(base, "DENIED", "A0", "token revoked or agent disabled", None)
         base["agent_id"] = agent.id
@@ -217,6 +222,12 @@ class Engine:
             base["session_id"] = self.sessions.session_for(token_id, ci)
         if self.suspended():
             return self._deny(base, "SUSPENDED", "K1", "all agents are suspended", None)
+        if offline:
+            if in_script:
+                return self._deny(base, "DENIED", "S5", "Drafting is unavailable inside Code Mode.", None)
+            out = self.draft_request(tool.handler, args, base, m,
+                                     lambda: self.draft_agents_active() and self.identity.agent_for_token(token_id) == agent)
+            return tool_error(out["code"], out["message"]) if "code" in out else tool_result(out)
         errs = schema.errors(args, tool.input_schema)
         if errs:
             return self._deny(base, "INVALID_ARGS", "V1", "; ".join(errs[:5]), None)
@@ -337,6 +348,28 @@ class Engine:
             r["content"].append({"type": "image", "data": base64.b64encode(img["bytes"]).decode("ascii"),
                                  "mimeType": img.get("mimeType", "image/png")})
         return r
+
+    def draft_request(self, action, args, audit, main, authenticated):
+        """Route exact offline data through the same durable worker without dispatching an operator call."""
+        def guard():
+            return self.draft_current() and not self.suspended() and authenticated()
+
+        if not self.draft_project or not self.store.available:
+            return {"code": "AUDIT_UNAVAILABLE", "message": "A verified project store is required."}
+        if not guard():
+            return {"code": "DRAFT_PAUSED", "message": "The offline workspace is suspended or authorization changed."}
+        try:
+            protected = main(self.adapter.draft_protection)
+        except (MainNotRun, MainUnknown, RuntimeError):
+            return {"code": "DRAFT_SCOPE", "message": "Protected scope could not be verified."}
+        try:
+            out = self.store.draft_request(self.draft_project, action, args, audit, self.policy, protected, guard)
+        except AuditUnavailable:
+            self._audit_failure()
+            return {"code": "AUDIT_UNAVAILABLE", "message": "The offline workspace stopped. Check the audit log."}
+        if not guard():
+            return {"code": "DRAFT_PAUSED", "message": "The offline workspace stopped before returning a result."}
+        return out
 
     # ---- main-thread steps ---------------------------------------------------------------------
     def _plan(self, tool: Tool, args: dict, agent: Agent) -> dict:
@@ -746,7 +779,7 @@ class Engine:
                                     "note": "Your own effective permissions, by capability; TDflowMCP supports more "
                                             "than one agent may be allowed. Only the user changes them."}}
         elif tool.name == "tdflow_capabilities":
-            out = CAPS.for_agent(agent, self.capability_facts(), self._page())
+            out = CAPS.for_agent(agent, {**self.capability_facts(), **self.draft_capability_facts()}, self._page())
         elif tool.name == "tdflow_approval_status":
             out = None
         elif tool.name == "tdflow_session_note":
@@ -784,6 +817,13 @@ class Engine:
         """D25: the runtime facts the capability matrix needs (no TouchDesigner access)."""
         return {"active": self.active, "code_mode": bool(self.code_mode), "approvals": bool(self.policy.approvals),
                 "root": self.policy.root}
+
+    def draft_capability_facts(self):
+        try:
+            rows = self.store.draft_grants_status(self.draft_project) if self.draft_project and self.store.available else []
+        except AuditUnavailable:
+            rows = []
+        return {"draft_grants": rows, "draft_protected": dict(getattr(self.adapter, "protected", {}))}
 
     def last_undoable(self, agent_id: str) -> Optional[dict]:
         undone = set()

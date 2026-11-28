@@ -128,6 +128,13 @@ class AdminAuth:
         now = self.clock()
         return sum(1 for _, exp in self._sessions.values() if exp > now)
 
+    def active_principal(self, principal: str) -> bool:
+        """Recheck a previously authenticated router principal without forwarding its credentials."""
+        if not principal.startswith("admin:"):
+            return False
+        row = self._sessions.get(principal[len("admin:"):])
+        return row is not None and row[1] > self.clock()
+
     # ---- any thread: authenticator hooks ---------------------------------------------------------
     def check(self, kind: str, headers) -> Optional[str]:
         if kind == "pair":

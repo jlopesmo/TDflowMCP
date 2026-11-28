@@ -152,7 +152,7 @@ class ProtocolTests(unittest.TestCase):
 
 class RegistryTests(unittest.TestCase):
     def test_registered_tools_with_classification(self):
-        self.assertEqual(len(ALL), 34)
+        self.assertEqual(len(ALL), 40)
         reg = core_registry()
         for t in reg.all():
             d = t.describe()

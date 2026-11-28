@@ -39,6 +39,7 @@
       <button type="button" role="tab" data-tab="agents">Agents</button>
       <button type="button" role="tab" data-tab="capabilities">Capabilities</button>
       <button type="button" role="tab" data-tab="memory">Memory</button>
+      <button type="button" role="tab" data-tab="drafts">Script drafts</button>
       <button type="button" role="tab" data-tab="reports">Reports</button>
       <button type="button" role="tab" data-tab="settings">Settings</button>
       <button id="logout" type="button" class="secondary small">Unpair</button>
@@ -186,6 +187,44 @@
         <dt>State</dt><dd id="m-state">–</dd>
       </dl>
       <p class="hint">Moving memory between the component and a folder, and re-linking a folder, are on the <a href="/setup/">Setup page</a>.</p>
+    </section>
+
+    <section data-panel="drafts" hidden>
+      <h2>Offline Script drafts</h2>
+      <p class="hint" id="draft-warning"></p>
+      <p role="status" id="draft-status"></p>
+      <div class="toolbar">
+        <label>Draft <select id="draft-choice"></select></label>
+        <button type="button" id="draft-refresh">Refresh drafts</button>
+      </div>
+      <div id="draft-details" hidden>
+        <h3 id="draft-title"></h3>
+        <p id="draft-meta"></p>
+        <p id="draft-hash"></p>
+        <p id="draft-diagnostic"></p>
+        <h4>Exact source</h4>
+        <pre id="draft-source" tabindex="0"></pre>
+        <h4>Changes from the previous revision</h4>
+        <pre id="draft-diff" tabindex="0"></pre>
+        <div class="toolbar">
+          <button type="button" id="draft-approve">Approve offline review</button>
+          <button type="button" id="draft-reject">Reject</button>
+          <button type="button" id="draft-copy-source">Copy reviewed source</button>
+          <button type="button" id="draft-copy-manifest">Copy checksum manifest</button>
+          <button type="button" id="draft-discard">Discard draft</button>
+        </div>
+      </div>
+      <h3>Temporary draft permissions</h3>
+      <form id="draft-grant" class="toolbar">
+        <label>Agent <select id="draft-agent" required></select></label>
+        <label>Project scope <input id="draft-scope" required maxlength="256" placeholder="/project1/scene"></label>
+        <label>Minutes <input id="draft-minutes" type="number" min="1" max="120" value="30" required></label>
+        <label><input id="draft-grant-read" type="checkbox" checked> Read</label>
+        <label><input id="draft-grant-author" type="checkbox"> Author</label>
+        <label><input id="draft-grant-submit" type="checkbox"> Submit for review</label>
+        <button type="submit">Set temporary grant</button>
+      </form>
+      <ul id="draft-grants"></ul>
     </section>
 
     <section data-panel="reports" hidden>
