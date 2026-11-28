@@ -27,7 +27,8 @@ import json
 from dataclasses import dataclass
 from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 
-from tdflowmcp.policy import ACTIONS, CAP_MEMORY_REPO_WRITE, CAPABILITIES, ROLES, Agent, Grant, scope_matches
+from tdflowmcp import drafts as DRAFTS
+from tdflowmcp.policy import ACTIONS, CAP_MEMORY_REPO_WRITE, CAPABILITIES, ROLES, Agent, Grant, Policy, Target, scope_matches
 
 STATUSES = ("available", "approval", "denied", "not_implemented", "protected")
 LABELS = {"available": "Available", "approval": "Approval Required", "denied": "Denied",
@@ -39,7 +40,8 @@ CAP_LABELS = {CAP_MEMORY_REPO_WRITE: "Write task records into the linked reposit
 GROUPS = (
     ("inspect", "Inspection"), ("edit", "Editing"), ("create", "Operator creation"), ("delete", "Deleting"),
     ("code", "Python and code"), ("experiments", "Experiments"), ("undo", "Undo"), ("save", "Project saving"),
-    ("memory", "Project memory"), ("coord", "Multi-agent coordination"), ("protected", "Always protected"),
+    ("memory", "Project memory"), ("coord", "Multi-agent coordination"), ("drafts", "Offline Script drafts"),
+    ("protected", "Always protected"),
     ("future", "Not implemented"),
 )
 MAX_ADD, MAX_REMOVE, MAX_GRANTS = 10, 50, 50
@@ -62,6 +64,17 @@ class Cap:
 
 
 CATALOG: Tuple[Cap, ...] = (
+    Cap("draft_guide", "drafts", "See offline Script templates and limits",
+        (DRAFTS.TOOL_NAMES["guide"],), kind="identity"),
+    Cap("draft_read", "drafts", "Read offline Script drafts",
+        tuple(DRAFTS.TOOL_NAMES[key] for key in ("list", "get")), ("read",), kind="draft",
+        note="Requires a temporary draft read grant in the Script drafts tab."),
+    Cap("draft_author", "drafts", "Create and revise offline Script drafts",
+        tuple(DRAFTS.TOOL_NAMES[key] for key in ("create", "revise")), ("read",), kind="draft",
+        note="Requires temporary draft author and read grants in the Script drafts tab."),
+    Cap("draft_submit", "drafts", "Submit an exact offline Script revision for owner review",
+        (DRAFTS.TOOL_NAMES["submit"],), ("read",), kind="draft",
+        note="Requires temporary draft submit and read grants in the Script drafts tab."),
     # ---- inspection -------------------------------------------------------------------------------------------
     Cap("identity", "inspect", "See its own identity, role and permissions",
         ("tdflow_whoami", "tdflow_capabilities"), kind="identity",
@@ -233,6 +246,19 @@ def agent_status(cap: Cap, agent: Agent, facts: Optional[Mapping] = None) -> dic
     out = {"status": eng["status"], "where": [], "except": [], "why": eng["why"], "fix": ""}
     if eng["status"] not in ("available", "approval"):
         return out
+    if cap.kind == "draft":
+        rows = [g for g in f.get("draft_grants", []) if g["agent"] == agent.id]
+        where = []
+        if agent.enabled and f["root"]:
+            policy = Policy(f["root"])
+            for row in rows:
+                scope = row["scope"]
+                kind = next((name for path, name in f.get("draft_protected", {}).items() if DRAFTS.under(scope, path)), "")
+                if policy.evaluate(agent, [Target("read", scope, protected=kind)]).allow and all(
+                        any(DRAFTS.under(scope, g["scope"]) and verb in g["permissions"].split(",") for g in rows)
+                        for verb in DRAFTS.DRAFT_ACCESS[cap.id]):
+                    where.append(scope)
+        return dict(out, status="available" if where else "denied", where=sorted(set(where)), why=cap.note)
     if not agent.enabled:
         return dict(out, status="denied", why="The agent is disabled.", fix="enable")
     if cap.kind == "identity":

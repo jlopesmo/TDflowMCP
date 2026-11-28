@@ -359,7 +359,7 @@ class ApplyAndEngineTests(unittest.TestCase):
         self.assertNotIn("tdflow_set_parameters", names)
         r = self.eng.call(self.tid, "tdflow_capabilities", {})["structuredContent"]
         self.assertEqual(sorted(i["capability"] for i in r["your_capabilities"]["available"]),
-                         sorted(C.BY_ID[x].title for x in ("identity", "sessions", "approval_status")))
+                         sorted(C.BY_ID[x].title for x in ("identity", "sessions", "approval_status", "draft_guide")))
         kinds = [e["kind"] for e in self.st.events(limit=5)]
         self.assertIn("outcome", kinds)
 

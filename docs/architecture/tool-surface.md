@@ -95,3 +95,15 @@ Errors added in 2A: `MEMORY_UNAVAILABLE` (no, an uninitialised, or more than one
 - `TDFLOW_NOT_COOKING` (2026-11-23, [S9](../research/2026-11-23-s9-minimized-window.md)): TouchDesigner is not running frames, usually because its window is minimized. Any tool that needs TouchDesigner's main thread answers with it at once; nothing ran, and the call may be retried after the user restores the window. `tdflow_whoami`, `tdflow_session_note` and `tdflow_session_list` need no frames.
 - Every mutating result includes `audit_seq` and `undo_label`.
 - `tools/list` returns only the tools the calling agent has *some* grant for (progressive disclosure, fewer tokens). Policy is still enforced at call time.
+## Additive offline Script workspace (Issue #26)
+
+| Tool | Data and authorization |
+| --- | --- |
+| `tdflow_script_draft_guide` | Authenticated family names, static templates and limits. |
+| `tdflow_script_draft_list` | Metadata for drafts visible under current normal read and temporary draft read grants. |
+| `tdflow_script_draft_get` | Current source, SHA-256, syntax diagnostic and bounded previous-revision diff for an accessible id. |
+| `tdflow_script_draft_create` | Family, title, scope, optional non-binding intended target and inert source. Requires draft author and read. |
+| `tdflow_script_draft_revise` | Original author, draft author and read, exact id, revision and SHA-256, and new source. Resets the review state. |
+| `tdflow_script_draft_submit` | Original author, draft submit and read, and an exact current revision with valid offline syntax. |
+
+The paired dashboard under **Script drafts** owns grants, exact offline decisions and explicit text copy. The agent tool surface offers no approval action or Script graph operation. These tools use the dedicated offline resolver and are unavailable inside Code Mode. [Milestone](../milestones/v1.7-offline-script-drafts.md)

@@ -197,7 +197,7 @@ class TDAdapter(Adapter):
         anc = next((k for pp, k in self.protected.items() if pp.startswith(path.rstrip("/") + "/")), "")
         return prot, anc
 
-    def refresh_protected(self):
+    def refresh_protected(self, strict=False):
         prot = {self.comp.path: "instance"}
         try:
             for c in td.op("/").findChildren(tags=["TDflowMCP"]):
@@ -205,8 +205,13 @@ class TDAdapter(Adapter):
             for c in td.op("/").findChildren(tags=["tdflowProject"]):
                 prot.setdefault(c.path, "tdflowproject")
         except Exception:
-            pass
+            if strict:
+                raise RuntimeError("Protected scopes unavailable.") from None
         self.protected = prot
+
+    def draft_protection(self):
+        self.refresh_protected(strict=True)
+        return dict(self.protected)
 
     def _facts(self, o, action, **kw):
         given = kw.pop("path", None)

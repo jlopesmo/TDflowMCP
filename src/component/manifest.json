@@ -32,6 +32,9 @@
     "tdflowmcp.engine": {
       "path": "src/tdflowmcp/engine.py"
     },
+    "tdflowmcp.drafts": {
+      "path": "src/tdflowmcp/drafts.py"
+    },
     "tdflowmcp.gate": {
       "path": "src/tdflowmcp/gate.py"
     },
@@ -761,6 +764,12 @@
     "tdflow_approval_status",
     "tdflow_capabilities",
     "tdflow_capture_network",
+    "tdflow_script_draft_guide",
+    "tdflow_script_draft_list",
+    "tdflow_script_draft_get",
+    "tdflow_script_draft_create",
+    "tdflow_script_draft_revise",
+    "tdflow_script_draft_submit",
     "tdflow_capture_top",
     "tdflow_compare_tops",
     "tdflow_connect",

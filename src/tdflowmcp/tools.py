@@ -31,12 +31,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
-from tdflowmcp import schema
+from tdflowmcp import drafts as DRAFTS, schema
 from tdflowmcp.policy import ACTIONS
 
 RESOLVERS = {"none", "project", "read_path", "read_children", "read_tree", "set_params", "create", "delete",
              "wire", "dat_text", "undo", "memory", "script", "copy", "promote", "discard", "save", "lease",
-             "custom_params", "compare_tops"}
+             "custom_params", "compare_tops", "draft"}
 PATH = {"type": "string", "minLength": 1, "maxLength": 512, "pattern": r"^/[A-Za-z0-9_/]*$",
         "description": "Absolute operator path, e.g. /project1/geo1"}
 NAME = {"type": "string", "minLength": 1, "maxLength": 64, "pattern": r"^[A-Za-z_][A-Za-z0-9_]*$"}
@@ -91,7 +91,7 @@ class Registry:
             raise RegistryError(f"bad or duplicate tool name {t.name!r}")
         if t.resolver not in RESOLVERS:
             raise RegistryError(f"{t.name}: unknown resolver {t.resolver!r}")
-        if t.resolver != "none" and not t.actions:
+        if t.resolver not in ("none", "draft") and not t.actions:
             raise RegistryError(f"{t.name}: tools with operator targets must declare actions")
         for a in t.actions:
             if a.rstrip("?") not in ACTIONS:
@@ -123,6 +123,19 @@ def obj(props: dict, required=()) -> dict:
 def core_registry() -> Registry:
     r = Registry()
     T = r.register
+    draft_labels = {
+        "guide": ("Script draft guide", "Discover supported Script CHOP, SOP and TOP offline templates and limits."),
+        "list": ("List Script drafts", "List review metadata for drafts accessible with your separate draft read grant."),
+        "get": ("Read Script draft", "Read exact source, syntax diagnostics and the bounded previous-revision diff."),
+        "create": ("Create Script draft", "Store a new offline source proposal under a scope. The intended target is a label."),
+        "revise": ("Revise Script draft", "Replace your draft's source using its exact current revision and SHA-256."),
+        "submit": ("Submit Script draft", "Submit your exact current revision for owner review of offline text."),
+    }
+    for action, name in DRAFTS.TOOL_NAMES.items():
+        title, description = draft_labels[action]
+        read_only = action in ("guide", "list", "get")
+        T(Tool(name, title, description + " Source stays inert and no graph operation is performed.",
+               DRAFTS.AGENT_SCHEMAS[action], (), "draft", action, read_only=read_only, idempotent=read_only))
     T(Tool("tdflow_whoami", "Who am I", "Your agent identity, role, effective scopes, server and tool-surface "
            "versions and limits.", EMPTY, (), "none", "whoami", read_only=True, idempotent=True))
     # Owner D25: the caller's own effective capabilities, kept apart from what TDflowMCP supports, and the address

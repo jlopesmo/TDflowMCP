@@ -112,6 +112,8 @@ The disposable prototype verified inert draft review and a controlled cold trans
 
 Owner-approved Issue #24 adds isolated boundary, manifest transfer and crash-recovery research after PR #23. The current recommendation retains the production deny and leaves an offline-only draft proposal as the smallest separately scoped next step. [Issue #24](https://github.com/jlopesmo/TDflowMCP/issues/24) · [Decision matrix](../milestones/v1.7-script-access.md#issue-24-boundary-and-recovery-follow-up)
 
+Issue #26 authorizes a v1.7.0 offline drafting workspace after PR #25. Product release requires new owner and compatibility decisions. Executable Script lifecycle remains deferred under Issue #20. [Milestone](../milestones/v1.7-offline-script-drafts.md) · [Offline decision](../decisions/0020-offline-script-drafts.md)
+
 ## D28 — Codex acceptance and release of 1.0.1 (owner, GitHub Issue #3, 2026-11-25)
 
 The owner ran the hands-on check on `1.0.1rc1` and reported it passed ([Issue #3](https://github.com/jlopesmo/TDflowMCP/issues/3#issuecomment-7175371704)): OpenAI Codex selected, Connect Agent approved, the Codex chat in VS Code returned `tdflow_whoami`, TouchDesigner showed `Agent Connected — Ready` and `Codex 0.171.0`. Decided:

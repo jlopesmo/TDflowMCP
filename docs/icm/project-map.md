@@ -14,6 +14,8 @@ The v1.7 inert draft review prototype is `spikes/v17/script_intent.py`. The disp
 
 Issue #24 adds `spikes/v17/transfer_review.py` for inert manifests, `spikes/v17/recovery_ledger.py` for the SQLite recovery experiment, and `spikes/v17/probe_windows_integrity.py` for the synthetic Windows integrity comparison. `tests/td/run_td_script_boundary_probe.py` runs the disposable native checks. `tests/unit/test_script_transfer_recovery.py` covers transfer, authorization and interrupted ledger cases. [Milestone](../milestones/v1.7-script-access.md#issue-24-boundary-and-recovery-follow-up)
 
+Issue #26 adds the packaged pure-Python workspace in `src/tdflowmcp/drafts.py` with a store-worker entry point and the dashboard's Script drafts tab. Targeted verification lives in `tests/unit/test_offline_drafts.py` and `tests/td/run_td_offline_drafts.py`, with `tests/td/td_runner_offline_drafts.py` for in-process observations. [Offline milestone](../milestones/v1.7-offline-script-drafts.md)
+
 This map lists the repository's actual contents (Phase 1C). Planned directories are listed in [source-of-truth.md](../architecture/source-of-truth.md#directory-layout). **They do not exist yet.**
 
 | Path | Purpose | Governing doc |

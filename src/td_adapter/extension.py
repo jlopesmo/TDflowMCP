@@ -440,6 +440,12 @@ class TDflowMCPExt:
         self.engine.audit_failed = self._audit_latched      # a rebuild never clears an audit failure
         self.engine.code_mode = bool(getattr(self, "_code_mode", False))   # ADR-0004: off by default
         self.engine.dashboard_page = self._capabilities_page      # D25: an address, never a credential
+        eng = self.engine
+        decision = self.storage
+        if decision is not None and decision.status != "OVERRIDE":
+            eng.draft_project = decision.project_id
+        eng.draft_current = lambda: self.engine is eng and self.store is eng.store
+        eng.draft_agents_active = lambda: self.mcp_on
 
     def _capabilities_page(self):
         """Any thread: the dashboard's Capabilities page on this computer (the MCP endpoint's own host and port; the
@@ -1683,6 +1689,42 @@ class TDflowMCPExt:
         return R(200, D(dict(res, ok=True)), "application/json")
 
     # -- governance dashboard (Phase 2B, ADR-0005): paired admin session, handler thread --------------------
+    def _draft_api(self, ctx):
+        routes = {
+            ("GET", "/api/script-drafts"): "owner_list",
+            ("POST", "/api/script-drafts/view"): "owner_get",
+            ("POST", "/api/script-drafts/copy"): "owner_export",
+            ("POST", "/api/script-drafts/decide"): "decide",
+            ("POST", "/api/script-drafts/grant"): "grant",
+            ("POST", "/api/script-drafts/revoke"): "revoke",
+        }
+        R, E, D = self._m.Response, self._m.error, self._m.setupapi.dumps
+        action = routes.get((ctx.method, ctx.path))
+        if action is None:
+            return E(404, "NOT_FOUND")
+        args = {} if ctx.method == "GET" else self._admin_body(ctx.body)
+        if args is None:
+            return E(400, "BAD_REQUEST")
+        eng = self.engine
+        owner = ctx.principal
+
+        def authenticated():
+            return isinstance(owner, str) and self.admin.active_principal(owner)
+
+        if eng is None or not authenticated():
+            return E(503, "DRAFT_UNAVAILABLE")
+
+        def metadata(fn):
+            try:
+                return ctx.call_main(fn)
+            except self._m.MainStepError as exc:
+                raise self._m.engine.MainNotRun(exc.code) from None
+
+        outcome = eng.draft_request(action, args, {"tool": "offline_draft_" + action, "method": ctx.method,
+                                                  "request_id": str(ctx.rid)}, metadata, authenticated)
+        status = 200 if "code" not in outcome else 409
+        return R(status, D(outcome), "application/json", (("Cache-Control", "no-store"),))
+
     def _dashboard_api(self, ctx, st, idn):
         """``/api/*``. A view and decision surface only: every rule is enforced by the engine. Nothing here needs
         TouchDesigner's main thread except the memory view, so the dashboard (and its kill switch) keep working
@@ -1704,6 +1746,8 @@ class TDflowMCPExt:
             return ok(self._dash_kill(body.get("suspend") is not False, st))
         if st is None or idn is None or not st.available:
             return E(503, "AUDIT_UNAVAILABLE")
+        if p == "/api/script-drafts" or p.startswith("/api/script-drafts/"):
+            return self._draft_api(ctx)
         try:
             if m == "GET":
                 if p == "/api/overview":
@@ -1879,6 +1923,8 @@ class TDflowMCPExt:
         """Handler thread. Every row comes from the stored grants (the same authority a change is checked against)."""
         C = self._m.capabilities
         facts, seen, now = self._cap_facts(), self._seen(), time.time()
+        if self.engine is not None:
+            facts.update(self.engine.draft_capability_facts())
         within = self._m.readiness.CONNECTED_WITHIN_S
         rows = []
         for a in list(idn.agents.values()):
